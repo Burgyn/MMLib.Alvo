@@ -1,7 +1,8 @@
 # test/teapie-field-service — does the product behave as documented?
 
-The end-to-end suite over `examples/field-service`, driven against the container
-`docker-compose.field-service.yml` starts on `:8081`.
+The end-to-end suite over `examples/field-service` — the advanced demo — driven against the container
+`docker-compose.field-service.yml` starts on `:8081`, and the WireMock billing sink it starts beside it
+(journal on `:8083`, the `fsSinkUrl` environment value).
 
 `test/teapie` is the sibling suite and it answers a different question. It runs against
 `examples/vehicle-registry` and proves the **plumbing**: the image builds, the descriptor applies, the
@@ -43,9 +44,15 @@ not.
 | `050-Idempotency` | 1 | A replayed create by **row count**, a 409 for the same key with a different body, and a new row for a different key. |
 | `060-Confidentiality` | 1 | A hidden field is absent everywhere, and a filter over it is refused **byte-identically** to one over an undeclared field. |
 | `070-Authorization` | 1 | The three shapes — 403, 200-with-an-empty-page, 404 — in one system state. |
-| `080-Tenancy` | 1 | Two keys differing only in tenant; B cannot see, read, modify or infer A's rows. |
+| `080-Tenancy` | 2 | Two keys differing only in tenant; B cannot see, read, modify or infer A's rows — and a `unique` value is not an existence oracle across tenants. |
 | `090-Docs` | 1 | `/openapi/v1.json` publishes the declared shape and obeys the same confidentiality rule. |
 | `100-Scenarios` | 6 | Multi-step journeys that end by asserting the state of the world. |
+| `110-Batch` | 1 | A transactional batch: three rows in order, a refused last row leaves the first two unwritten, a cross-tenant row is refused by the predicate, an empty batch is refused. |
+| `120-Replace` | 1 | `PUT` creates under a client-chosen id, replaces whole, and is refused for an entity with a required hidden field. |
+| `130-Lifecycle` | 2 | The work-order state machine: 422 `transition` for a skipped step or a failed condition, 403 for a transition the caller holds no role for (with the same caller's legal move as control), and a batch with one illegal move writes nothing. |
+| `140-Integrity` | 4 | The gapless `job_number` sequence (per tenant; a refused create gives its number back), CHECK validations at the exact field, the partial unique index on `(customer_id, po_number)`, and visits: exclusion, lookup check, rollup. |
+| `150-Relations` | 1 | A technician sees visits through the job's assignee, not the visit's `technician_id`, and writes only a visit they can read (a booked-but-unassigned technician's `PATCH` is 404; re-pointing a visit at an unreadable job is `unresolved-reference`). |
+| `160-Automation` | 1 | A completed purchase-order job reaches the billing sink once, as a CloudEvent without the excluded fields; the two controls send nothing. Polled with `## RETRY-UNTIL-TEST-PASS` (≤ 30 × 1 s) until a sentinel PO completion written last has also arrived, and only then are the counts judged. |
 
 ## The bar every case meets
 
@@ -103,7 +110,8 @@ field is configured, because EF cannot resolve `tenant_id` while the field loop 
 added … no property type was specified"*).
 
 `080-Tenancy/002` therefore asserts **indistinguishability**, not a status: both probes answer 201 and
-their whole documents match, minus the four fields that identify the row rather than classify the request.
+their whole documents match, minus the five fields that identify the row rather than classify the request
+(`job_number` joined `id` when the per-tenant sequence was added: each tenant's count assigns it per row).
 It also pins the direction a careless fix would have lost — uniqueness still **holds** inside a tenant,
 409 and all — because a fix that dropped the constraint would satisfy the equality alone. While the defect
 stood, the same assertion was written as `NotEqual`, and it stayed green under a status-only change; that
@@ -111,7 +119,7 @@ is the property that kept a partial fix from reading as a complete one.
 
 `030-Problems/002` was green through that whole change, and stayed green: the two really are independent.
 
-## Three TeaPie behaviours worth knowing before editing
+## Four TeaPie behaviours worth knowing before editing
 
 Each cost a debugging round here.
 
@@ -124,6 +132,11 @@ Each cost a debugging round here.
    for it. Use `Constant(name)` from `_shared/Rows.csx`.
 3. **A request without a `###` separator is merged into its predecessor**, silently — the `# @name`
    line alone is not enough, and the symptom is one request too few and a puzzling 422.
+
+4. **A test that a `## RETRY-UNTIL-TEST-PASS` names must read `tp.Response`, not `tp.Responses[name]`.**
+   While TeaPie retries, the response under evaluation is not in the named history yet, so the lookup
+   throws on every attempt; make the polled request the file's last, so `tp.Response` is the same
+   response in the final pass too (`160-Automation/001`).
 
 Also: a request-variable JSONPath resolves object properties (`{{Name.response.body.$.id}}`) and
 headers (`{{Name.response.headers.ETag}}`), but **not array indexing** — chain through a captured

@@ -14,6 +14,7 @@ await tp.Test("The document is OpenAPI 3.1 and its paths are this descriptor's e
         {
             "/api/customers", "/api/customers/batch", "/api/customers/query", "/api/customers/{id}",
             "/api/regions", "/api/regions/batch", "/api/regions/query", "/api/regions/{id}",
+            "/api/visits", "/api/visits/batch", "/api/visits/query", "/api/visits/{id}",
             "/api/work_orders", "/api/work_orders/batch", "/api/work_orders/query", "/api/work_orders/{id}",
         },
         paths);
@@ -32,9 +33,9 @@ await tp.Test("Every entity's non-hidden fields are published on its row schema.
         new[]
         {
             "assigned_to", "completed_on", "contact_email", "created_at", "created_by",
-            "customer_id", "description", "external_ref", "id", "is_emergency", "metadata",
-            "priority", "quoted_price", "reference", "region_id", "scheduled_for", "status",
-            "tenant_id", "title", "updated_at", "updated_by",
+            "customer_id", "description", "external_ref", "id", "is_emergency", "job_number", "metadata",
+            "on_site_minutes", "po_number", "priority", "quoted_price", "reference", "region_id",
+            "respond_by", "scheduled_for", "status", "tenant_id", "title", "updated_at", "updated_by",
         },
         workOrder);
 
@@ -94,6 +95,30 @@ await tp.Test("A readOnly field is the mirror image: in the response schemas, ou
         .GetProperty("external_ref").GetProperty("readOnly").GetBoolean());
 });
 
+await tp.Test("Alvo-maintained fields — the sequence and the rollup — are readOnly, and absent from the write schemas.", async () =>
+{
+    var schemas = (await BodyOf(tp.Responses["Document"]))
+        .GetProperty("components").GetProperty("schemas");
+
+    static string[] Properties(System.Text.Json.JsonElement schema) =>
+        schema.GetProperty("properties").EnumerateObject().Select(p => p.Name).ToArray();
+
+    // A `sequence` field is written by Alvo on create and a `rollup` by the child writes; a caller who
+    // sends either is refused, so a generated client must be told not to — the same contract as
+    // `external_ref`, reached through a different declaration.
+    foreach (var maintained in new[] { "job_number", "on_site_minutes" })
+    {
+        Contains(maintained, Properties(schemas.GetProperty("work_orders")));
+        DoesNotContain(maintained, Properties(schemas.GetProperty("work_ordersCreate")));
+        DoesNotContain(maintained, Properties(schemas.GetProperty("work_ordersPatch")));
+        True(schemas.GetProperty("work_orders").GetProperty("properties")
+            .GetProperty(maintained).GetProperty("readOnly").GetBoolean());
+    }
+
+    // Control: a plain new field beside them is writable, so the absence above is the maintenance.
+    Contains("po_number", Properties(schemas.GetProperty("work_ordersCreate")));
+});
+
 await tp.Test("A declared format publishes its PATTERN, anchored as Alvo enforces it; a built-in publishes its name.", async () =>
 {
     var fields = (await BodyOf(tp.Responses["Document"]))
@@ -132,7 +157,7 @@ await tp.Test("Each declared field type reaches its OpenAPI wire shape.", async 
     Equal("date", fields.GetProperty("completed_on").GetProperty("format").GetString());
     Equal("uuid", fields.GetProperty("customer_id").GetProperty("format").GetString());
     Equal(
-        new[] { "cancelled", "completed", "in_progress", "scheduled" },
+        new[] { "cancelled", "completed", "in_progress", "new", "scheduled" },
         fields.GetProperty("status").GetProperty("enum").EnumerateArray()
             .Select(value => value.GetString()).OrderBy(v => v, StringComparer.Ordinal).ToArray());
 });

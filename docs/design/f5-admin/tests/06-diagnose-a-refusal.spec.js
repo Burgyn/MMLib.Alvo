@@ -103,18 +103,20 @@ test.describe('diagnose a refusal', () => {
     await reset(page);
     await go(page, '#/access');
 
-    // field-service declares no `access` block at all, so only the bootstrap admin gets in.
+    // field-service declares only the `admin` level (`'admin' in @user.roles`); Martin is a dispatcher,
+    // so he matches none of the three, and viewer and developer are named as not declared.
     await openPerson(page, MARTIN);
     const ladder = page.locator('.a-ladder');
     await expect(ladder).toContainText('Cannot open it');
     await expect(ladder).toContainText('The three predicates are');
     await expect(ladder).toContainText('not declared');
+    await expect(ladder).toContainText("'admin' in @user.roles");
 
-    // The Access screen says the same thing about the empty block, rather than leaving it silent.
+    // The Access screen says what matching none of them costs, rather than leaving it silent.
     await page.click('[data-act="close"]');
     await page.waitForTimeout(60);
-    await expect(page.locator('#app')).toContainText('This descriptor declares no level at all');
-    await expect(page.locator('#app')).toContainText('nobody but the deployment');
+    await expect(page.locator('#app')).toContainText('Matching none of the three means the dashboard will not open');
+    await expect(page.locator('#app')).not.toContainText('This descriptor declares no level at all');
 
     console_.assertClean();
   });

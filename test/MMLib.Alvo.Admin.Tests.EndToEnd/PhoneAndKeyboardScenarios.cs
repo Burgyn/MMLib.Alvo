@@ -245,8 +245,10 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
             await session.SettleAsync();
             await session.AssertRenderedAsync();
 
-            (await session.Content.InnerTextAsync())
-                .ShouldNotContain("Not yet");
+            // The "Not yet" panel itself, not the words: the Overview now quotes the build's webhooks
+            // sentence, whose "cannot yet verify the sender" holds "not yet" as a substring.
+            (await session.Content.Locator("[data-testid^='not-yet-']").CountAsync())
+                .ShouldBe(0, "a phone-bar section is never a Not-yet placeholder");
         }
 
         session.AssertConsoleClean();

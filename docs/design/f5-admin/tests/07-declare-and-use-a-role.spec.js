@@ -21,7 +21,7 @@ test.describe('declare a role and use it', () => {
     await go(page, '#/access');
     const m = moves(page);
 
-    // Martin reaches nothing today: the descriptor declares no `access` block at all.
+    // Martin reaches nothing today: the descriptor declares only the `admin` level, and he is a dispatcher.
     await expect(page.locator(`[data-person="martin@field-service.sk"]`)).toContainText('cannot open the dashboard');
 
     // Declare the role.
@@ -63,7 +63,8 @@ test.describe('declare a role and use it', () => {
     await go(page, '#/access');
     await page.fill('[data-act="setaccess"][data-level="viewer"]', "'ops-lead' in @user.roles");
     await page.waitForTimeout(80);
-    expect((await changeList(page))[0]).toMatchObject({ kind: 'access', pointer: '/access' });
+    // The block already exists (it declares `admin`), so the change is the one level, not the block.
+    expect((await changeList(page))[0]).toMatchObject({ kind: 'access', pointer: '/access/viewer' });
     await expect(page.locator('[data-pending]')).toContainText('needs <strong>admin</strong>'.replace(/<[^>]+>/g, ''));
 
     await go(page, '#/schema/preview');

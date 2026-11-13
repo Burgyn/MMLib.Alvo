@@ -1,0 +1,48 @@
+### A partial unique index: `(customer_id, po_number)` unique `where: status != 'cancelled'`. A customer's
+### purchase order pays for one open job; cancelling the job releases the PO. Three 201s are the controls
+### that make the 409 the `where` and the `(customer, po)` key, not a plain unique on `po_number`.
+
+### Acme's job on PO-778
+# @name PoFirst
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3301", "title": "Integrity: WO-3301", "status": "new", "priority": 3, "access_code": "ACME-3301", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-778" }
+
+### A second open Acme job on the same PO
+# @name PoAgain
+## TEST-EXPECT-STATUS: [409]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3302", "title": "Integrity: WO-3302", "status": "new", "priority": 3, "access_code": "ACME-3302", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-778" }
+
+### Another customer may carry the same PO number: the key is the pair (control)
+# @name PoOtherCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3303", "title": "Integrity: WO-3303", "status": "new", "priority": 3, "access_code": "ACME-3303", "customer_id": "{{CustomerBorovicaId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-778" }
+
+### Cancel the first job (`cancel` admits `new`)
+# @name CancelFirst
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{PoFirst.response.body.$.id}}
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "status": "cancelled" }
+
+### The PO is free again: the cancelled row is outside the index (control)
+# @name PoAfterCancel
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3304", "title": "Integrity: WO-3304", "status": "new", "priority": 3, "access_code": "ACME-3304", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "po_number": "PO-778" }

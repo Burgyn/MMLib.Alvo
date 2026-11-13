@@ -73,12 +73,13 @@ public sealed class RemoveEntityScenarios(AdminWorld world) : IClassFixture<Admi
 /// the apply drops it (docs/todo-admin.md §8d item 24).
 /// </summary>
 /// <remarks>
-/// Its own world: it removes <c>work_orders</c>, which is what points at <c>regions</c> and <c>customers</c>. Every fact
+/// Its own world, <see cref="LeafWorkOrdersWorld"/>: it removes <c>work_orders</c>, which is what points at <c>regions</c>
+/// and <c>customers</c> — in the example <c>visits</c> points at it, so that world leaves <c>visits</c> out. Every fact
 /// starts from that removal through <see cref="RemoveWorkOrdersAsync"/>, which stages it once, so the facts hold in any
 /// order xUnit runs them in.
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
-public sealed class RemoveAppliedEntityScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+public sealed class RemoveAppliedEntityScenarios(LeafWorkOrdersWorld world) : IClassFixture<LeafWorkOrdersWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task An_applied_entity_removed_from_the_copy_is_marked_removed_and_what_it_pointed_at_is_free()

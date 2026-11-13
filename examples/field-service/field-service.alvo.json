@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "field-service",
-  "description": "A multi-tenant field-service dispatch backend: shared region reference data, per-tenant customers, and per-tenant work orders assigned to technicians. Every construct here exists so one end-to-end test can measure one behaviour F3 claims — see README.md for the construct-to-behaviour table.",
+  "description": "The advanced demo: a multi-tenant field-service dispatch backend — shared region reference data, per-tenant customers, per-tenant work orders that move through a guarded life cycle, and the technicians' booked visits — with gapless job numbers, an SLA timer, integrity the database enforces, and a completion webhook to billing. Every construct here exists so one end-to-end test can measure one behaviour — see README.md for the construct-to-behaviour table.",
   "tenancy": {
     "enabled": true
   },
@@ -14,6 +14,28 @@
     "work-order-ref": {
       "pattern": "WO-[0-9]{4,8}",
       "description": "The letters WO, a dash, then four to eight digits. Written without ^...$ on purpose: Alvo anchors a format over the whole value, so a value with trailing text is refused by the framework's anchoring rather than by the author's."
+    }
+  },
+  "access": {
+    "developer": "'admin' in @user.roles"
+  },
+  "webhooks": {
+    "endpoints": {
+      "billing": {
+        "url": "http://localhost:9090/billing/work-orders",
+        "secretRef": "billing-signing",
+        "description": "The billing system. In the demo stack a WireMock sidecar shares the Alvo container's network namespace, so localhost:9090 is loopback and the webhook egress guard admits it. Anywhere nothing listens there, a delivery to it fails and retries visibly on Operations — which is why only purchase-order jobs are sent (see the automation rule)."
+      }
+    }
+  },
+  "automation": {
+    "job-completed-to-billing": {
+      "description": "Tells billing a purchase-order job is done, once per completion, as its own retried delivery after the commit. A job without a purchase order is settled on site and never reaches billing.",
+      "trigger": { "event": "entity.work_orders.updated" },
+      "condition": "changed(status) && new.status == 'completed' && has(new.po_number)",
+      "actions": [
+        { "type": "webhook", "endpoint": "billing" }
+      ]
     }
   },
   "entities": {
@@ -72,6 +94,16 @@
         "notes": {
           "type": "text",
           "description": "Free-form notes about the customer."
+        },
+        "service_opens_hour": {
+          "type": "integer",
+          "description": "The hour (0-23, the tenant's local time) from which a technician may be on site. Empty = no restriction. The embedded host's before-write hook schedules against it.",
+          "validation": "value >= 0 && value <= 23"
+        },
+        "service_closes_hour": {
+          "type": "integer",
+          "description": "The hour (1-24) by which a visit must end; after service_opens_hour when both are set.",
+          "validation": "value >= 1 && value <= 24 && (!has(service_opens_hour) || value > service_opens_hour)"
         }
       },
       "rules": {
@@ -110,20 +142,22 @@
         },
         "status": {
           "type": "enum",
-          "description": "Where the job is in its life cycle.",
+          "description": "Where the job is in its life cycle. Every move is guarded by the descriptor's state machine: new, then scheduled, in progress and completed — or cancelled, and only an administrator reopens.",
           "required": true,
-          "values": ["scheduled", "in_progress", "completed", "cancelled"]
+          "values": ["new", "scheduled", "in_progress", "completed", "cancelled"]
         },
         "priority": {
           "type": "integer",
           "description": "Dispatch priority, 1 (highest) to 5 (lowest). Required, so a paged read may sort by it.",
-          "required": true
+          "required": true,
+          "validation": "value >= 1 && value <= 5"
         },
         "quoted_price": {
           "type": "decimal",
           "description": "What the customer was quoted, excluding tax.",
           "precision": 10,
-          "scale": 2
+          "scale": 2,
+          "validation": "value >= 0.0"
         },
         "is_emergency": {
           "type": "boolean",
@@ -182,6 +216,25 @@
           "entity": "regions",
           "required": true,
           "onDelete": "restrict"
+        },
+        "job_number": {
+          "type": "string",
+          "description": "The gapless job number billing and the customer quote, assigned by Alvo on create, counted per tenant and per calendar year in Bratislava. Read-only: a write that sends it is refused.",
+          "sequence": { "period": "year", "timeZone": "Europe/Bratislava", "format": "JOB-{yyyy}-{n:5}" }
+        },
+        "respond_by": {
+          "type": "datetime",
+          "description": "When an emergency must be scheduled by, from the customer's contract. Arms the sla_breach timer."
+        },
+        "po_number": {
+          "type": "string",
+          "description": "The customer's purchase order. One open job per customer and PO; a cancelled job releases it. A job on a PO is invoiced by billing when it is completed.",
+          "maxLength": 40
+        },
+        "on_site_minutes": {
+          "type": "integer",
+          "description": "Minutes on site across the job's visits — what billing invoices. Maintained by Alvo.",
+          "rollup": { "from": "visits", "op": "sum", "field": "minutes_on_site" }
         }
       },
       "rules": {
@@ -193,7 +246,75 @@
       },
       "indexes": [
         { "fields": ["status", "priority"] },
-        { "fields": ["assigned_to"] }
+        { "fields": ["assigned_to"] },
+        { "fields": ["customer_id", "po_number"], "unique": true, "where": "status != 'cancelled'" }
+      ],
+      "events": {
+        "exclude": ["access_code", "internal_notes"]
+      },
+      "stateMachine": {
+        "field": "status",
+        "transitions": {
+          "schedule": { "description": "A dispatcher books a technician and a time.", "from": ["new"], "to": "scheduled", "roles": ["dispatcher", "admin"], "when": "has(new.assigned_to) && has(new.scheduled_for)" },
+          "start": { "description": "The technician arrives.", "from": ["scheduled"], "to": "in_progress", "roles": ["technician", "dispatcher", "admin"] },
+          "complete": { "description": "Signed off on site.", "from": ["in_progress"], "to": "completed", "roles": ["technician", "dispatcher", "admin"], "when": "has(new.completed_on)" },
+          "cancel": { "description": "The customer or the desk calls it off, even mid-visit.", "from": ["new", "scheduled", "in_progress"], "to": "cancelled", "roles": ["dispatcher", "admin"] },
+          "reopen": { "description": "Only an administrator reopens a closed job, and clears its sign-off day in the same write, so completing it again needs a new one.", "from": ["completed", "cancelled"], "to": "scheduled", "roles": ["admin"], "when": "!has(new.completed_on)" }
+        }
+      },
+      "timers": {
+        "sla_breach": { "description": "An emergency still unscheduled at respond_by escalates.", "at": "respond_by", "when": "is_emergency == true && status == 'new'", "event": "work_orders.sla_breached" }
+      }
+    },
+    "visits": {
+      "description": "A technician's booked slot on a job: the dispatch calendar. Seen by a technician through the job it belongs to.",
+      "tenancy": "scoped",
+      "audit": true,
+      "fields": {
+        "work_order_id": {
+          "type": "ref",
+          "description": "The job this visit is for.",
+          "entity": "work_orders",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "technician_id": {
+          "type": "uuid",
+          "description": "The user id of the technician booked.",
+          "required": true
+        },
+        "starts_at": {
+          "type": "datetime",
+          "description": "When the slot starts (inclusive).",
+          "required": true
+        },
+        "ends_at": {
+          "type": "datetime",
+          "description": "When the slot ends (exclusive).",
+          "required": true
+        },
+        "minutes_on_site": {
+          "type": "integer",
+          "description": "Minutes actually spent, recorded at sign-off.",
+          "validation": "value >= 0 && value <= 1440"
+        },
+        "notes": {
+          "type": "text",
+          "description": "What the technician wants the desk to know."
+        }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles || 'admin' in @user.roles || work_order_id.assigned_to == @user.id",
+        "get": "'dispatcher' in @user.roles || 'admin' in @user.roles || work_order_id.assigned_to == @user.id",
+        "create": "'dispatcher' in @user.roles || 'admin' in @user.roles",
+        "update": "'dispatcher' in @user.roles || 'admin' in @user.roles || (technician_id == @user.id && work_order_id.assigned_to == @user.id)",
+        "delete": "'dispatcher' in @user.roles || 'admin' in @user.roles"
+      },
+      "checks": [
+        { "lookup": "work_order_id", "expr": "work_order_id.status != 'completed' && work_order_id.status != 'cancelled'", "message": "A visit can only be booked on an open work order." }
+      ],
+      "indexes": [
+        { "fields": ["technician_id"], "exclude": { "from": "starts_at", "to": "ends_at" } }
       ]
     }
   }

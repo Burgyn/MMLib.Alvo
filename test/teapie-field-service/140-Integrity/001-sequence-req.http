@@ -1,0 +1,53 @@
+### `job_number` is a gapless sequence (`JOB-{yyyy}-{n:5}`, per tenant, per calendar year in Bratislava).
+###
+### The seed claim below holds only because 010-Seed/003 is tenant north's first work-order create and
+### 010-Seed/004 tenant south's — true by folder order, and the reason this case may read the seed at all.
+
+### The seven seeded north orders, in reference order (= creation order in 010-Seed/003)
+# @name ListSeededNorth
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=in.(WO-1001,WO-1002,WO-1003,WO-1004,WO-1005,WO-1006,WO-1007)&select=reference,job_number&order=reference.asc&limit=10
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+
+### South's only seeded order: its tenant counts on its own, so it is number one too
+# @name ReadSouthSeed
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?reference=eq.WO-5001&select=job_number&limit=10
+X-Alvo-Api-Key: {{keyDispatcherSouth}}
+
+### A numbered create
+# @name NumberedA
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3201", "title": "Integrity: WO-3201", "status": "new", "priority": 3, "access_code": "ACME-3201", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+
+### The same body, refused by the priority CHECK — inside the create's transaction, after the number was
+### taken, so a sequence that did not give it back would leave a gap
+# @name RefusedByCheck
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3202", "title": "Integrity: WO-3202", "status": "new", "priority": 9, "access_code": "ACME-3202", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+
+### The next create, which must be exactly one more than NumberedA
+# @name NumberedB
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3203", "title": "Integrity: WO-3203", "status": "new", "priority": 3, "access_code": "ACME-3203", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+
+### Alvo writes the number: a create that sends it is refused
+# @name SendsJobNumber
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3204", "title": "Integrity: WO-3204", "status": "new", "priority": 3, "access_code": "ACME-3204", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "job_number": "JOB-1999-00001" }

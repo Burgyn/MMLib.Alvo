@@ -1,0 +1,75 @@
+### `validation` on a field is a CHECK constraint the database enforces for every writer. Each refusal
+### is 422 `check` at the field to fix; each boundary value beside it is the control that makes the
+### refusal the condition and not the field's type.
+
+### An opening hour past the day's last
+# @name OpensAt25
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "OpensAt25 Ltd", "tier": "standard", "service_opens_hour": 25 }
+
+### Closing before opening — the closing hour's validation reads the opening hour of the same row
+# @name ClosesBeforeOpens
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "ClosesBeforeOpens Ltd", "tier": "standard", "service_opens_hour": 18, "service_closes_hour": 8 }
+
+### A sane window, 07-19 (control)
+# @name SaneHours
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "SaneHours Ltd", "tier": "standard", "service_opens_hour": 7, "service_closes_hour": 19 }
+
+### A closing hour with no opening hour: the `!has(service_opens_hour) ||` arm admits it (control)
+# @name ClosesOnly
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "ClosesOnly Ltd", "tier": "standard", "service_closes_hour": 17 }
+
+### The edges of the window are admitted: 0 and 24 (control)
+# @name EdgeHours
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "name": "EdgeHours Ltd", "tier": "standard", "service_opens_hour": 0, "service_closes_hour": 24 }
+
+### Priority 0 is outside 1..5
+# @name PriorityZero
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3211", "title": "Integrity: WO-3211", "status": "new", "priority": 0, "access_code": "ACME-3211", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}" }
+
+### A negative quote
+# @name NegativeQuote
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3212", "title": "Integrity: WO-3212", "status": "new", "priority": 3, "access_code": "ACME-3212", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "quoted_price": -1.00 }
+
+### Priority 5 and a zero quote are the boundaries, and pass (control)
+# @name BoundaryValues
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{keyDispatcherNorth}}
+Content-Type: application/json
+
+{ "tenant_id": "{{tenantNorth}}", "reference": "WO-3213", "title": "Integrity: WO-3213", "status": "new", "priority": 5, "access_code": "ACME-3213", "customer_id": "{{CustomerAcmeId}}", "region_id": "{{RegionNorthId}}", "quoted_price": 0.00 }

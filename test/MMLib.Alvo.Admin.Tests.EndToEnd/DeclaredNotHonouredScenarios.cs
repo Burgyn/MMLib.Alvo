@@ -14,11 +14,13 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 public sealed class DeclaredNotHonouredScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     /// <summary>
-    /// field-service declares none of the blocks or keys the build ignores, so the Overview draws no "not honoured"
-    /// panel at all; its description and its formats' descriptions, which the build honours and this dashboard does not show, is one quiet line.
+    /// field-service declares exactly one block the build does not fully honour — <c>webhooks</c> (deliveries are unsigned) —
+    /// so the Overview's "not honoured" panel has that one row and nothing else, and realtime's build-wide default is not
+    /// in it; its description and its formats' descriptions, which the build honours and this dashboard does not show, is
+    /// one quiet line.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_overview_says_nothing_is_ignored_when_nothing_is_and_names_the_unshown_metadata()
+    public async Task The_overview_names_only_what_is_declared_and_ignored_and_the_unshown_metadata()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("");
@@ -26,8 +28,11 @@ public sealed class DeclaredNotHonouredScenarios(AdminWorld world) : IClassFixtu
         var unshown = session.Page.GetByTestId("overview-unshown");
         await unshown.WaitForAsync();
         (await unshown.InnerTextAsync()).ShouldBe("Declared metadata this dashboard does not show yet: description, formats.*.description (#268, #271).");
-        (await session.Page.GetByTestId("overview-limits").CountAsync())
-            .ShouldBe(0, "realtime's default is a fact about the build, not a declaration of this project's");
+        var limits = session.Page.GetByTestId("overview-limits");
+        (await limits.Locator("[data-testid^='overview-limit-']").CountAsync()).ShouldBe(1, "only the block this project declares");
+        (await limits.GetByTestId("overview-limit-webhooks").CountAsync()).ShouldBe(1);
+        (await limits.InnerTextAsync()).ShouldNotContain("realtime",
+            Case.Insensitive, "realtime's default is a fact about the build, not a declaration of this project's");
 
         session.AssertConsoleClean();
     }

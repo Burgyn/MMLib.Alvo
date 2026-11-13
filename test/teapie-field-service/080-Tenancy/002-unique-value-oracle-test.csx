@@ -22,9 +22,10 @@ await tp.Test("A `unique` field on a scoped entity answers tenant south NOTHING 
 
 await tp.Test("The whole answer is indistinguishable, not merely its status — so nothing else carries the bit.", async () =>
 {
-    // Compared as complete documents. Four fields are excluded and each exclusion is forced by the row
+    // Compared as complete documents. Five fields are excluded and each exclusion is forced by the row
     // rather than chosen: `id` is assigned per row, `reference` is the one thing the two requests
-    // deliberately differ in, and `created_at`/`updated_at` are stamped per write. Every other field —
+    // deliberately differ in, `job_number` is assigned per row by the tenant's own sequence, and
+    // `created_at`/`updated_at` are stamped per write. Every other field —
     // and the key set, and the status — has to match, because a differing value, key or message would
     // answer the question the status no longer does.
     Equal(
@@ -80,12 +81,14 @@ await tp.Test("One reference, two rows — south's WO-1001 is south's own, in so
 });
 
 /// One create's answer with everything that identifies the ROW removed, so two creates can be compared
-/// for being the same ANSWER rather than the same row. Four exclusions, all forced: `id` is assigned per
-/// row, `reference` is the single field the two probes deliberately differ in, and `created_at` and
-/// `updated_at` are stamped per write on this audited entity. Nothing else may differ.
+/// for being the same ANSWER rather than the same row. Five exclusions, all forced: `id` is assigned per
+/// row, `reference` is the single field the two probes deliberately differ in, `job_number` is assigned
+/// per row by the tenant's own sequence — so two creates differ in it by construction, like `id` — and
+/// `created_at` and `updated_at` are stamped per write on this audited entity. Nothing else may differ;
+/// the key set is still compared whole, so `job_number` must be present on both.
 async Task<string> CreateFingerprint(HttpResponseMessage response)
 {
-    var excluded = new[] { "id", "reference", "created_at", "updated_at" };
+    var excluded = new[] { "id", "reference", "job_number", "created_at", "updated_at" };
     var body = await BodyOf(response);
     var fields = body.EnumerateObject()
         .Where(property => !excluded.Contains(property.Name, StringComparer.Ordinal))
