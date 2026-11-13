@@ -9,7 +9,9 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// <c>visits.technician_id</c> is named by its <c>update</c> rule (<c>technician_id == @user.id</c>) and by its exclusion
 /// index's equality fields; the plan appearing is the apply's own dry run compiling the renamed rule and index. Not
 /// <c>work_orders.assigned_to</c> any more: the state machine's <c>schedule</c> condition and the visits' relation rule
-/// (<c>work_order_id.assigned_to</c>) name it too, which is a different claim. Its own world: it stages.
+/// (<c>work_order_id.assigned_to</c>) name it too, and the dashboard's rename walks neither — it reports no leftover
+/// and Preview refuses the descriptor. That is issue #513, kept visible by the skipped fact below. Its own world: it
+/// stages.
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
 public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<AdminWorld>
@@ -30,6 +32,33 @@ public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<Ad
         await session.PreviewPendingAsync();
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
         (await session.Content.InnerTextAsync()).ShouldContain("booked_user_id == @user.id");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A field named by a transition's condition and by another entity's relation rule is carried, or named as not
+    /// carried, before Preview — today neither happens (#513).
+    /// </summary>
+    [Fact(Skip = "Issue 513: a field rename misses state-machine conditions and other entities' relation paths", Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_rename_carries_the_state_machine_and_the_relation_rules_or_names_them()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.Page.GetByTestId("edit-field-assigned_to").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("technician_id");
+        await session.Page.GetByTestId("field-save").ClickAsync();
+        await session.Page.GetByTestId("field-row-technician_id").WaitForAsync();
+
+        if (await session.Page.GetByTestId("rename-leftovers").CountAsync() == 0)
+        {
+            await session.PreviewPendingAsync();
+            (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+            (await session.Content.InnerTextAsync()).ShouldContain("has(new.technician_id)");
+            (await session.Content.InnerTextAsync()).ShouldContain("work_order_id.technician_id == @user.id");
+        }
 
         session.AssertConsoleClean();
     }
