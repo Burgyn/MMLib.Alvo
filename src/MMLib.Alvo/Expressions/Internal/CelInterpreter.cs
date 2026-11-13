@@ -1,4 +1,6 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
 using System.Globalization;
 
 namespace MMLib.Alvo.Expressions.Internal;
@@ -138,7 +140,8 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression), changed: changed);
+            var state = new EvalState(
+                current, previous, context, expression.Entity.Tenancy, failClosed: FailsClosed(expression), changed: changed);
             return Truth(Evaluate(expression.Root, state), WholeCondition, state.FailClosed, WholeConditionReason);
         }
         catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
@@ -193,7 +196,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(AlvoRecord.Empty, null, context);
+            var state = new EvalState(AlvoRecord.Empty, null, context, expression.Entity.Tenancy);
             return Evaluate(expression.Root, state) is not false;
         }
 #pragma warning disable CA1031
@@ -219,7 +222,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, null, null);
+            var state = new EvalState(current, null, null, null);
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
@@ -278,7 +281,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, null, now, FailsClosed(expression));
+            var state = new EvalState(current, previous, null, null, now, FailsClosed(expression));
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
@@ -307,7 +310,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, null, context, now, failClosed: true);
+            var state = new EvalState(current, null, context, expression.Entity.Tenancy, now, failClosed: true);
             return Instant(Evaluate(expression.Root, state));
         }
         catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
@@ -367,7 +370,7 @@ internal static class CelInterpreter
     {
         CelLiteral literal => literal.Value,
         CelFieldRef fieldRef => ResolveField(fieldRef, state),
-        CelContextRef contextRef => ResolveContext(contextRef, state.Context),
+        CelContextRef contextRef => ResolveContext(contextRef, state),
         CelUnary unary => EvaluateUnary(unary, state),
         CelBinary binary => EvaluateBinary(binary, state),
         CelHas has => ResolveField(has.Field, state) is not null,
@@ -419,9 +422,13 @@ internal static class CelInterpreter
         return record?[fieldRef.FieldName];
     }
 
-    private static object? ResolveContext(CelContextRef contextRef, AlvoContext? context)
+    /// <summary>
+    /// Resolves a context read against the caller; <c>@user.roles</c> is the set <see cref="RoleProvenance"/> makes
+    /// visible in the evaluated expression's entity, so a tenant role counts only in a scoped entity's expression.
+    /// </summary>
+    private static object? ResolveContext(CelContextRef contextRef, in EvalState state)
     {
-        if (context is null)
+        if (state.Context is not { } context)
         {
             return null;
         }
@@ -429,7 +436,7 @@ internal static class CelInterpreter
         return contextRef.Value switch
         {
             CelContextValue.UserId => context.User.Value,
-            CelContextValue.UserRoles => context.Roles.Select(role => role.Name).ToArray(),
+            CelContextValue.UserRoles => RoleProvenance.Visible(context, state.Tenancy).Select(role => role.Name).ToArray(),
             CelContextValue.TenantId => context.Tenant?.Value,
             _ => null,
         };
@@ -887,6 +894,7 @@ internal static class CelInterpreter
         AlvoRecord current,
         AlvoRecord? previous,
         AlvoContext? context,
+        TenancyMode? tenancy,
         DateTimeOffset? now = null,
         bool failClosed = false,
         IReadOnlyCollection<string>? changed = null)
@@ -896,6 +904,13 @@ internal static class CelInterpreter
         public AlvoRecord? Previous { get; } = previous;
 
         public AlvoContext? Context { get; } = context;
+
+        /// <summary>
+        /// Gets the tenancy of the entity the evaluated expression belongs to — what decides whether the caller's tenant
+        /// roles join <c>@user.roles</c> (<see cref="RoleProvenance"/>); <see langword="null"/> on an untenanted entity and
+        /// on every entry point that passes no caller.
+        /// </summary>
+        public TenancyMode? Tenancy { get; } = tenancy;
 
         /// <summary>
         /// The instant a <see cref="CelProfile.Mutate"/> evaluation's caller passed for <c>now()</c>, or

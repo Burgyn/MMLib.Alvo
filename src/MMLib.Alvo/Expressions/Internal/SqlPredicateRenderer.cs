@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Schema;
 using System.Collections.Frozen;
 
 namespace MMLib.Alvo.Expressions.Internal;
@@ -379,20 +380,21 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
 
     /// <summary>
     /// Renders role membership. The right operand is never read — the caller's role set answers it — so
-    /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first.
+    /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first. The set is the one
+    /// <see cref="RoleProvenance"/> makes visible in this scope's entity: tenant roles count only in a scoped entity's.
     /// </summary>
     private static PredicateFragment RenderIn(CelBinary binary, RenderScope scope)
     {
         RoleMembership.RequireUserRolesOperand(binary.Right);
-        var caller = Caller(scope.Context, binary);
+        var roles = RoleProvenance.Visible(Caller(scope.Context, binary), scope.Entity.Tenancy);
 
         if (binary.Left is CelLiteral { Type: CelValueType.String, Value: string text })
         {
-            var isMember = caller.Roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
+            var isMember = roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
             return new PredicateFragment(scope.Fields.RenderBooleanPredicate(isMember), true);
         }
 
-        var roleNames = caller.Roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        var roleNames = roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
         if (roleNames.Count == 0 || ReadsAbsentImageValue(binary.Left, scope))
         {
             return new PredicateFragment(scope.Fields.RenderBooleanPredicate(false), true);

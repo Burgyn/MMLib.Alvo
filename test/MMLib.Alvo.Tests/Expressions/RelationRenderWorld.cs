@@ -41,6 +41,10 @@ internal sealed class RelationRenderWorld
 
     internal static RelationRenderWorld Instance { get; } = new(Descriptor());
 
+    /// <summary>A world over <paramref name="json"/>, with a relation cache of its own.</summary>
+    /// <param name="json">The descriptor.</param>
+    internal static RelationRenderWorld Over(string json) => new(json);
+
     internal static AlvoContext Manager { get; } =
         CelFixtures.Alice with { Roles = new HashSet<Role> { Role.Authenticated, Role.Application("manager") } };
 
