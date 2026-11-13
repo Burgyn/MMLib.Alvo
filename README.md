@@ -162,6 +162,20 @@ Next: [the 10-minute tutorial →](https://alvo.burgyn.online/start-here/tutoria
   <img src="assets/screenshots/rules-editor-light-2x.png" width="960" alt="The admin dashboard's rule editor: the list rule of service_orders reads 'amdin' in @user.roles, and the editor flags it before saving: 'amdin' is not a declared role. Did you mean 'admin'?">
 </picture>
 
+## Extend it in C#
+
+When the descriptor cannot say it, an embedded host writes C# that joins the same write pipeline, events and guarantees
+the descriptor's own hooks use: the caller's rules still apply, and a hook's writes share the write's transaction.
+Start with [where logic goes](https://alvo.burgyn.online/extending/where-logic-goes/); the pieces are:
+
+- **Writes** — [validate and guard a write](https://alvo.burgyn.online/extending/write-hooks/), [transactions in your own code](https://alvo.burgyn.online/extending/transactions/),
+  [state machines and timers](https://alvo.burgyn.online/extending/state-machines/) and [rules over relations](https://alvo.burgyn.online/extending/relation-rules/).
+- **Events and deliveries** — [event handlers](https://alvo.burgyn.online/extending/event-handlers/), [multi-step side effects](https://alvo.burgyn.online/extending/steps/),
+  [functions](https://alvo.burgyn.online/extending/functions/) and [automation](https://alvo.burgyn.online/extending/automation/) in the descriptor, [commands and inbound webhooks](https://alvo.burgyn.online/extending/commands/).
+- **Time** — [timers, cron schedules and data migrations](https://alvo.burgyn.online/extending/time/).
+- **Reads** — [narrow rows and shape fields](https://alvo.burgyn.online/extending/reads/) after the rules.
+- **Testing** — [`MMLib.Alvo.TestHost`](https://alvo.burgyn.online/extending/testing/) runs your descriptor and your C# through the real pipeline in a unit test.
+
 ## How it fits together
 
 ```mermaid
