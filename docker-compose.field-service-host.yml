@@ -1,0 +1,133 @@
+# The field-service EMBEDDED-HOST stack: samples/MMLib.Alvo.Samples.FieldService over real PostgreSQL, serving the SAME
+# examples/field-service descriptor as docker-compose.field-service.yml, plus the host code that descriptor cannot
+# express — the dispatch command, the technician app's signed webhook, the service-hours hook, the customer notice, the
+# SLA escalation, the per-tenant overdue report and the technician's open-jobs view.
+#
+# A THIRD compose file, for the reason docker-compose.field-service.yml gives for being a second: Compose interpolates the
+# whole file before selecting services, so the extra `${...:?}` secrets here would break every reader of the other two.
+# It is also a different image (the sample, not the standalone host) with a database of its own.
+#
+#   export ALVO_FS_DISPATCHER_NORTH_SECRET=... (and the other four, see examples/field-service/README.md)
+#   export ALVO_FS_TECH_APP_SECRET="whsec_$(openssl rand -base64 32)"
+#   docker compose --env-file examples/field-service/demo-identities.env \
+#     -f docker-compose.field-service-host.yml up --build --wait
+#
+# scripts/test-e2e does all of that for you, with fresh secrets per run, and runs test/teapie-field-service-host.
+name: alvo-field-service-host
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alvo_field_service_host
+      POSTGRES_USER: alvo
+      POSTGRES_PASSWORD: alvo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alvo -d alvo_field_service_host"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  alvo:
+    build:
+      context: .
+      dockerfile: samples/MMLib.Alvo.Samples.FieldService/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__FieldService: Host=postgres;Port=5432;Database=alvo_field_service_host;Username=alvo;Password=alvo
+      FieldService__DescriptorPath: /alvo/descriptor.json
+      FieldService__TimeZone: Europe/Bratislava
+      # The customer notice, the on-call page and the overdue report go to the sink below — a real deployment points
+      # this at its SMS or e-mail gateway. The sink shares this container's network namespace, so localhost is it.
+      FieldService__NotificationsUrl: http://localhost:9090/notifications
+      # The tenants the per-tenant overdue report runs for. Alvo owns no tenant directory; this host lists them.
+      FieldService__Tenants__0: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      FieldService__Tenants__1: ${ALVO_FS_TENANT_SOUTH:?set ALVO_FS_TENANT_SOUTH (see examples/field-service/demo-identities.env)}
+
+      # The technician app's Standard Webhooks signing secret (`whsec_` + base64). Never committed; compose refuses to
+      # start without one, and scripts/test-e2e mints a fresh one per run and signs its deliveries with it.
+      Alvo__Secrets__Values__technician_app: ${ALVO_FS_TECH_APP_SECRET:?set ALVO_FS_TECH_APP_SECRET to whsec_ followed by at least 24 random bytes in base64}
+
+      # The SAME five dev keys as docker-compose.field-service.yml, differing in exactly the two things the suites
+      # measure: role and tenant. Every secret comes from the shell with `:?`, so the image ships none (§2.14); the
+      # tenant and user ids are not secrets and live in demo-identities.env, where a test reads the same values.
+
+      # 1. The tenant-north dispatcher.
+      Alvo__Auth__DevKeys__0__KeyId: dispatcher-north
+      Alvo__Auth__DevKeys__0__Secret: ${ALVO_FS_DISPATCHER_NORTH_SECRET:?set ALVO_FS_DISPATCHER_NORTH_SECRET before starting the field-service host stack}
+      Alvo__Auth__DevKeys__0__User: ${ALVO_FS_USER_DISPATCHER_NORTH:?set ALVO_FS_USER_DISPATCHER_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__0__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__0__Roles__0: authenticated
+      Alvo__Auth__DevKeys__0__Roles__1: dispatcher
+      Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+
+      # 2. A tenant-north technician with jobs assigned.
+      Alvo__Auth__DevKeys__1__KeyId: tech-north
+      Alvo__Auth__DevKeys__1__Secret: ${ALVO_FS_TECH_NORTH_SECRET:?set ALVO_FS_TECH_NORTH_SECRET before starting the field-service host stack}
+      Alvo__Auth__DevKeys__1__User: ${ALVO_FS_USER_TECH_NORTH:?set ALVO_FS_USER_TECH_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__1__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__1__Roles__0: authenticated
+      Alvo__Auth__DevKeys__1__Roles__1: technician
+      Alvo__Auth__DevKeys__1__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__1__Scopes__1: "*:write"
+
+      # 3. A tenant-north technician with nothing assigned.
+      Alvo__Auth__DevKeys__2__KeyId: spare-north
+      Alvo__Auth__DevKeys__2__Secret: ${ALVO_FS_SPARE_NORTH_SECRET:?set ALVO_FS_SPARE_NORTH_SECRET before starting the field-service host stack}
+      Alvo__Auth__DevKeys__2__User: ${ALVO_FS_USER_SPARE_NORTH:?set ALVO_FS_USER_SPARE_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__2__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__2__Roles__0: authenticated
+      Alvo__Auth__DevKeys__2__Roles__1: technician
+      Alvo__Auth__DevKeys__2__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__2__Scopes__1: "*:write"
+
+      # 4. The tenant-south dispatcher.
+      Alvo__Auth__DevKeys__3__KeyId: dispatcher-south
+      Alvo__Auth__DevKeys__3__Secret: ${ALVO_FS_DISPATCHER_SOUTH_SECRET:?set ALVO_FS_DISPATCHER_SOUTH_SECRET before starting the field-service host stack}
+      Alvo__Auth__DevKeys__3__User: ${ALVO_FS_USER_DISPATCHER_SOUTH:?set ALVO_FS_USER_DISPATCHER_SOUTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__3__Tenant: ${ALVO_FS_TENANT_SOUTH:?set ALVO_FS_TENANT_SOUTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__3__Roles__0: authenticated
+      Alvo__Auth__DevKeys__3__Roles__1: dispatcher
+      Alvo__Auth__DevKeys__3__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__3__Scopes__1: "*:write"
+
+      # 5. The administrator — and, through the descriptor's `access.developer`, the instance operator who may run a
+      #    schedule now over the Management API.
+      Alvo__Auth__DevKeys__4__KeyId: admin
+      Alvo__Auth__DevKeys__4__Secret: ${ALVO_FS_ADMIN_SECRET:?set ALVO_FS_ADMIN_SECRET before starting the field-service host stack}
+      Alvo__Auth__DevKeys__4__User: ${ALVO_FS_USER_ADMIN:?set ALVO_FS_USER_ADMIN (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__4__Tenant: ${ALVO_FS_TENANT_NORTH:?set ALVO_FS_TENANT_NORTH (see examples/field-service/demo-identities.env)}
+      Alvo__Auth__DevKeys__4__Roles__0: authenticated
+      Alvo__Auth__DevKeys__4__Roles__1: admin
+      Alvo__Auth__DevKeys__4__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__4__Scopes__1: "*:write"
+
+    # Loopback only, as in the other two stacks.
+    ports:
+      - "127.0.0.1:${ALVO_FSH_PORT:?set ALVO_FSH_PORT (see examples/field-service/demo-identities.env)}:8080"
+      # The sink's port, published here because a `network_mode: service:` container cannot publish its own.
+      - "127.0.0.1:${ALVO_FSH_SINK_PORT:?set ALVO_FSH_SINK_PORT (see examples/field-service/demo-identities.env)}:9090"
+    # /health/ready: 503 until the descriptor has applied, so `up --wait` means the schema is there.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The same sink as docker-compose.field-service.yml: billing (the descriptor's webhook) AND this host's notifications,
+  # in the alvo container's network namespace so `http://localhost:9090` is loopback and the webhook egress guard stays
+  # fully on. The suite reads both from WireMock's journal (`POST /__admin/requests/find`) on ALVO_FSH_SINK_PORT.
+  sink:
+    image: wiremock/wiremock:3.9.1
+    network_mode: "service:alvo"
+    command: ["--port", "9090", "--disable-banner"]
+    volumes:
+      - ./examples/field-service/sink/mappings:/home/wiremock/mappings:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9090/__admin/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

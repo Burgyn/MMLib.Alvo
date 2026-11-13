@@ -12,6 +12,8 @@
 
   <PropertyGroup>
     <RootNamespace>MMLib.Alvo.Samples.FieldService</RootNamespace>
+    <!-- The image's Alpine base carries no ICU, as for MMLib.Alvo.Host. Time zones come from tzdata, not ICU. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>

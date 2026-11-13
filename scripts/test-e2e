@@ -6,7 +6,7 @@
 # self-skipping Testcontainers image rather than an image BUILD plus a multi-service stack. This
 # script exists so a human can run the same thing CI runs, on purpose, not because a ring calls it.
 #
-# TWO stacks, and they answer two different questions:
+# THREE stacks, and they answer three different questions:
 #
 #   docker-compose.yml (:8080, vehicle-registry)  — does the stack boot and answer? Three entities,
 #       no tenancy, no audit, no hidden fields. Its suite guards the smoke path and the two
@@ -22,8 +22,14 @@
 #       lookup check, rollup, relation rule) and a completion webhook to a WireMock billing sink that
 #       shares the alvo container's network namespace (so its http://localhost URL is loopback).
 #
+#   docker-compose.field-service-host.yml (:8082) — does the SAME descriptor plus host code behave as the
+#       sample claims? samples/MMLib.Alvo.Samples.FieldService, the embedded host over the same file: the
+#       dispatch command (one unit, Idempotency-Key), the technician app's signed Standard Webhook, the
+#       service-hours hook, the customer notice, the SLA timer's escalation, the per-tenant overdue report
+#       (driven by the Management API's Run now) and the technician's open-jobs narrowing.
+#
 # "The stack boots and answers" is not "the product behaves as documented", and only the second is
-# worth shipping — so both run, and the run fails if either does.
+# worth shipping — so all three run, and the run fails if any does.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
@@ -33,6 +39,7 @@ REPORT_DIR="$ROOT/artifacts/teapie"
 ENV_FILE="$REPORT_DIR/env.json"
 REPORT_FILE="$REPORT_DIR/report.xml"
 FIELD_SERVICE_REPORT_FILE="$REPORT_DIR/report-field-service.xml"
+FIELD_SERVICE_HOST_REPORT_FILE="$REPORT_DIR/report-field-service-host.xml"
 
 # The default stack, named explicitly: compose would otherwise merge a reader's docker-compose.override.yml
 # (gitignored; the docs' "Run your own descriptor" creates one) and honour ALVO_DESCRIPTOR, and either would change
@@ -47,6 +54,11 @@ FIELD_SERVICE_COMPOSE=(
   -f "$ROOT/docker-compose.field-service.yml"
 )
 
+FIELD_SERVICE_HOST_COMPOSE=(
+  --env-file "$ROOT/examples/field-service/demo-identities.env"
+  -f "$ROOT/docker-compose.field-service-host.yml"
+)
+
 # The image ships no credential (§2.14), so every stack is handed fresh ones per run and the TeaPie
 # environment is generated from the same values — one source of truth, and nothing secret committed.
 export ALVO_DEMO_KEY_SECRET="${ALVO_DEMO_KEY_SECRET:-$(openssl rand -hex 16)}"
@@ -55,6 +67,9 @@ export ALVO_FS_TECH_NORTH_SECRET="${ALVO_FS_TECH_NORTH_SECRET:-$(openssl rand -h
 export ALVO_FS_SPARE_NORTH_SECRET="${ALVO_FS_SPARE_NORTH_SECRET:-$(openssl rand -hex 16)}"
 export ALVO_FS_DISPATCHER_SOUTH_SECRET="${ALVO_FS_DISPATCHER_SOUTH_SECRET:-$(openssl rand -hex 16)}"
 export ALVO_FS_ADMIN_SECRET="${ALVO_FS_ADMIN_SECRET:-$(openssl rand -hex 16)}"
+# The technician app's Standard Webhooks secret: `whsec_` + 32 random bytes in base64, the form the receiver requires
+# (at least 24 bytes). The suite signs its deliveries with the same value.
+export ALVO_FS_TECH_APP_SECRET="${ALVO_FS_TECH_APP_SECRET:-whsec_$(openssl rand -base64 32)}"
 
 # The field-service demo's non-secret constants — tenant ids, user ids, the published port. Sourced
 # rather than restated: compose interpolates the same file, so the environment TeaPie asserts
@@ -77,6 +92,10 @@ write_teapie_environment() {
 
     "fsBaseUrl": "http://localhost:$ALVO_FS_PORT",
     "fsSinkUrl": "http://localhost:$ALVO_FS_SINK_PORT",
+
+    "fshBaseUrl": "http://localhost:$ALVO_FSH_PORT",
+    "fshSinkUrl": "http://localhost:$ALVO_FSH_SINK_PORT",
+    "techAppSecret": "$ALVO_FS_TECH_APP_SECRET",
 
     "tenantNorth": "$ALVO_FS_TENANT_NORTH",
     "tenantSouth": "$ALVO_FS_TENANT_SOUTH",
@@ -103,9 +122,11 @@ teardown() {
     echo "[e2e] FAILED — container logs follow" >&2
     docker compose "${MAIN_COMPOSE[@]}" logs --no-color --tail 200 >&2 || true
     docker compose "${FIELD_SERVICE_COMPOSE[@]}" logs --no-color --tail 200 >&2 || true
+    docker compose "${FIELD_SERVICE_HOST_COMPOSE[@]}" logs --no-color --tail 200 >&2 || true
   fi
   docker compose "${MAIN_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose "${FIELD_SERVICE_HOST_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   exit "$status"
 }
 
@@ -117,13 +138,16 @@ start_the_stacks() {
   # fixed `reference` values, which are declared unique.
   docker compose "${MAIN_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose "${FIELD_SERVICE_HOST_COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
 
   # Build and pull outside the timed window: §2.14's criterion is "a working backend within 60 s",
   # which is boot time, not compile time and not the speed of a registry. Both stacks build the same
-  # image from the same context, so the second build is a cache hit.
+  # image from the same context, so the second build is a cache hit. The third stack builds the
+  # field-service sample's own image (samples/MMLib.Alvo.Samples.FieldService/Dockerfile).
   echo "[e2e] docker compose build"
   docker compose "${MAIN_COMPOSE[@]}" build
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" build
+  docker compose "${FIELD_SERVICE_HOST_COMPOSE[@]}" build
   docker compose "${MAIN_COMPOSE[@]}" pull --quiet --ignore-buildable >/dev/null 2>&1 || true
 
   echo "[e2e] docker compose up --wait (60s budget, from baas-analyza.md §2.14)"
@@ -131,6 +155,9 @@ start_the_stacks() {
 
   echo "[e2e] docker compose -f docker-compose.field-service.yml up --wait"
   docker compose "${FIELD_SERVICE_COMPOSE[@]}" up --detach --wait --wait-timeout 60
+
+  echo "[e2e] docker compose -f docker-compose.field-service-host.yml up --wait"
+  docker compose "${FIELD_SERVICE_HOST_COMPOSE[@]}" up --detach --wait --wait-timeout 60
 }
 
 run_the_suites() {
@@ -153,6 +180,14 @@ run_the_suites() {
     -e compose \
     --env-file "$ENV_FILE" \
     -r "$FIELD_SERVICE_REPORT_FILE" \
+    --no-cache-vars \
+    --no-logo
+
+  echo "[e2e] teapie test test/teapie-field-service-host -e compose"
+  dotnet tool run teapie -- test test/teapie-field-service-host \
+    -e compose \
+    --env-file "$ENV_FILE" \
+    -r "$FIELD_SERVICE_HOST_REPORT_FILE" \
     --no-cache-vars \
     --no-logo
 }
