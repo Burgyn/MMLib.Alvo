@@ -75,4 +75,43 @@ public class CelNamesTests
     [Fact]
     public void A_function_member_after_the_namespace_is_never_renamed() =>
         CelNames.Rename("math.round(new.round)", "round", "rounded").ShouldBe("math.round(new.rounded)");
+
+    /// <summary>In another entity's relation slot the field is only ever the member of a ref to its entity.</summary>
+    [Theory]
+    [InlineData("work_order_id.assigned_to == @user.id || assigned_to == 1", "work_order_id.owner_id == @user.id || assigned_to == 1")]
+    [InlineData("new.assigned_to == 1", "new.assigned_to == 1")]
+    [InlineData("x.work_order_id.assigned_to == 1", "x.work_order_id.assigned_to == 1")]
+    [InlineData("@work_order_id.assigned_to == 1", "@work_order_id.assigned_to == 1")]
+    [InlineData("work_order_id.assigned_to(1)", "work_order_id.assigned_to(1)")]
+    public void Through_a_ref_only_the_member_of_that_ref_is_renamed(string cel, string renamed)
+        => CelNames.Rename(cel, "assigned_to", "owner_id", new CelSpelling(Bare: false, ["work_order_id"], Head: false)).ShouldBe(renamed);
+
+    /// <summary>A ref in a relation slot is also the head of a path: <c>work_order_id.status</c> names it.</summary>
+    [Theory]
+    [InlineData("work_order_id.status != 'done' && has(work_order_id)", "job_id.status != 'done' && has(job_id)")]
+    [InlineData("work_order_id . status == 'x'", "job_id . status == 'x'")]
+    [InlineData("work_order_id.size() > 0", "work_order_id.size() > 0")]
+    [InlineData("x.work_order_id.status == 1", "x.work_order_id.status == 1")]
+    [InlineData("@work_order_id.status == 1", "@work_order_id.status == 1")]
+    public void A_ref_is_renamed_as_the_head_of_a_path_but_not_as_a_receiver_of_a_call(string cel, string renamed)
+        => CelNames.Rename(cel, "work_order_id", "job_id", CelSpelling.Own with { Head = true }).ShouldBe(renamed);
+
+    [Fact]
+    public void Without_the_head_spelling_a_name_before_a_dot_stays_a_namespace()
+        => CelNames.Rename("work_order_id.status == 1", "work_order_id", "job_id").ShouldBe("work_order_id.status == 1");
+
+    [Theory]
+    [InlineData("work_order_id.status == 'x'", true)]
+    [InlineData("work_order_id . status == 'x'", true)]
+    [InlineData("'work_order_id.status' == x", false)]
+    [InlineData("x.work_order_id.status == 1", false)]
+    [InlineData("@work_order_id.status == 1", false)]
+    [InlineData("work_order_id.statuses == 1", false)]
+    public void Reading_through_a_ref_is_told_outside_string_literals_only(string cel, bool reads)
+        => CelNames.MayReadThrough(cel, "work_order_id", "status").ShouldBe(reads);
+
+    [Fact]
+    public void The_body_of_each_exists_over_the_receiver_is_found_to_its_closing_parenthesis()
+        => CelNames.ExistsBodies("orders.exists(o, size(o.tags) > 1 && o.note == ')') || lines.exists(l, l.x) || x.orders.exists(y, y)", "orders")
+            .ShouldBe(["o, size(o.tags) > 1 && o.note ==  "]);
 }

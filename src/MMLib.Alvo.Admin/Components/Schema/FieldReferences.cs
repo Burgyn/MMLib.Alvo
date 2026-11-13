@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Nodes;
+﻿using System.Globalization;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
@@ -14,20 +15,27 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// name, an index over a missing column. The <see cref="EntityReferences"/> pattern, one level down.
 /// </para>
 /// <para>
-/// <b>The places, from the frozen schema:</b> the entity's <c>indexes[].fields</c>; its <c>events.exclude</c>; its <c>rules</c>; its fields'
-/// <c>computed</c>, <c>hidden</c>/<c>readOnly</c>/<c>validation</c> CEL and <c>default.$cel</c>; its hooks'
+/// <b>The places, from the frozen schema:</b> the entity's <c>indexes[]</c> — <c>fields</c>, <c>where</c> and
+/// <c>exclude.from</c>/<c>to</c>; its <c>events.exclude</c>; its <c>stateMachine.field</c> and each transition's
+/// <c>when</c>; its <c>timers</c>' <c>at</c> and <c>when</c>; its fields' <c>computed</c>,
+/// <c>hidden</c>/<c>readOnly</c>/<c>validation</c> CEL, <c>default.$cel</c> and <c>sequence.per</c>; its hooks'
 /// <c>condition</c>, <c>mutate</c> keys and <c>$cel</c> values, and the <c>{{new.…}}</c>/<c>{{old.…}}</c>
-/// placeholders of its after-actions; and every rollup whose <c>from</c> is this entity — its <c>field</c>,
-/// <c>via</c> and <c>where</c>. Top-level templates are shared between entities and are not attributed.
+/// placeholders and <c>$cel</c> values of its after-actions; and every rollup whose <c>from</c> is this entity — its
+/// <c>field</c>, <c>via</c> and <c>where</c>. Beyond the entity (<c>FieldReferences.Relations.cs</c>,
+/// <c>FieldReferences.Actions.cs</c>): the <c>rules</c> and <c>checks</c> of every entity that may read it through a
+/// relation path, each automation rule its events trigger, and every <c>entity.update</c> payload that writes it.
+/// Top-level templates are shared between entities and are not attributed.
 /// </para>
 /// </remarks>
-internal static class FieldReferences
+internal static partial class FieldReferences
 {
     /// <summary>A name no field can have: a find is a rename to it that must change nothing it keeps.</summary>
     private const string Probe = "\u0001";
 
     private static readonly string[] _celFacets = ["computed", "hidden", "readOnly", "validation"];
     private static readonly string[] _rollupKeys = ["field", "via"];
+    private static readonly string[] _rangeKeys = ["from", "to"];
+    private static readonly string[] _timerSlots = ["at", "when"];
 
     /// <summary>Every place that names the field; nothing is changed.</summary>
     public static IReadOnlyList<DescriptorReference> Of(JsonObject root, string entity, string field)
@@ -47,15 +55,24 @@ internal static class FieldReferences
 
         if (entities[entity] is JsonObject declared)
         {
-            Indexes(declared, at);
-            EventExclusions(declared, at);
-            Rules(declared, at);
-            FieldExpressions(declared, at);
-            Hooks(declared, at);
+            Own(declared, at);
         }
 
+        Relations(entities, at);
         Rollups(entities, at);
+        UpdateTargets(root, entities, at);
+        Automation(root, at);
         return at.Found;
+    }
+
+    private static void Own(JsonObject declared, Site at)
+    {
+        Indexes(declared, at);
+        EventExclusions(declared, at);
+        StateMachine(declared, at);
+        Timers(declared, at);
+        FieldExpressions(declared, at);
+        Hooks(declared, at);
     }
 
     private static void Indexes(JsonObject declared, Site at)
@@ -67,10 +84,27 @@ internal static class FieldReferences
 
         for (var i = 0; i < indexes.Count; i++)
         {
-            if (indexes[i]?["fields"] is JsonArray fields && fields.Any(name => Is(name, at.Field)))
+            if (indexes[i] is JsonObject index)
             {
-                Replace(fields, at);
-                at.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{at.Entity}.indexes[{i}]"), blocks: true);
+                Index(index, Indexed($"{at.Entity}.indexes", i), at);
+            }
+        }
+    }
+
+    private static void Index(JsonObject index, string place, Site at)
+    {
+        if (index["fields"] is JsonArray fields && fields.Any(name => Is(name, at.Field)))
+        {
+            Replace(fields, at);
+            at.Add(place, blocks: true);
+        }
+
+        Expression(index, "where", $"{place}.where", at);
+        if (index["exclude"] is JsonObject range)
+        {
+            foreach (var key in _rangeKeys)
+            {
+                Name(range, key, $"{place}.exclude.{key}", at);
             }
         }
     }
@@ -85,60 +119,68 @@ internal static class FieldReferences
         }
     }
 
-    private static void Rules(JsonObject declared, Site at)
+    /// <summary>The machine's <c>field</c>, and each transition's <c>when</c> over <c>old</c>/<c>new</c>.</summary>
+    private static void StateMachine(JsonObject declared, Site at)
     {
-        if (declared["rules"] is JsonObject rules)
-        {
-            foreach (var operation in rules.Select(pair => pair.Key).ToList())
-            {
-                Expression(rules, operation, $"{at.Entity}.rules.{operation}", at);
-            }
-        }
-    }
-
-    /// <summary>Each field's own CEL facets — except, for a removal, the removed field's, which go with it.</summary>
-    private static void FieldExpressions(JsonObject declared, Site at)
-    {
-        if (declared["fields"] is not JsonObject fields)
+        if (declared["stateMachine"] is not JsonObject machine)
         {
             return;
         }
 
-        foreach (var (name, node) in fields.ToList())
+        var place = $"{at.Entity}.stateMachine";
+        Name(machine, "field", $"{place}.field", at);
+        foreach (var (name, transition) in Members(machine["transitions"]))
         {
-            if (node is not JsonObject field || (at.To is null && name == at.Field))
-            {
-                continue;
-            }
+            Expression(transition, "when", $"{place}.transitions.{name}.when", at);
+        }
+    }
 
-            foreach (var facet in _celFacets)
+    private static void Timers(JsonObject declared, Site at)
+    {
+        foreach (var (name, timer) in Members(declared["timers"]))
+        {
+            foreach (var slot in _timerSlots)
             {
-                Expression(field, facet, $"{at.Entity}.fields.{name}.{facet}", at);
+                Expression(timer, slot, $"{at.Entity}.timers.{name}.{slot}", at);
             }
+        }
+    }
 
-            if (field["default"] is JsonObject tagged)
+    /// <summary>Each field's own facets — except, for a removal, the removed field's, which go with it.</summary>
+    private static void FieldExpressions(JsonObject declared, Site at)
+    {
+        foreach (var (name, field) in Members(declared["fields"]))
+        {
+            if (at.To is not null || name != at.Field)
             {
-                Expression(tagged, "$cel", $"{at.Entity}.fields.{name}.default", at);
+                FieldFacets(field, $"{at.Entity}.fields.{name}", at);
             }
+        }
+    }
+
+    private static void FieldFacets(JsonObject field, string place, Site at)
+    {
+        foreach (var facet in _celFacets)
+        {
+            Expression(field, facet, $"{place}.{facet}", at);
+        }
+
+        if (field["default"] is JsonObject tagged)
+        {
+            Expression(tagged, "$cel", $"{place}.default", at);
+        }
+
+        if (field["sequence"] is JsonObject sequence)
+        {
+            Name(sequence, "per", $"{place}.sequence.per", at);
         }
     }
 
     private static void Hooks(JsonObject declared, Site at)
     {
-        if (declared["hooks"] is not JsonObject hooks)
+        foreach (var (hook, place) in HooksOf(declared, at.Entity))
         {
-            return;
-        }
-
-        foreach (var (point, node) in hooks.ToList())
-        {
-            for (var i = 0; node is JsonArray list && i < list.Count; i++)
-            {
-                if (list[i] is JsonObject hook)
-                {
-                    Hook(hook, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{at.Entity}.hooks.{point}[{i}]"), at);
-                }
-            }
+            Hook(hook, place, at);
         }
     }
 
@@ -152,63 +194,12 @@ internal static class FieldReferences
 
         if (action["mutate"] is JsonObject mutate)
         {
-            Mutate(mutate, $"{place}.mutate", at);
+            TaggedValues(mutate, $"{place}.mutate", at);
+            Keys(mutate, $"{place}.mutate", at);
             return;
         }
 
-        Placeholders(action, $"{place}.action", at);
-    }
-
-    private static void Mutate(JsonObject mutate, string place, Site at)
-    {
-        foreach (var (key, value) in mutate.ToList())
-        {
-            if (value is JsonObject tagged)
-            {
-                Expression(tagged, "$cel", $"{place}.{key}", at);
-            }
-        }
-
-        if (!mutate.ContainsKey(at.Field))
-        {
-            return;
-        }
-
-        /* A mutate that already sets the new name as well cannot be merged by a rename — it is named instead. */
-        if (at.To is { } to && mutate.ContainsKey(to))
-        {
-            at.Found.Add(new(new(place, Blocks: true), Carried: false));
-            return;
-        }
-
-        if (at.To is { } target)
-        {
-            Rekey(mutate, at.Field, target);
-        }
-
-        at.Add(place, blocks: true);
-    }
-
-    /// <summary><c>{{new.field}}</c> and <c>{{old.field}}</c> in an after-action's strings — exact placeholder syntax, so always carried.</summary>
-    private static void Placeholders(JsonObject action, string place, Site at)
-    {
-        var pattern = Placeholder(at.Field);
-        foreach (var (key, value) in action.ToList())
-        {
-            if (value is JsonObject nested)
-            {
-                Placeholders(nested, $"{place}.{key}", at);
-            }
-            else if (value is JsonValue text && text.TryGetValue<string>(out var template) && pattern.IsMatch(template))
-            {
-                if (at.To is { } to)
-                {
-                    action[key] = pattern.Replace(template, "${1}" + to + "${2}");
-                }
-
-                at.Add($"{place}.{key}", blocks: true);
-            }
-        }
+        RowReads(action, $"{place}.action", at);
     }
 
     private static void Rollups(JsonObject entities, Site at)
@@ -253,28 +244,43 @@ internal static class FieldReferences
     private static void Rollup(JsonObject rollup, string place, Site at)
     {
         Expression(rollup, "where", $"{place}.where", at);
-        foreach (var key in _rollupKeys.Where(key => Is(rollup[key], at.Field)))
+        foreach (var key in _rollupKeys)
         {
-            if (at.To is { } to)
-            {
-                rollup[key] = to;
-            }
-
-            at.Add($"{place}.{key}", blocks: true);
+            Name(rollup, key, $"{place}.{key}", at);
         }
     }
 
-    /// <summary>One CEL slot: rewritten token by token when that is safe; otherwise named, and not blocking.</summary>
-    private static void Expression(JsonObject owner, string key, string place, Site at)
+    /// <summary>One slot that holds the field's name as plain text: carried by a rename, and blocking a removal.</summary>
+    private static void Name(JsonObject owner, string key, string place, Site at)
     {
-        if (owner[key] is not JsonValue value || !value.TryGetValue<string>(out var cel))
+        if (!Is(owner[key], at.Field))
         {
             return;
         }
 
-        if (CelNames.Rename(cel, at.Field, at.To ?? Probe) is not { } renamed)
+        if (at.To is { } to)
         {
-            if (CelNames.MayName(cel, at.Field))
+            owner[key] = to;
+        }
+
+        at.Add(place, blocks: true);
+    }
+
+    /// <inheritdoc cref="Expression(JsonObject, string, string, Reading, Site)"/>
+    private static void Expression(JsonObject owner, string key, string place, Site at)
+        => Expression(owner, key, place, new Reading(CelSpelling.Own, cel => MayName(cel, at)), at);
+
+    /// <summary>One CEL slot: rewritten token by token when that is safe; otherwise named, and not blocking.</summary>
+    private static void Expression(JsonObject owner, string key, string place, Reading reading, Site at)
+    {
+        if (Text(owner, key) is not { } cel)
+        {
+            return;
+        }
+
+        if (CelNames.Rename(cel, at.Field, at.To ?? Probe, reading.Spelling) is not { } renamed)
+        {
+            if (reading.MayName(cel))
             {
                 at.Found.Add(new(new(place, Blocks: false), Carried: false));
             }
@@ -292,6 +298,10 @@ internal static class FieldReferences
             at.Add(place, blocks: true);
         }
     }
+
+    /// <summary>Whether a declined expression may name the field — bare, as a member, or as the ref of a <c>&lt;child&gt;_via_&lt;ref&gt;</c> receiver.</summary>
+    private static bool MayName(string cel, Site at)
+        => CelNames.MayName(cel, at.Field) || CelNames.MayName(cel, Via(at.Entity, at.Field));
 
     private static void Replace(JsonArray fields, Site at)
     {
@@ -315,8 +325,19 @@ internal static class FieldReferences
         }
     }
 
+    /// <summary>The members of an object whose values are objects, captured first so a rewrite may replace them.</summary>
+    private static List<(string Name, JsonObject Value)> Members(JsonNode? node)
+        => node is JsonObject owner
+            ? [.. owner.Where(pair => pair.Value is JsonObject).Select(pair => (pair.Key, (JsonObject)pair.Value!))]
+            : [];
+
+    private static string Indexed(string place, int index) => string.Create(CultureInfo.InvariantCulture, $"{place}[{index}]");
+
     private static Regex Placeholder(string field)
         => new(@"(\{\{\s*(?:new|old)\.)" + Regex.Escape(field) + @"(\s*\}\})", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    private static string? Text(JsonObject owner, string key)
+        => owner[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     private static bool Is(JsonNode? node, string expected)
         => node is JsonValue value && value.TryGetValue<string>(out var text) && text == expected;
@@ -329,4 +350,7 @@ internal static class FieldReferences
     }
 
     private sealed record Found(DescriptorReference Reference, bool Carried);
+
+    /// <summary>How one CEL slot spells the field, and whether an expression it declined may still name it.</summary>
+    private sealed record Reading(CelSpelling Spelling, Func<string, bool> MayName);
 }
