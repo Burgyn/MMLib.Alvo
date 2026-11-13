@@ -25,6 +25,13 @@ internal sealed class HttpWorld : IAsyncDisposable
 
     private const string KeySecret = "s3cret-value-long-enough-for-the-floor";
 
+    /// <summary>
+    /// Runs the service-hours hook once per process on a fake clock before any host here serves a request. A before-write
+    /// hook's 250 ms budget is wall-clock and includes the first run's JIT, which a loaded test machine (ring0 runs every
+    /// module at once) can exceed; once warm the hook takes a few milliseconds. The product's budget is unchanged.
+    /// </summary>
+    private static readonly Lazy<Task> _warmUp = new(WarmUpAsync);
+
     private readonly SqliteConnection _database;
     private readonly WebApplication _app;
 
@@ -41,6 +48,7 @@ internal sealed class HttpWorld : IAsyncDisposable
 
     public static async Task<HttpWorld> StartAsync(CancellationToken cancellationToken)
     {
+        await _warmUp.Value;
         var database = new SqliteConnection($"Data Source=field-service-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await database.OpenAsync(cancellationToken);
 
@@ -58,6 +66,13 @@ internal sealed class HttpWorld : IAsyncDisposable
         app.MapFieldService();
         await app.StartAsync(cancellationToken);
         return new HttpWorld(database, app);
+    }
+
+    private static async Task WarmUpAsync()
+    {
+        await using var alvo = await FieldServiceWorld.StartAsync(CancellationToken.None);
+        var north = await alvo.SeedAsync(FieldServiceWorld.North, CancellationToken.None);
+        await alvo.CreateJobAsync(north, "WO-0001", CancellationToken.None, scheduledFor: FieldServiceWorld.Now);
     }
 
     public async Task<HttpResponseMessage> SendAsync(

@@ -56,6 +56,7 @@ public static class FieldServiceSetup
         services.AddOptions<FieldServiceOptions>()
             .Bind(configuration.GetSection(FieldServiceOptions.SectionName))
             .Validate(options => IsAbsoluteUrl(options.NotificationsUrl), NotificationsUrlRequired)
+            .Validate(options => TimeZoneInfo.TryFindSystemTimeZoneById(options.TimeZone, out _), TimeZoneRequired)
             .ValidateOnStart();
         services.AddSingleton<IAlvoTenantCatalog, ConfiguredTenantCatalog>();
         services.AddHttpClient<IFieldServiceNotifier, HttpFieldServiceNotifier>((provider, http) =>
@@ -73,6 +74,10 @@ public static class FieldServiceSetup
 
         return app.MapDispatch().MapTechnicianApp();
     }
+
+    private const string TimeZoneRequired =
+        "FieldService:TimeZone must be an IANA zone this machine knows (the image installs tzdata). Checking it at start also "
+        + "loads the zone once, so the service-hours hook never pays for the first lookup inside a write's 250 ms budget.";
 
     private const string NotificationsUrlRequired =
         "FieldService:NotificationsUrl must be an absolute http(s) URL: where the customer's visit notice, the on-call page "

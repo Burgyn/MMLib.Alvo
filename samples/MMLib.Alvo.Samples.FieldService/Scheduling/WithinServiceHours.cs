@@ -32,11 +32,9 @@ internal sealed class WithinServiceHours(IOptions<FieldServiceOptions> options) 
             return;
         }
 
-        var customerId = write.New.CustomerId;
-        var customers = await write.Transaction.AsSystem()
-            .QueryAsync<Customer>(x => x.Id == customerId, limit: 1, cancellationToken);
-        if (customers.Count == 1
-            && !ServiceHours.Admit(customers[0].ServiceOpensHour, customers[0].ServiceClosesHour, at, options.Value.TimeZone))
+        var customer = await write.Transaction.AsSystem().GetAsync<Customer>(write.New.CustomerId, cancellationToken);
+        if (customer is not null
+            && !ServiceHours.Admit(customer.ServiceOpensHour, customer.ServiceClosesHour, at, options.Value.TimeZone))
         {
             write.Invalid(RefusalCode, "The customer does not accept visits at that time.", "scheduled_for");
         }
