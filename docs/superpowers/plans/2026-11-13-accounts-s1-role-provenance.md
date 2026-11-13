@@ -25,6 +25,7 @@ fixed there: `AlvoContext.TenantRoles`, `CallerResolution`, person resolver key 
 
 ## Decisions (read before Task 1)
 
+- **D1 (amended 2026-11-13 after the Task 1+2 review):** the fold is keyed by the *path*, not one entity — tenant roles count only while every entity from the top-level decision down to the scope is scoped (`RenderScope`/`EvalState` carry the flag). The original text follows for history.
 - **D1 — The split lives at the fold, keyed by the scope's entity.** The policy engine hands out trees; role literals
   fold per caller at render (`RelationBinder` remarks), and every render/evaluation level already knows its entity:
   `CompiledExpression.Entity` at the top, `relation.Related` inside a relation term (its body and its bound `list` rule
@@ -45,7 +46,7 @@ fixed there: `AlvoContext.TenantRoles`, `CallerResolution`, person resolver key 
   | Site | Role set | Why |
   |---|---|---|
   | rule `USING`/`WITH CHECK` (SQL and the in-memory remainder of a write probe), `hidden`/`readOnly` masks | by the expression's entity (D1) | spec §6.2 |
-  | relation term body and its bound related `list` rule | by the related entity (D1) | spec §6.2 |
+  | relation term body and its bound related `list` rule | only while **every** entity on the path is scoped (D1, amended after the Task 1+2 review) | spec §6.2 |
   | lookup checks | n/a | a check may not read `@user` (relation-rules.md) |
   | before-hooks, write extensions, lifecycle `when`, timer `when`, entity-bound command access | by the compiled entity (D1, via the interpreter) | they are that entity's rules |
   | state-machine transition `roles` list | by the entity's tenancy (Task 3) | a declared role gate of the entity, read outside CEL |
