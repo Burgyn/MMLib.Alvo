@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The field-service embedded host's unit tests: every slice through MMLib.Alvo.TestHost (SQLite, a fake clock, manual
+    event drains) over the repository's own examples/field-service descriptor, and the command and the inbound webhook
+    over TestServer. ".Tests", so ring0: nothing here needs a container.
+
+    AlvoSharedArchTests=false: the sample is IsPackable=false and has no public-API baseline to approve, exactly as
+    MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration. scripts/ring0-scope needs no by-path row for the descriptor these
+    tests read: a staged path under examples/ is outside every project, which already runs every module.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../samples/MMLib.Alvo.Samples.FieldService/MMLib.Alvo.Samples.FieldService.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.TestHost/MMLib.Alvo.TestHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../examples/field-service/field-service.alvo.json" Link="field-service.alvo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
