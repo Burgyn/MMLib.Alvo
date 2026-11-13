@@ -1013,8 +1013,10 @@ endpoints; `Management`), not three copies.
   line arrives and any of them is Bearer. That is a 401, never "take the first": it is the repeated-header rule the
   API key already follows.
 - "A person resolver is registered" is read once, from the container's keyed-service lookup; a container that cannot
-  answer counts as *not registered*, which is today's behaviour. The resolver itself is resolved per request, so a
-  scoped one works.
+  answer counts as *not registered*, which is today's behaviour. Only a registration under exactly `alvo-person`
+  counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
+  register, and a container that says yes to that one holds a catch-all, not a person resolver — the channel stays
+  closed. The resolver itself is resolved per request, so a scoped one works.
 - The tenant header is passed to the person resolver as received, as it is to the API-key resolver. Validating it is the
   resolver's job.
 

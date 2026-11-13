@@ -83,6 +83,28 @@ public sealed class HostOwnAuthorizationTests
         bystander.Calls.ShouldBeEmpty("a resolver under another key is never handed the bearer token");
     }
 
+    /// <summary>
+    /// A resolver registered under <see cref="KeyedService.AnyKey"/> answers for every key, <c>alvo-person</c>
+    /// included — but it was not registered <em>as</em> the person resolver, so it does not open the Bearer channel
+    /// and a host's own <c>Authorization</c> stays the host's.
+    /// </summary>
+    [Fact]
+    public async Task A_resolver_registered_under_any_key_does_not_claim_the_bearer_channel()
+    {
+        var bystander = new AdmittingResolver();
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin],
+            new AlvoApiWorldSetup(
+                ConfigureServices: services => services.AddKeyedSingleton<IAlvoContextResolver>(KeyedService.AnyKey, bystander)));
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/api/owners", body: Owner("Anonymous Ltd"), headers: Authorization("Bearer t"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "Bearer is ignored, as with no person resolver at all");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+        bystander.Calls.ShouldBeEmpty("a catch-all keyed resolver is never handed the bearer token");
+    }
+
     private static Task<AlvoApiWorld> HostWorldAsync() =>
         AlvoApiWorld.VehicleRegistryAsync(
             [_admin],
