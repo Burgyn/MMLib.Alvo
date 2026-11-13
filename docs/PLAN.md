@@ -110,7 +110,10 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md` and sequenced in
   `docs/superpowers/plans/2026-11-13-accounts-00-master.md` (#36, #140, #210, #376 territory). Prioritised by
   the maintainer ahead of F5's close; the marker stays on F5. **S0**: a scoped → scoped `ref` is a foreign key
-  over `(tenant_id, id)` (#161, an F6 debt, closed as the initiative's prerequisite). S1 (role provenance) is next.
+  over `(tenant_id, id)` (#161, an F6 debt, closed as the initiative's prerequisite). **S1**: role provenance —
+  `AlvoContext.TenantRoles`, counted only while every entity on a decision's path is scoped, never at Management —
+  and one credential reading for the Data API, commands and Management (`Authorization: Bearer` is Alvo's only once a
+  person resolver is registered). S2 (sign-in, level 1) is next.
 
 ## 3a. What closed F4
 
