@@ -1,0 +1,19 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "delivery-desk",
+  "auth": { "roles": ["clerk"] },
+  "entities": {
+    "orders": {
+      "fields": {
+        "customer": { "type": "string", "required": true, "maxLength": 80 },
+        "postcode": { "type": "string", "required": true, "maxLength": 10 }
+      },
+      "rules": {
+        "list": "'clerk' in @user.roles",
+        "get": "'clerk' in @user.roles",
+        "create": "'clerk' in @user.roles"
+      }
+    }
+  }
+}

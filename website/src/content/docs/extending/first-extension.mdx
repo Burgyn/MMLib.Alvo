@@ -1,0 +1,100 @@
+---
+title: Your first extension
+description: One validate hook that calls a service, registered in an embedded host's Program.cs and tested through the real pipeline — the whole path, from compiled code.
+sidebar:
+  order: 1
+---
+
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import descriptor from '../../../snippets/extending/first-extension/delivery-desk.alvo.json?raw';
+import desk from '../../../snippets/extending/first-extension/DeliveryDesk.cs?raw';
+import program from '../../../snippets/extending/first-extension/DeliveryDeskProgram.cs?raw';
+import tests from '../../../snippets/extending/first-extension/DeliveryDeskTests.cs?raw';
+import testReferences from '../../../snippets/shell/first-extension-test-references.sh?raw';
+
+:::tip[What you will achieve]
+A delivery desk that refuses an order to a postcode the courier does not serve: one C# hook, its one registration
+line in `Program.cs`, and one test that runs it through Alvo's real write pipeline. Every block on this page is compiled
+and run by the repository's own tests.
+:::
+
+**Reach for C# only when the descriptor cannot express it.** A rule, a before-hook or a field's `validation` says most
+things, and says them where the policy simulator, the dashboard and the schema assistant can read them; a
+[custom CEL function](/guides/custom-cel-functions/) adds a calculation. Asking the courier's service whether it delivers
+to a postcode is neither: it is a call over the network, which no CEL expression can make. That is what a host hook is
+for. [Where logic goes](/extending/where-logic-goes/) makes the same decision for every other case.
+
+## Before you start
+
+- **An embedded host**: an ASP.NET Core project (`Microsoft.NET.Sdk.Web`) that references `MMLib.Alvo` and a database
+  driver, as in [Embed Alvo in ASP.NET Core](/start-here/embed/#1-reference-the-packages). No package is on NuGet yet,
+  so that page shows how to reference a clone or a local feed. Host code does not run in the standalone image.
+- **The descriptor** below, saved beside the project as `delivery-desk.alvo.json`:
+
+<Code code={descriptor} lang="json" title="delivery-desk.alvo.json" />
+
+## 1. Write the hook
+
+<SourceExcerpt code={desk} from="using Microsoft.Extensions.DependencyInjection;" title="DeliveryDesk.cs" />
+
+- **`Order` maps the entity.** `[AlvoEntity("orders")]` names it, and each property maps to its snake_case field
+  ([Typed or CEL](/extending/typed-or-cel/#your-class)); a hook, a handler or a typed read works over it. You can have the build [generate the class from your descriptor](/extending/generated-types/) instead of writing
+  it.
+- **`PostcodeIsCovered` is a validate hook.** It runs before the write opens its transaction, so a network call holds
+  no lock, and it can only refuse. `Invalid` refuses with your own code, at the field you name. Its constructor's
+  services come from the host's container. The other phases, which run inside the write's transaction, are on
+  [Validate and guard writes](/extending/write-hooks/).
+- **`CourierAreas` is the real service**: an ordinary typed `HttpClient`. Alvo does not know it exists.
+- **`AddDeliveryDesk` is the registration.** Every page in this section ends the same way: an `Add…` extension method
+  on `IAlvoBuilder` that registers the code under a stable id, here `postcode-is-covered`. The id names the hook in
+  refusals, logs, the [dashboard](/extending/extension-catalog/) and tests.
+
+## 2. Register it in Program.cs
+
+The same `Program.cs` as [Embed Alvo in ASP.NET Core](/start-here/embed/#2-register-alvo), plus two lines: the
+courier's client, and `.AddDeliveryDesk()` on the builder `AddAlvo` hands you:
+
+<SourceExcerpt code={program} from="var builder = WebApplication.CreateBuilder(args);" to="app.Run();" title="Program.cs" />
+
+A web project imports ASP.NET Core's namespaces by itself; add `using MMLib.Alvo.Auth;` and a `using` for your
+extension's namespace. Start the app, and a create on `/api/alvo/orders` whose postcode the courier does not serve is
+answered `422` [`validation`](/reference/problem-types/#validation): its violation carries your code,
+`postcode-not-covered`, pointed at `/postcode`, and the problem document's `extensions` names the hook. Nothing is
+written.
+
+## 3. Test it
+
+A test project on xUnit v3 (the test reads `TestContext.Current.CancellationToken`) that references
+`MMLib.Alvo.TestHost` and your host project. `ALVO_CLONE` is where you cloned the repository; from a local feed,
+`dotnet add package MMLib.Alvo.TestHost --prerelease` instead of the first line:
+
+<Code code={testReferences.trimEnd()} lang="sh" title="Terminal (in your test project)" frame="terminal" />
+
+Copy the descriptor into the test's output, so `AppContext.BaseDirectory` finds it:
+
+```xml
+<ItemGroup>
+  <None Include="../DeliveryDesk/delivery-desk.alvo.json" CopyToOutputDirectory="PreserveNewest" />
+</ItemGroup>
+```
+
+<SourceExcerpt code={tests} from="using Microsoft.Extensions.DependencyInjection;" title="DeliveryDeskTests.cs" />
+
+- **`AlvoTestHost.StartAsync` takes the same builder as `AddAlvo`**, so `.AddDeliveryDesk()` is the line your
+  `Program.cs` has. It runs the production pipeline over an in-memory SQLite database.
+- **The service is yours to replace.** The test registers a fixed list of postcodes in place of `CourierAreas`, so it
+  never calls the network.
+- **In process, a refusal is an exception.** `AlvoWriteRejectedException` carries the kind (`Invalid` here, which HTTP
+  renders as `422`), your code and the field's pointer.
+- **`Hooks.AssertRan`** counts the hook's runs by its id: both creates ran it, the refused one included.
+
+[Testing your backend](/extending/testing/) covers events, the clock and PostgreSQL.
+
+## Next
+
+- **[Validate and guard writes](/extending/write-hooks/)**: before- and after-write hooks, inside the write's
+  transaction, that read and write other rows.
+- **[React to changes](/extending/event-handlers/)**: C# after the write commits — mail, an ERP, a payment — retried
+  until it succeeds.
+- **[Extending in code](/extending/)**: the map of everything a host can add.
