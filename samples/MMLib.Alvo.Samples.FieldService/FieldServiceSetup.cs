@@ -3,6 +3,7 @@ using MMLib.Alvo.Samples.FieldService.Dispatch;
 using MMLib.Alvo.Samples.FieldService.Mobile;
 using MMLib.Alvo.Samples.FieldService.Model;
 using MMLib.Alvo.Samples.FieldService.Notifications;
+using MMLib.Alvo.Samples.FieldService.Reads;
 using MMLib.Alvo.Samples.FieldService.Reports;
 using MMLib.Alvo.Samples.FieldService.Scheduling;
 using MMLib.Alvo.Samples.FieldService.Sla;
@@ -33,7 +34,8 @@ public static class FieldServiceSetup
                 .BeforeWrite<WithinServiceHours>(WithinServiceHours.Id)
                 .OnUpdated<NotifyCustomerOfVisit>(
                     NotifyCustomerOfVisit.Id,
-                    when: e => e.Changed(x => x.Status) && e.New.Status == WorkOrderStatus.Scheduled))
+                    when: e => e.Changed(x => x.Status) && e.New.Status == WorkOrderStatus.Scheduled)
+                .Narrow<TechnicianOpenJobs>(TechnicianOpenJobs.Id))
             .AddEventHandler<SlaBreached, EscalateSlaBreach>(EscalateSlaBreach.Id)
             .AddSchedule<OverdueReportJob>(OverdueReportJob.Id, options.OverdueReportCron, options.TimeZone, schedule =>
             {
