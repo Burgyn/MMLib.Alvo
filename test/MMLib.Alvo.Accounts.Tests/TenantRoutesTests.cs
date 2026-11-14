@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Tests;
+using MMLib.Alvo.Tenants;
 using MMLib.Alvo.Tests.Accounts;
 using System.Globalization;
 using System.Net;
@@ -249,6 +250,23 @@ public sealed class TenantRoutesTests
         preflight.Headers.GetValues("Access-Control-Allow-Methods").ShouldHaveSingleItem().ShouldContain("POST");
     }
 
+    /// <summary>
+    /// A creation status the route does not know is a broken invariant, raised to the host's exception pipeline (the
+    /// embedded shape: it propagates; a standalone host answers 500 <c>internal</c>) — never guessed into a refusal such as
+    /// 401, which would send a client to sign in again over a server defect.
+    /// </summary>
+    [Fact]
+    public async Task An_unknown_creation_status_is_a_server_defect_not_a_refusal()
+    {
+        await using var world = await AccountsWorld.StartAsync(
+            _engine, descriptor: TeamTracker, services: host => host.Decorate<ITenantStore>(inner => new UnknownCreation(inner)));
+        var (access, _) = await world.SignInAsync("ada");
+
+        var raised = await Should.ThrowAsync<InvalidOperationException>(() => CreateAsync(world, access, "Acme"));
+
+        raised.Message.ShouldContain("does not know");
+    }
+
     /// <summary>Creates a tenant named <paramref name="name"/> as <paramref name="access"/>'s person, asserting it was created.</summary>
     internal static async Task<Guid> CreatedAsync(AccountsWorld world, string access, string name)
     {
@@ -270,6 +288,33 @@ public sealed class TenantRoutesTests
         problem["type"]!.GetValue<string>().ShouldBe(AlvoProblemTypes.BaseUri + AlvoProblemTypes.FeatureDisabled);
         problem["descriptorKey"]!.GetValue<string>().ShouldBe(key);
         response.Headers.CacheControl!.NoStore.ShouldBeTrue();
+    }
+
+    /// <summary>A registry that answers every creation with a status no route knows.</summary>
+    private sealed class UnknownCreation(ITenantStore inner) : ITenantStore
+    {
+        public Task<CreateTenantOutcome> CreateSharedAsync(CreateTenantRequest request, CancellationToken ct) =>
+            Task.FromResult(new CreateTenantOutcome((CreateTenantStatus)99, null));
+
+        public Task<IReadOnlyList<StoredMembership>> ListMembershipsAsync(UserId user, CancellationToken ct) =>
+            inner.ListMembershipsAsync(user, ct);
+
+        public Task<StoredMembership?> FindMembershipAsync(UserId user, TenantId? tenant, CancellationToken ct) =>
+            inner.FindMembershipAsync(user, tenant, ct);
+
+        public Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct) => inner.ListTenantIdsAsync(ct);
+
+        public Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct) =>
+            inner.RenameAsync(tenant, actor, name, ct);
+
+        public Task<IReadOnlyList<MemberView>?> ListMembersAsync(TenantId tenant, UserId actor, CancellationToken ct) =>
+            inner.ListMembersAsync(tenant, actor, ct);
+
+        public Task<MemberChangeStatus> UpdateMemberAsync(MemberUpdate update, CancellationToken ct) =>
+            inner.UpdateMemberAsync(update, ct);
+
+        public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) =>
+            inner.RemoveMemberAsync(removal, ct);
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -36,6 +36,10 @@ internal static class TenantRoutes
 
     /// <summary><c>POST {prefix}/tenants</c>: a new shared tenant, owned by the person.</summary>
     /// <param name="http">The request.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The registry answered a status this route does not know — a broken invariant, the host's 500, never a guessed
+    /// refusal.
+    /// </exception>
     internal static async Task<IResult> CreateAsync(HttpContext http)
     {
         var (call, refusal) = await SelfServiceCall.EnterAsync(http, SelfServiceProblems.CreatingOff).ConfigureAwait(false);
@@ -55,7 +59,9 @@ internal static class TenantRoutes
         {
             CreateTenantStatus.Created => Created(call, outcome.Membership!),
             CreateTenantStatus.LimitReached => ProblemResultFactory.TenantLimit(call.Policy.MaxPerAccount),
-            _ => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
+            CreateTenantStatus.NoAccount => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
+            _ => throw new InvalidOperationException(
+                $"The tenant registry answered a creation with {outcome.Status}, which this route does not know."),
         };
     }
 
