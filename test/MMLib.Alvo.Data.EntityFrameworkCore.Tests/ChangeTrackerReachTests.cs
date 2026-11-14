@@ -159,6 +159,9 @@ public class ChangeTrackerReachTests
     /// <c>InvitationAcceptance</c> is the one acceptance both the tenant and the account store run inside their own
     /// transactions: <c>InvitationTables</c>', <c>TenantTables</c>' and <c>AuthTables</c>' statements, every value bound, and
     /// never an entity table;
+    /// <c>EfCoreAppTokenStore</c> reads and writes only the app-token table (<c>AppTokenTables</c>' statements), takes the
+    /// minter's account-row lock and the tenant's version bump with <c>TenantTables</c>' statements, reads memberships and the
+    /// minter's name, binding every value, and never an entity table;
     /// <c>TimerWrites</c> is the timer table's upsert, cancel and armed-due read that store shares with a data write arming its entity's
     /// declarative timers, binding every value, and never touches an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
@@ -237,6 +240,8 @@ public class ChangeTrackerReachTests
     [InlineData("InvitationTables.cs")]
     [InlineData("EfCoreTenantStore.Invitations.cs")]
     [InlineData("InvitationAcceptance.cs")]
+    [InlineData("AppTokenTables.cs")]
+    [InlineData("EfCoreAppTokenStore.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);
@@ -270,6 +275,7 @@ public class ChangeTrackerReachTests
         "EfAlvoData.Units.cs",
         "EfCoreDeliveryStore.cs",
         "EfCoreAccountStore.cs",
+        "EfCoreAppTokenStore.cs",
         "EfCoreDescriptorVersionStore.cs",
         "EfCoreOutboxStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",

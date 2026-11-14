@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
@@ -114,6 +115,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<ITimerStore>(CreateTimerStore);
         builder.Services.TryAddSingleton<IAccountStore>(CreateAccountStore);
         builder.Services.TryAddSingleton<ITenantStore>(CreateTenantStore);
+        builder.Services.TryAddSingleton<IAppTokenStore>(CreateAppTokenStore);
         AddSecretStore(builder.Services);
 
         return builder;
@@ -228,6 +230,10 @@ public static class AlvoEfCoreProvider
     /// core consults it only when the applied descriptor has <c>tenancy.selfService</c>.
     /// </remarks>
     private static EfCoreTenantStore CreateTenantStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value);
+
+    private static EfCoreAppTokenStore CreateAppTokenStore(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value);
 
