@@ -22,6 +22,7 @@ internal static partial class AccountsDocumentation
     private static readonly Dictionary<string, string> _parameters = new(StringComparer.Ordinal)
     {
         [TenantIdParameter] = "The tenant's id, as `GET /tenants` lists it.",
+        ["userId"] = "The member's account id, as the members list shows it; the person's own id to leave.",
     };
 
     /// <summary>Gives every documented path parameter its description.</summary>
@@ -67,8 +68,87 @@ internal static partial class AccountsDocumentation
             document => Body("application/json", AccountsSchemas.TenantNameId, "The tenant's new name.", document),
             RenameResponses,
             SelfServiceEndpoints.Tag);
+        return WithMemberOperations(operations);
+    }
+
+    private static Dictionary<string, Operation> WithMemberOperations(Dictionary<string, Operation> operations)
+    {
+        operations[SelfServiceEndpoints.ListMembersOperationId] = new(
+            "List a tenant's members",
+            "The members of a tenant the person belongs to: display name, avatar, the tenant roles that count for them under "
+            + "the applied descriptor, and whether they own it. Never an email.",
+            Bearer: true,
+            _ => null,
+            ListMembersResponses,
+            SelfServiceEndpoints.Tag);
+        operations[SelfServiceEndpoints.UpdateMemberOperationId] = new(
+            "Change a member's roles or ownership",
+            "An owner changes another member's tenant roles (each from `tenancy.selfService.assignableRoles`) and/or "
+            + "ownership; a part left out is kept. Nobody changes their own membership, and a tenant never loses its last owner.",
+            Bearer: true,
+            document => Body("application/json", AccountsSchemas.MemberUpdateId, "What changes.", document),
+            UpdateMemberResponses,
+            SelfServiceEndpoints.Tag);
+        operations[SelfServiceEndpoints.RemoveMemberOperationId] = new(
+            "Remove a member, or leave",
+            "An owner removes another member; any member leaves by naming themself. The removed member's next request in "
+            + "the tenant is refused. A personal tenant's owner never leaves it, and a tenant never loses its last owner.",
+            Bearer: true,
+            _ => null,
+            RemoveMemberResponses,
+            SelfServiceEndpoints.Tag);
         return operations;
     }
+
+    private static OpenApiResponses ListMembersResponses(OpenApiDocument document) => Answers(
+        document,
+        ("200", Response("The tenant's members.", PersonNoStore(), Media("application/json", Members(document)))),
+        PersonUnauthenticated(document),
+        NotAPerson(document),
+        NoSuchTenant(document));
+
+    private static OpenApiResponses UpdateMemberResponses(OpenApiDocument document) => Answers(
+        document,
+        ("200", Response("The member, as changed.", PersonNoStore(), Media("application/json", AccountsSchemas.MemberId, document))),
+        PersonUnauthenticated(document),
+        OwnersOnly(document, "the person is no owner, or named themself — nobody changes their own membership"),
+        NoSuchTenant(document, " or the member is no member of it"),
+        MembershipConflict(document, "would take ownership from the tenant's last owner"),
+        Unsupported(document),
+        TenantRefusal(
+            "422",
+            "`validation`: the body names neither `roles` nor `isOwner`, names another member, or a role at `/roles/{i}` is "
+            + "not in `tenancy.selfService.assignableRoles` (the detail lists them) or is named twice.",
+            document));
+
+    private static OpenApiResponses RemoveMemberResponses(OpenApiDocument document) => Answers(
+        document,
+        ("204", Response("The member was removed, or the person left.", PersonNoStore())),
+        PersonUnauthenticated(document),
+        OwnersOnly(document, "the person is no owner and named another member"),
+        NoSuchTenant(document, " or the member is no member of it"),
+        MembershipConflict(document, "would remove the tenant's last owner"));
+
+    private static (string, OpenApiResponse) OwnersOnly(OpenApiDocument document, string why) => TenantRefusal(
+        "403", $"`forbidden`: {why}; or the caller is not a signed-in person.", document);
+
+    private static (string, OpenApiResponse) NoSuchTenant(OpenApiDocument document, string member = "") => Disabled(
+        document,
+        $"`not-found`: no such tenant, the person is no member of it{member} — one answer for all. `feature-disabled`: the "
+        + "descriptor does not declare `tenancy.selfService`.");
+
+    private static (string, OpenApiResponse) MembershipConflict(OpenApiDocument document, string lastOwner) => TenantRefusal(
+        "409",
+        $"`last-owner`: the change {lastOwner}; make another member an owner first. `conflict`: the tenant is a personal one, "
+        + "whose one membership never changes.",
+        document);
+
+    private static OpenApiSchema Members(OpenApiDocument document) => new()
+    {
+        Type = JsonSchemaType.Array,
+        Description = "The members, by joining.",
+        Items = new OpenApiSchemaReference(AccountsSchemas.MemberId, document),
+    };
 
     private static OpenApiResponses CreateResponses(OpenApiDocument document)
     {

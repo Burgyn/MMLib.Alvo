@@ -38,9 +38,22 @@ internal static class SelfServiceEndpoints
     /// <summary>The operation id of <c>PATCH {prefix}/tenants/{tenantId}</c>.</summary>
     internal const string RenameOperationId = "tenants.rename";
 
+    /// <summary>The operation id of <c>GET {prefix}/tenants/{tenantId}/members</c>.</summary>
+    internal const string ListMembersOperationId = "tenants.listMembers";
+
+    /// <summary>The operation id of <c>PATCH {prefix}/tenants/{tenantId}/members/{userId}</c>.</summary>
+    internal const string UpdateMemberOperationId = "tenants.updateMember";
+
+    /// <summary>The operation id of <c>DELETE {prefix}/tenants/{tenantId}/members/{userId}</c>.</summary>
+    internal const string RemoveMemberOperationId = "tenants.removeMember";
+
     private const string Collection = "/tenants";
 
     private const string Tenant = Collection + "/{tenantId:guid}";
+
+    private const string Members = Tenant + "/members";
+
+    private const string Member = Members + "/{userId:guid}";
 
     /// <summary>Maps the self-service routes into <paramref name="group"/>.</summary>
     /// <param name="group">The sign-in group, mapped at the auth prefix.</param>
@@ -58,6 +71,23 @@ internal static class SelfServiceEndpoints
             group.MapPatch(Tenant, static (HttpContext http, Guid tenantId) => TenantRoutes.RenameAsync(http, tenantId)),
             cors,
             RenameOperationId);
+        MapMembers(group, cors);
+    }
+
+    private static void MapMembers(RouteGroupBuilder group, AlvoCors cors)
+    {
+        Protect(
+            group.MapGet(Members, static (HttpContext http, Guid tenantId) => MemberRoutes.ListAsync(http, tenantId)),
+            cors,
+            ListMembersOperationId);
+        Protect(
+            group.MapPatch(Member, static (HttpContext http, Guid tenantId, Guid userId) => MemberRoutes.UpdateAsync(http, tenantId, userId)),
+            cors,
+            UpdateMemberOperationId);
+        Protect(
+            group.MapDelete(Member, static (HttpContext http, Guid tenantId, Guid userId) => MemberRoutes.RemoveAsync(http, tenantId, userId)),
+            cors,
+            RemoveMemberOperationId);
     }
 
     /// <summary>CORS first, then <c>no-store</c>; then the tag and the operation id.</summary>

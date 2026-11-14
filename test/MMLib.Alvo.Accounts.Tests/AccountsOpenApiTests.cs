@@ -27,9 +27,23 @@ public sealed class AccountsOpenApiTests
         "/auth/v1/.well-known/jwks.json",
     ];
 
-    private static readonly string[] _tenantPaths = ["/auth/v1/tenants", "/auth/v1/tenants/{tenantId}"];
+    private static readonly string[] _tenantPaths =
+    [
+        "/auth/v1/tenants",
+        "/auth/v1/tenants/{tenantId}",
+        "/auth/v1/tenants/{tenantId}/members",
+        "/auth/v1/tenants/{tenantId}/members/{userId}",
+    ];
 
-    private static readonly string[] _tenantOperations = ["tenants.list", "tenants.create", "tenants.rename"];
+    private static readonly string[] _tenantOperations =
+    [
+        "tenants.list",
+        "tenants.create",
+        "tenants.rename",
+        "tenants.listMembers",
+        "tenants.updateMember",
+        "tenants.removeMember",
+    ];
 
     [Fact]
     public async Task The_document_with_sign_in_is_stable()

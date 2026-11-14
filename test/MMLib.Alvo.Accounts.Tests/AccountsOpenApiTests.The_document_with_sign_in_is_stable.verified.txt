@@ -884,6 +884,441 @@
         ]
       }
     },
+    "/auth/v1/tenants/{tenantId}/members": {
+      "get": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "List a tenant's members",
+        "description": "The members of a tenant the person belongs to: display name, avatar, the tenant roles that count for them under the applied descriptor, and whether they own it. Never an email.",
+        "operationId": "tenants.listMembers",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tenant's members.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/authMember"
+                  },
+                  "description": "The members, by joining."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: an API key or an integration's token was presented; only a signed-in person manages tenants.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, the person is no member of it — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/auth/v1/tenants/{tenantId}/members/{userId}": {
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Change a member's roles or ownership",
+        "description": "An owner changes another member's tenant roles (each from `tenancy.selfService.assignableRoles`) and/or ownership; a part left out is kept. Nobody changes their own membership, and a tenant never loses its last owner.",
+        "operationId": "tenants.updateMember",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The member's account id, as the members list shows it; the person's own id to leave.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "What changes.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authMemberUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The member, as changed.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authMember"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: the person is no owner, or named themself — nobody changes their own membership; or the caller is not a signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, the person is no member of it or the member is no member of it — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`last-owner`: the change would take ownership from the tenant's last owner; make another member an owner first. `conflict`: the tenant is a personal one, whose one membership never changes.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: the body names neither `roles` nor `isOwner`, names another member, or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` (the detail lists them) or is named twice.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Remove a member, or leave",
+        "description": "An owner removes another member; any member leaves by naming themself. The removed member's next request in the tenant is refused. A personal tenant's owner never leaves it, and a tenant never loses its last owner.",
+        "operationId": "tenants.removeMember",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The member's account id, as the members list shows it; the person's own id to leave.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The member was removed, or the person left.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: the person is no owner and named another member; or the caller is not a signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, the person is no member of it or the member is no member of it — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`last-owner`: the change would remove the tenant's last owner; make another member an owner first. `conflict`: the tenant is a personal one, whose one membership never changes.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
     "/auth/v1/.well-known/oauth-authorization-server": {
       "get": {
         "tags": [
@@ -1805,6 +2240,49 @@
         },
         "description": "The public keys access tokens are signed with (RFC 7517 §5). Select one by the token header's `kid`."
       },
+      "authMember": {
+        "required": [
+          "userId",
+          "name",
+          "avatarUrl",
+          "roles",
+          "isOwner"
+        ],
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "The member's account id.",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The member's display name, or null."
+          },
+          "avatarUrl": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The member's avatar, or null."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles the member holds here, as `@user.roles` counts them in this tenant's scoped entities."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether the member manages this tenant. Not a role."
+          }
+        },
+        "description": "One member of a tenant, as the other members see them. Never an email."
+      },
       "authMembership": {
         "required": [
           "tenantId",
@@ -1845,6 +2323,26 @@
           }
         },
         "description": "One tenant the person belongs to."
+      },
+      "authMemberUpdate": {
+        "minProperties": 1,
+        "type": "object",
+        "properties": {
+          "roles": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The member's new tenant roles, each from `tenancy.selfService.assignableRoles`; `[]` takes them all away."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether the member manages the tenant."
+          }
+        },
+        "additionalProperties": false,
+        "description": "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other member is accepted."
       },
       "authServerMetadata": {
         "required": [

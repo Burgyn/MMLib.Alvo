@@ -42,6 +42,12 @@ internal static class AccountsSchemas
     /// <summary>A tenant's name, as creating or renaming one sends it.</summary>
     internal const string TenantNameId = "authTenantName";
 
+    /// <summary>One member of a tenant.</summary>
+    internal const string MemberId = "authMember";
+
+    /// <summary>A change to a member's roles or ownership.</summary>
+    internal const string MemberUpdateId = "authMemberUpdate";
+
     /// <summary>Registers every component, unless the document already carries them.</summary>
     /// <param name="document">The document being built.</param>
     internal static void AddTo(OpenApiDocument document)
@@ -57,6 +63,8 @@ internal static class AccountsSchemas
         document.AddComponent(MembershipId, Membership());
         document.AddComponent(UserId, User(document));
         document.AddComponent(TenantNameId, TenantName());
+        document.AddComponent(MemberId, Member());
+        document.AddComponent(MemberUpdateId, MemberUpdate());
         document.AddComponent(UserUpdateId, UserUpdate());
         document.AddComponent(MetadataId, Metadata());
         document.AddComponent(KeyId, Key());
@@ -130,6 +138,33 @@ internal static class AccountsSchemas
                 Description = "The name: trimmed, 1–100 Unicode code points, no control character.",
             }));
         schema.AdditionalPropertiesAllowed = false;
+        return schema;
+    }
+
+    private static OpenApiSchema Member() => Object(
+        "One member of a tenant, as the other members see them. Never an email.",
+        ["userId", "name", "avatarUrl", "roles", "isOwner"],
+        ("userId", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The member's account id." }),
+        ("name", Nullable("The member's display name, or null.")),
+        ("avatarUrl", Nullable("The member's avatar, or null.")),
+        ("roles", Strings("The tenant roles the member holds here, as `@user.roles` counts them in this tenant's scoped entities.")),
+        ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the member manages this tenant. Not a role." }));
+
+    private static OpenApiSchema MemberUpdate()
+    {
+        var schema = Object(
+            "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other member is accepted.",
+            [],
+            ("roles", new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                UniqueItems = true,
+                Description = "The member's new tenant roles, each from `tenancy.selfService.assignableRoles`; `[]` takes them all away.",
+                Items = new OpenApiSchema { Type = JsonSchemaType.String },
+            }),
+            ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the member manages the tenant." }));
+        schema.AdditionalPropertiesAllowed = false;
+        schema.MinProperties = 1;
         return schema;
     }
 
