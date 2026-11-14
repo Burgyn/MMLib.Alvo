@@ -45,3 +45,48 @@ internal sealed record InvitationView(
 /// <param name="Invitation">The invitation.</param>
 /// <param name="Now">The instant of the revocation.</param>
 internal sealed record InvitationRevocation(TenantId Tenant, UserId Actor, Guid Invitation, DateTimeOffset Now);
+
+/// <summary>What a live invitation offers, as anyone holding its code sees it — never the email it may be bound to.</summary>
+/// <param name="Tenant">The tenant it invites into.</param>
+/// <param name="TenantName">The tenant's name.</param>
+/// <param name="InviterName">The creator's display name, if they have one.</param>
+/// <param name="Roles">The stored tenant-role names an accepted membership starts with, verbatim.</param>
+/// <param name="GrantsOwner">Whether an accepted membership is an owner's.</param>
+/// <param name="EmailBound">Whether only one trusted email may accept it (S4 plan D8).</param>
+/// <param name="ExpiresAt">The instant from which it no longer admits anyone.</param>
+internal sealed record InvitationPreview(
+    TenantId Tenant, string TenantName, string? InviterName, IReadOnlyList<string> Roles, bool GrantsOwner,
+    bool EmailBound, DateTimeOffset ExpiresAt);
+
+/// <summary>One person's acceptance of the invitation whose code hashes to <paramref name="CodeHash"/>.</summary>
+/// <param name="CodeHash">The SHA-256 of the presented code, lowercase hex.</param>
+/// <param name="Person">The account accepting.</param>
+/// <param name="Now">The instant of the acceptance.</param>
+internal sealed record AcceptInvitationRequest(string CodeHash, UserId Person, DateTimeOffset Now);
+
+/// <summary>What an acceptance did; every status but <see cref="Joined"/> wrote nothing.</summary>
+internal enum AcceptInvitationStatus
+{
+    /// <summary>The person became a member and one use of the invitation was consumed.</summary>
+    Joined,
+
+    /// <summary>The person already is a member of the invitation's tenant; no use was consumed and nothing changed.</summary>
+    AlreadyMember,
+
+    /// <summary>
+    /// The invitation admits nobody, or not this person: unknown, expired, revoked, used up, into a personal tenant, its
+    /// creator no longer an owner, or bound to an email this person's account does not hold trusted — one answer for all.
+    /// </summary>
+    Dead,
+
+    /// <summary>The person has no enabled account.</summary>
+    NoAccount,
+}
+
+/// <summary>An acceptance's status and, for a member, their membership.</summary>
+/// <param name="Status">What the acceptance did.</param>
+/// <param name="Membership">
+/// The new membership for <see cref="AcceptInvitationStatus.Joined"/>, the existing one for
+/// <see cref="AcceptInvitationStatus.AlreadyMember"/>.
+/// </param>
+internal readonly record struct AcceptInvitationOutcome(AcceptInvitationStatus Status, StoredMembership? Membership);

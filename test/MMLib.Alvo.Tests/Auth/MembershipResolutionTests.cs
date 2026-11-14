@@ -129,6 +129,12 @@ public sealed class MembershipResolutionTests
 
         public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) => throw new NotSupportedException();
 
+        public Task<InvitationPreview?> PreviewInvitationAsync(string codeHash, DateTimeOffset now, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
+            throw new NotSupportedException();
+
         public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
             throw new NotSupportedException();
 

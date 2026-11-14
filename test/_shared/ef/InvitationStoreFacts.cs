@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Tenants;
 using Shouldly;
@@ -14,8 +15,9 @@ using Xunit;
 namespace MMLib.Alvo.Tests.Ef;
 
 /// <summary>
-/// The tenant registry's invitations — creating, listing and revoking them, and an owner's invitations dying with their
-/// ownership — the same facts on SQLite and on PostgreSQL (accounts spec §6.1, §6.4; S4 plan D2, D6, D12). Accounts are
+/// The tenant registry's invitations — creating, listing and revoking them, an owner's invitations dying with their
+/// ownership, previewing one and accepting one — the same facts on SQLite and on PostgreSQL (accounts spec §5.3, §6.1,
+/// §6.4; S4 plan D2, D3, D4, D6, D8, D12, D15). Accounts are
 /// created through <see cref="IAccountStore.SignInAsync"/>, tenants through <see cref="ITenantStore.CreateSharedAsync"/>,
 /// and members no port member writes yet through <see cref="TenantSeed"/>.
 /// </summary>
@@ -266,6 +268,378 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
     [Fact]
     public void The_invitations_table_is_a_reserved_framework_name() =>
         AlvoFrameworkTables.NamesFor("alvo").ShouldContain("alvo_tenant_invitations");
+
+    [Fact]
+    public async Task Accepting_makes_a_member_with_the_invitation_s_roles_ownership_and_provenance()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var (planner, coOwner) = (await SignedUpAsync(services), await SignedUpAsync(services));
+        var (asPlanner, asOwner) = (Invite(tenant, owner, ["planner", "viewer"]), Invite(tenant, owner, ["dispatcher"], grantsOwner: true));
+        await store.CreateInvitationAsync(asPlanner, Ct);
+        await store.CreateInvitationAsync(asOwner, Ct);
+
+        var joined = await AcceptAsync(store, asPlanner.CodeHash, planner);
+        var promoted = await AcceptAsync(store, asOwner.CodeHash, coOwner);
+
+        var expected = new StoredMembership(tenant, TenantKind.Shared, "Acme", ["planner", "viewer"], IsOwner: false, _now.AddHours(1));
+        joined.Status.ShouldBe(AcceptInvitationStatus.Joined);
+        Same(joined.Membership.ShouldNotBeNull(), expected);
+        Same((await store.FindMembershipAsync(planner, tenant, Ct)).ShouldNotBeNull(), expected);
+        Same((await store.FindMembershipAsync(coOwner, tenant, Ct)).ShouldNotBeNull(), expected with { Roles = ["dispatcher"], IsOwner = true });
+        promoted.Membership.ShouldNotBeNull().IsOwner.ShouldBeTrue("grants_owner makes an owner");
+        (await TenantSeed.InvitationIdOfAsync(services, tenant, planner)).ShouldBe(asPlanner.Id, "the membership's provenance");
+        (await TenantSeed.InvitationIdOfAsync(services, tenant, owner)).ShouldBeNull("a creator joined through no invitation");
+        (await UsesAsync(services, asPlanner.Id)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Accepting_twice_is_already_a_member_and_consumes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(store, services);
+        var invitee = await SignedUpAsync(services);
+        var request = Invite(tenant, owner, ["viewer"], maxUses: 3);
+        await store.CreateInvitationAsync(request, Ct);
+        (await AcceptAsync(store, request.CodeHash, invitee)).Status.ShouldBe(AcceptInvitationStatus.Joined);
+        (await store.UpdateMemberAsync(Update(tenant, owner, invitee, ["planner"], isOwner: null), Ct)).ShouldBe(MemberChangeStatus.Changed);
+
+        var again = await AcceptAsync(store, request.CodeHash, invitee, _now.AddHours(2));
+        var existing = await AcceptAsync(store, request.CodeHash, member, _now.AddHours(2));
+
+        again.Status.ShouldBe(AcceptInvitationStatus.AlreadyMember);
+        again.Membership.ShouldNotBeNull().Roles.ShouldBe(["planner"], "the roles an owner gave stay");
+        existing.Status.ShouldBe(AcceptInvitationStatus.AlreadyMember, "a member from before the invitation is one too");
+        existing.Membership.ShouldNotBeNull().Roles.ShouldBe(["viewer"]);
+        (await UsesAsync(services, request.Id)).ShouldBe(1, "being a member consumes no use");
+        (await store.FindMembershipAsync(invitee, tenant, Ct)).ShouldNotBeNull().Roles.ShouldBe(["planner"]);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("expired at the instant")]
+    [InlineData("expired after")]
+    [InlineData("revoked")]
+    [InlineData("used up")]
+    [InlineData("creator demoted")]
+    [InlineData("creator removed")]
+    [InlineData("creator no owner")]
+    public async Task Every_dead_invitation_previews_and_accepts_as_dead(string reason)
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(store, services);
+        var person = await SignedUpAsync(services);
+        var (hash, now) = await DeadAsync(store, services, reason, tenant, owner, member);
+
+        (await store.PreviewInvitationAsync(hash, now, Ct)).ShouldBeNull(reason);
+        (await AcceptAsync(store, hash, person, now)).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.Dead, null), reason);
+        (await store.FindMembershipAsync(person, tenant, Ct)).ShouldBeNull(reason);
+    }
+
+    [Fact]
+    public async Task An_invitation_into_a_personal_tenant_is_dead_even_when_its_row_exists()
+    {
+        var (store, services) = await StoreAsync();
+        var owner = await SignedUpAsync(services);
+        var stranger = await SignedUpAsync(services);
+        var personal = TenantId.New();
+        await TenantSeed.AddPersonalTenantAsync(services, personal, owner, "Ada", _now);
+        var request = Invite(personal, owner, maxUses: 5);
+        await TenantSeed.AddInvitationAsync(services, request);
+
+        (await store.PreviewInvitationAsync(request.CodeHash, _now, Ct)).ShouldBeNull();
+        (await AcceptAsync(store, request.CodeHash, stranger)).Status.ShouldBe(AcceptInvitationStatus.Dead);
+        (await store.FindMembershipAsync(stranger, personal, Ct)).ShouldBeNull();
+        (await UsesAsync(services, request.Id)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task An_email_bound_invitation_admits_only_that_trusted_email()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var (first, second) = (Invite(tenant, owner, email: "ada@gmail.com", maxUses: 5), Invite(tenant, owner, email: "ada@gmail.com"));
+        await store.CreateInvitationAsync(first, Ct);
+        await store.CreateInvitationAsync(second, Ct);
+        var untrusted = await SignedUpAsync(services, "ada@gmail.com", trusted: false);
+        var another = await SignedUpAsync(services, "bob@gmail.com");
+        var none = await SignedUpAsync(services, email: null, trusted: false);
+
+        (await AcceptAsync(store, first.CodeHash, untrusted)).Status.ShouldBe(AcceptInvitationStatus.Dead, "an untrusted email satisfies nothing");
+        (await AcceptAsync(store, first.CodeHash, another)).Status.ShouldBe(AcceptInvitationStatus.Dead, "another address");
+        (await AcceptAsync(store, first.CodeHash, none)).Status.ShouldBe(AcceptInvitationStatus.Dead, "no email at all");
+        (await AcceptAsync(store, first.CodeHash, await SignedUpAsync(services, "ada@gmail.com"))).Status.ShouldBe(AcceptInvitationStatus.Joined);
+        (await AcceptAsync(store, second.CodeHash, await SignedUpAsync(services, "ADA@Gmail.com"))).Status
+            .ShouldBe(AcceptInvitationStatus.Joined, "the binding ignores case");
+
+        (await UsesAsync(services, first.Id)).ShouldBe(1, "a refused binding consumes nothing");
+    }
+
+    [Fact]
+    public async Task A_disabled_or_unknown_person_accepts_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var disabled = await SignedUpAsync(services);
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(disabled, disabled: true, _now, Ct)).ShouldBeTrue();
+        var request = Invite(tenant, owner, maxUses: 5);
+        await store.CreateInvitationAsync(request, Ct);
+
+        (await AcceptAsync(store, request.CodeHash, disabled)).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.NoAccount, null));
+        (await AcceptAsync(store, request.CodeHash, UserId.New())).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.NoAccount, null));
+
+        (await store.FindMembershipAsync(disabled, tenant, Ct)).ShouldBeNull();
+        (await UsesAsync(services, request.Id)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Preview_names_the_tenant_the_inviter_the_roles_and_whether_an_email_is_bound()
+    {
+        var (store, services) = await StoreAsync();
+        var grace = await SignedUpAsync(services, name: "Grace");
+        var nameless = await SignedUpAsync(services, name: null);
+        var tenant = TenantId.New();
+        await store.CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", grace, [], 5, _now), Ct);
+        await TenantSeed.AddMemberAsync(services, tenant, nameless, [], isOwner: true, _now);
+        var bound = Invite(tenant, grace, ["planner", "viewer"], grantsOwner: true, email: "bob@example.com");
+        var open = Invite(tenant, nameless, ["viewer"]);
+        await store.CreateInvitationAsync(bound, Ct);
+        await store.CreateInvitationAsync(open, Ct);
+
+        var named = (await store.PreviewInvitationAsync(bound.CodeHash, _now, Ct)).ShouldNotBeNull();
+        var anonymous = (await store.PreviewInvitationAsync(open.CodeHash, _now, Ct)).ShouldNotBeNull();
+
+        Same(named, new InvitationPreview(tenant, "Acme", "Grace", ["planner", "viewer"], GrantsOwner: true, EmailBound: true, _now.AddDays(7)));
+        Same(anonymous, new InvitationPreview(tenant, "Acme", null, ["viewer"], GrantsOwner: false, EmailBound: false, _now.AddDays(7)));
+        (await UsesAsync(services, bound.Id)).ShouldBe(0, "a preview consumes nothing");
+    }
+
+    /// <summary>
+    /// Review Focus 1 (S4 plan D4): two people accept a single-use invitation at the same instant. Step 5's conditional
+    /// update is the decision — exactly one matches, the other finds the invitation used up and is dead.
+    /// </summary>
+    [Fact]
+    public async Task Two_people_accepting_a_single_use_invitation_at_once_make_one_member()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var request = Invite(tenant, owner);
+            await store.CreateInvitationAsync(request, Ct);
+            var (first, second) = (await SignedUpAsync(services), await SignedUpAsync(services));
+
+            var (one, two) = await RaceAsync(() => AcceptAsync(store, request.CodeHash, first), () => AcceptAsync(store, request.CodeHash, second));
+
+            new[] { one.Status, two.Status }.ShouldBe([AcceptInvitationStatus.Joined, AcceptInvitationStatus.Dead], ignoreOrder: true, $"iteration {iteration}");
+            (await MembersJoinedAsync(store, tenant, first, second)).ShouldBe(1, $"iteration {iteration}");
+            (await UsesAsync(services, request.Id)).ShouldBe(1, $"iteration {iteration}");
+        }
+    }
+
+    [Fact]
+    public async Task Five_people_accepting_a_three_use_invitation_at_once_make_three_members()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+
+        for (var iteration = 0; iteration < Iterations / 2; iteration++)
+        {
+            var request = Invite(tenant, owner, maxUses: 3);
+            await store.CreateInvitationAsync(request, Ct);
+            var people = new UserId[5];
+            for (var index = 0; index < people.Length; index++)
+            {
+                people[index] = await SignedUpAsync(services);
+            }
+
+            var outcomes = await AllAtOnceAsync(people.Select(person => (Func<Task<AcceptInvitationOutcome>>)(() => AcceptAsync(store, request.CodeHash, person))));
+
+            outcomes.Count(outcome => outcome.Status == AcceptInvitationStatus.Joined).ShouldBe(3, $"iteration {iteration}");
+            outcomes.Count(outcome => outcome.Status == AcceptInvitationStatus.Dead).ShouldBe(2, $"iteration {iteration}");
+            (await MembersJoinedAsync(store, tenant, people)).ShouldBe(3, $"iteration {iteration}");
+            (await UsesAsync(services, request.Id)).ShouldBe(3, $"iteration {iteration}");
+        }
+    }
+
+    /// <summary>
+    /// Review Focus 3 (S4 plan D4 step 1): one person submits the same accept twice at once. The account row lock
+    /// serialises the two, so the second sees the first's membership: one join, one use, both answers a membership.
+    /// </summary>
+    [Fact]
+    public async Task One_person_accepting_twice_at_once_joins_once()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var request = Invite(tenant, owner, maxUses: 3);
+            await store.CreateInvitationAsync(request, Ct);
+            var person = await SignedUpAsync(services);
+
+            var (one, two) = await RaceAsync(() => AcceptAsync(store, request.CodeHash, person), () => AcceptAsync(store, request.CodeHash, person));
+
+            new[] { one.Status, two.Status }.ShouldBe([AcceptInvitationStatus.Joined, AcceptInvitationStatus.AlreadyMember], ignoreOrder: true, $"iteration {iteration}");
+            one.Membership.ShouldNotBeNull($"iteration {iteration}");
+            two.Membership.ShouldNotBeNull($"iteration {iteration}");
+            (await UsesAsync(services, request.Id)).ShouldBe(1, $"iteration {iteration}");
+        }
+    }
+
+    /// <summary>
+    /// Review Focus 2 (S4 plan D4, D6): a person accepts while the invitation's creator is demoted. The demotion's sweep and
+    /// the acceptance's conditional update meet on the invitation's row, so either the person joined before the sweep —
+    /// which then revoked the invitation — or the acceptance found it revoked, or its creator no owner, and is dead.
+    /// </summary>
+    [Fact]
+    public async Task An_accept_racing_its_creator_s_demotion_never_joins_after_the_sweep()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (tenant, first, second) = await TwoOwnersAsync(store, services);
+            var request = Invite(tenant, first, maxUses: 5);
+            await store.CreateInvitationAsync(request, Ct);
+            var person = await SignedUpAsync(services);
+
+            var (accepted, demoted) = await RaceAsync(
+                async () => { await Task.Delay(iteration % 4, Ct); return await AcceptAsync(store, request.CodeHash, person); },
+                () => store.UpdateMemberAsync(Update(tenant, second, first, roles: null, isOwner: false), Ct));
+
+            demoted.ShouldBe(MemberChangeStatus.Changed, $"iteration {iteration}");
+            accepted.Status.ShouldBeOneOf([AcceptInvitationStatus.Joined, AcceptInvitationStatus.Dead], $"iteration {iteration}");
+            (await RevokedAtAsync(store, tenant, request.Id)).ShouldNotBeNull($"iteration {iteration}: the sweep revoked it");
+            (await store.FindMembershipAsync(person, tenant, Ct) is not null)
+                .ShouldBe(accepted.Status == AcceptInvitationStatus.Joined, $"iteration {iteration}");
+            (await UsesAsync(services, request.Id)).ShouldBe(accepted.Status == AcceptInvitationStatus.Joined ? 1 : 0, $"iteration {iteration}");
+        }
+    }
+
+    /// <summary>
+    /// The deterministic half of Review Focus 2: an acceptance reads the invitation live while a revocation of it — the
+    /// stand-in for a demotion's sweep — holds its row uncommitted, then reaches the conditional update only after the
+    /// revocation committed. Step 5's own <c>revoked_at IS NULL</c> is what refuses it: step 2's read was already past.
+    /// (On SQLite the open revocation holds the write lock, so the acceptance starts only after it and reads it dead.)
+    /// </summary>
+    [Fact]
+    public async Task An_accept_that_waited_on_a_revocation_finds_the_invitation_revoked()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var request = Invite(tenant, owner, maxUses: 5);
+        await store.CreateInvitationAsync(request, Ct);
+        var person = await SignedUpAsync(services);
+
+        await using var connection = services.GetRequiredService<RelationalConnectionFactory>().Create();
+        await connection.OpenAsync(Ct);
+        await using var revocation = await connection.BeginTransactionAsync(Ct);
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = revocation;
+            command.CommandText =
+                $"UPDATE {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} SET revoked_at = '{StoredInstant.Text(_now)}' WHERE id = '{request.Id:D}'";
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+
+        var accepting = Task.Run(() => AcceptAsync(store, request.CodeHash, person), Ct);
+        await Task.Delay(TimeSpan.FromMilliseconds(500), Ct);
+        await revocation.CommitAsync(Ct);
+
+        (await accepting).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.Dead, null));
+        (await store.FindMembershipAsync(person, tenant, Ct)).ShouldBeNull();
+        (await UsesAsync(services, request.Id)).ShouldBe(0);
+    }
+
+    /// <summary>Builds the dead invitation <paramref name="reason"/> names and returns its hash and the instant to try it at.</summary>
+    private protected static async Task<(string Hash, DateTimeOffset Now)> DeadAsync(
+        ITenantStore store, IServiceProvider services, string reason, TenantId tenant, UserId owner, UserId member)
+    {
+        var request = Invite(tenant, owner, maxUses: 2);
+        var later = _now.AddHours(1);
+        switch (reason)
+        {
+            case "unknown":
+                return (Hash(), later);
+            case "creator no owner":
+                await TenantSeed.AddInvitationAsync(services, Invite(tenant, member, maxUses: 2) with { CodeHash = request.CodeHash });
+                return (request.CodeHash, later);
+        }
+
+        (await store.CreateInvitationAsync(request, Ct)).Status.ShouldBe(MemberChangeStatus.Changed);
+        return reason switch
+        {
+            "expired at the instant" => (request.CodeHash, request.ExpiresAt),
+            "expired after" => (request.CodeHash, request.ExpiresAt.AddTicks(10)),
+            _ => (request.CodeHash, await KillAsync(store, services, reason, request, member)),
+        };
+    }
+
+    /// <summary>Kills a live invitation by <paramref name="reason"/> and returns the instant to try it at.</summary>
+    private protected static async Task<DateTimeOffset> KillAsync(
+        ITenantStore store, IServiceProvider services, string reason, CreateInvitationRequest request, UserId member)
+    {
+        var (tenant, owner, later) = (request.Tenant, request.Actor, _now.AddHours(1));
+        if (reason == "revoked")
+        {
+            (await store.RevokeInvitationAsync(Revoke(tenant, owner, request.Id), Ct)).ShouldBe(MemberChangeStatus.Changed);
+            return later;
+        }
+
+        if (reason == "used up")
+        {
+            (await AcceptAsync(store, request.CodeHash, await SignedUpAsync(services))).Status.ShouldBe(AcceptInvitationStatus.Joined);
+            (await AcceptAsync(store, request.CodeHash, await SignedUpAsync(services))).Status.ShouldBe(AcceptInvitationStatus.Joined);
+            return later;
+        }
+
+        (await store.UpdateMemberAsync(Update(tenant, owner, member, roles: null, isOwner: true), Ct)).ShouldBe(MemberChangeStatus.Changed);
+        var status = reason == "creator demoted"
+            ? await store.UpdateMemberAsync(Update(tenant, member, owner, roles: null, isOwner: false), Ct)
+            : await store.RemoveMemberAsync(new MemberRemoval(tenant, member, owner, later), Ct);
+        status.ShouldBe(MemberChangeStatus.Changed, reason);
+        return later;
+    }
+
+    /// <summary>One acceptance of the invitation whose code hashes to <paramref name="hash"/>, an hour after the start by default.</summary>
+    private protected static Task<AcceptInvitationOutcome> AcceptAsync(ITenantStore store, string hash, UserId person, DateTimeOffset? now = null) =>
+        store.AcceptInvitationAsync(new AcceptInvitationRequest(hash, person, now ?? _now.AddHours(1)), Ct);
+
+    /// <summary>How many of <paramref name="people"/> are members of <paramref name="tenant"/>.</summary>
+    private protected static async Task<int> MembersJoinedAsync(ITenantStore store, TenantId tenant, params UserId[] people)
+    {
+        var memberships = await Task.WhenAll(people.Select(person => store.FindMembershipAsync(person, tenant, Ct)));
+        return memberships.Count(membership => membership is not null);
+    }
+
+    /// <summary>Runs every operation at once, released together, and returns their results.</summary>
+    private protected static async Task<TResult[]> AllAtOnceAsync<TResult>(IEnumerable<Func<Task<TResult>>> operations)
+    {
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = operations.Select(operation => Task.Run(async () => { await start.Task; return await operation(); }, Ct)).ToArray();
+        start.SetResult();
+        return await Task.WhenAll(running);
+    }
+
+    /// <summary>The stored <c>uses</c> of one invitation.</summary>
+    private protected static async Task<long> UsesAsync(IServiceProvider services, Guid invitation) =>
+        Convert.ToInt64(await ColumnAsync(services, invitation, "uses"), CultureInfo.InvariantCulture);
+
+    /// <summary>Asserts two memberships are equal, roles compared by value.</summary>
+    private protected static void Same(StoredMembership actual, StoredMembership expected)
+    {
+        actual.ShouldBe(expected with { Roles = actual.Roles });
+        actual.Roles.ShouldBe(expected.Roles);
+    }
+
+    /// <summary>Asserts two previews are equal, roles compared by value.</summary>
+    private protected static void Same(InvitationPreview actual, InvitationPreview expected)
+    {
+        actual.ShouldBe(expected with { Roles = actual.Roles });
+        actual.Roles.ShouldBe(expected.Roles);
+    }
 
     /// <summary>Starts a fresh database and returns its tenant store and container.</summary>
     private protected async Task<(ITenantStore Store, IServiceProvider Services)> StoreAsync()

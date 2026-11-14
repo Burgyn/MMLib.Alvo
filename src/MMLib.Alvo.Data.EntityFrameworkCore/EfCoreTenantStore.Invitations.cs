@@ -6,14 +6,21 @@ using System.Data.Common;
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
-/// The tenant registry's invitation half: an owner creates, lists and revokes invitations (S4 plan D6, D10). It builds no
-/// command of its own and goes through the main file's.
+/// The tenant registry's invitation half: an owner creates, lists and revokes invitations (S4 plan D6, D10), anyone holding
+/// a code previews one, and a person accepts one. It builds no command of its own and goes through the main file's and
+/// <see cref="InvitationAcceptance"/>'s.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>Creating and revoking are membership writes</b>: both run through <see cref="MemberWriteAsync"/>, so they bump the
 /// tenant's <c>version</c> first and judge the actor's ownership after it. That is what serialises a creation with its
 /// creator's demotion or removal, whose sweep (<see cref="InvitationTables.RevokeCreatedBySql"/>) then either sees the new
 /// invitation or has already made the creator a non-owner — never an invitation of a non-owner left live.
+/// </para>
+/// <para>
+/// <b>Accepting is <see cref="InvitationAcceptance"/></b>, in a transaction of its own here and inside the sign-in's in the
+/// account store — one routine, so the two paths cannot drift.
+/// </para>
 /// </remarks>
 internal sealed partial class EfCoreTenantStore
 {
@@ -50,6 +57,32 @@ internal sealed partial class EfCoreTenantStore
             revocation.Tenant,
             revocation.Actor,
             (connection, transaction, actor, token) => RevokedAsync(connection, transaction, revocation, actor, token),
+            ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<InvitationPreview?> PreviewInvitationAsync(string codeHash, DateTimeOffset now, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(codeHash);
+
+        var found = await ReadAsync(
+            _invitations.PreviewSql,
+            command => Bind(command, ("@code_hash", codeHash), ("@now", Instant(now))),
+            InvitationTables.ReadPreview,
+            ct).ConfigureAwait(false);
+
+        return found.Count == 0 ? null : found[0];
+    }
+
+    /// <inheritdoc/>
+    public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return InTransactionAsync(
+            (connection, transaction, token) => InvitationAcceptance.AcceptAsync(
+                connection, transaction, _invitations, _tables, _authTables, request.CodeHash, request.Person, request.Now, token),
+            outcome => outcome.Status == AcceptInvitationStatus.Joined,
             ct);
     }
 

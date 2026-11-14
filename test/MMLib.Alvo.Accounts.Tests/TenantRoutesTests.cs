@@ -340,6 +340,12 @@ public sealed class TenantRoutesTests
         public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) =>
             inner.RemoveMemberAsync(removal, ct);
 
+        public Task<InvitationPreview?> PreviewInvitationAsync(string codeHash, DateTimeOffset now, CancellationToken ct) =>
+            inner.PreviewInvitationAsync(codeHash, now, ct);
+
+        public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
+            inner.AcceptInvitationAsync(request, ct);
+
         public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
             inner.CreateInvitationAsync(request, ct);
 

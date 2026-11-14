@@ -420,6 +420,12 @@ public sealed class PersonResolverTests
         public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) =>
             Calls.Count(nameof(RemoveMemberAsync), inner.RemoveMemberAsync(removal, ct));
 
+        public Task<InvitationPreview?> PreviewInvitationAsync(string codeHash, DateTimeOffset now, CancellationToken ct) =>
+            Calls.Count(nameof(PreviewInvitationAsync), inner.PreviewInvitationAsync(codeHash, now, ct));
+
+        public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
+            Calls.Count(nameof(AcceptInvitationAsync), inner.AcceptInvitationAsync(request, ct));
+
         public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
             Calls.Count(nameof(CreateInvitationAsync), inner.CreateInvitationAsync(request, ct));
 

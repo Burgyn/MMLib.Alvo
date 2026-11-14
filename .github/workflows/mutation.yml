@@ -42,7 +42,8 @@ name: Mutation
 #   - "accounts-store" → the EF adapter's account store and tenant registry —
 #                        EfCoreAccountStore{,.Sessions,.Keys}.cs, Internal/AuthTables.cs,
 #                        EfCoreTenantStore*.cs (.Invitations.cs included),
-#                        Internal/TenantTables.cs and Internal/InvitationTables.cs
+#                        Internal/TenantTables.cs, Internal/InvitationTables.cs and
+#                        Internal/InvitationAcceptance.cs
 #                        (stryker-config.accounts-store.json) — against
 #                        MMLib.Alvo.Data.Sqlite.Tests and MMLib.Alvo.Accounts.Tests. A third
 #                        partition of the EF project beside data-ef-core and data-ef-rest; see
@@ -423,7 +424,8 @@ name: Mutation
 # EfCoreTenantStore*.cs and Internal/TenantTables.cs and accounts-store mutates them.
 # The invitations (accounts S4) follow the registry: their facts
 # (test/_shared/ef/InvitationStoreFacts.cs) compile into the same two engine suites, so
-# EfCoreTenantStore.Invitations.cs and Internal/InvitationTables.cs move with them.
+# EfCoreTenantStore.Invitations.cs, Internal/InvitationTables.cs and
+# Internal/InvitationAcceptance.cs (the one acceptance both stores run) move with them.
 #
 # `accounts` mutates every file of the package except AssemblyInfo.cs. The registration
 # surface (AddAlvoAccounts, MapAlvoAccounts) stays IN, against the drivers' precedent,
@@ -1011,8 +1013,8 @@ jobs:
           - name: accounts-store
             config: stryker-config.accounts-store.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 164    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
-                            # 70 + tenant registry 69 + invitations 25 — S4's two new files, 157
+            mutants: 193    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
+                            # 70 + tenant registry 69 + invitations 54 — S4's three new files, 336
                             # code lines); still an estimate, re-probe on the first run
             suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
                             # (S3's tenant-store facts add to the first; a floor, so left as measured)

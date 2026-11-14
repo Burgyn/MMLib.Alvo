@@ -121,6 +121,27 @@ internal interface ITenantStore
     /// <see cref="MemberChangeStatus.NotOwner"/> or <see cref="MemberChangeStatus.NoSuchInvitation"/>.
     /// </returns>
     Task<MemberChangeStatus> RevokeInvitationAsync(InvitationRevocation revocation, CancellationToken ct);
+
+    /// <summary>
+    /// What a live invitation offers, read for anyone holding its code — or <see langword="null"/> for every dead one
+    /// (unknown, expired, revoked, used up, into a personal tenant, or whose creator is no longer an owner), all alike
+    /// (S4 plan D3, D8). Reads without a lock and consumes nothing; it cannot judge an email binding, so it only says
+    /// whether there is one.
+    /// </summary>
+    /// <param name="codeHash">The SHA-256 of the presented code, lowercase hex.</param>
+    /// <param name="now">The instant the invitation's expiry is judged at.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<InvitationPreview?> PreviewInvitationAsync(string codeHash, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Accepts an invitation for a person, in one transaction (S4 plan D4): the person's account row is locked first, the
+    /// invitation must be live and its email binding satisfied by the account's trusted email, and its use is consumed by
+    /// one conditional update — never read-then-write — before the membership is inserted. A person who is already a
+    /// member consumes nothing. Only <see cref="AcceptInvitationStatus.Joined"/> commits.
+    /// </summary>
+    /// <param name="request">The code's hash, the person and the instant.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct);
 }
 
 /// <summary>What kind of tenant a registry tenant is.</summary>
