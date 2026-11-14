@@ -170,6 +170,29 @@ public class AlvoApiOptionsValidatorTests
     /// <paramref name="expected"/> — a refusal whose message names nothing is a startup failure an operator
     /// cannot act on.
     /// </summary>
+    /// <summary>
+    /// A CORS origin is one a browser could send, and never <c>*</c>; a rate-limit budget is at least one request.
+    /// </summary>
+    [Theory]
+    [InlineData("*", "may not contain '*'")]
+    [InlineData("https://a.test/path", "is not an origin")]
+    [InlineData("not-a-uri", "is not an origin")]
+    [InlineData("ftp://a.test", "is not an origin")]
+    [InlineData("https://a.test?x=1", "is not an origin")]
+    public void A_cors_origin_that_is_not_an_origin_is_refused(string origin, string fragment)
+        => ShouldFail(api => api.Cors.Origins.Add(origin), "Alvo:Api:Cors:Origins", fragment);
+
+    [Theory]
+    [InlineData("https://app.example.com")]
+    [InlineData("https://app.example.com/")]
+    [InlineData("http://localhost:5173")]
+    public void A_cors_origin_is_accepted(string origin)
+        => Validate(api => api.Cors.Origins.Add(origin)).ShouldBeNull();
+
+    [Fact]
+    public void A_token_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.Token = 0, "RateLimits:Token");
+
     private static void ShouldFail(Action<AlvoApiOptions> configure, params string[] expected)
     {
         var message = Validate(configure);

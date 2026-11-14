@@ -1032,6 +1032,41 @@ Every credential that was *presented but cannot be used* already gets one diagno
 branch on it; a Bearer that is syntactically broken is the same situation as an API key that is unknown, and splitting
 them across two statuses would make the client tell them apart for no gain.
 
+## CORS and rate limits (spec 2026-11-13 §7.3, S2 D3)
+
+Both live in the core and both are **endpoint filters Alvo attaches to its own routes**, not middleware and not
+`RequireCors` / `RequireRateLimiting` metadata. Metadata only works with `UseCors()` / `UseRateLimiter()` in the host's
+pipeline after routing — `EndpointMiddleware` even throws on CORS metadata without it — and an embedded host must get
+both without adding a pipeline step. (Spec §7.3 says "named policies"; this is the deliberate deviation, for that
+reason.)
+
+**CORS** (`Alvo:Api:Cors:Origins`, `AlvoCors`). The framework's own `ICorsService` evaluates a `CorsPolicy` object Alvo
+holds — never a registered policy name, so no host policy can collide with it — from the **first** filter on every
+generated Data API endpoint and every sign-in route, so a 401, 403 or 429 carries the headers too. Preflights are
+answered by one `OPTIONS {prefix}/{**path}` catch-all per Alvo route group (the Data API's `RoutePrefix`, the sign-in
+`Prefix`), excluded from the OpenAPI document and **mapped only when origins are configured**: none of Alvo's routes
+accepts a CORS preflight in routing's sense, so a preflight is routed as a plain `OPTIONS` and reaches the catch-all,
+and a host without origins answers it 405 exactly as before. No origins means no CORS header at all.
+
+- Origins are absolute `http`/`https` URIs with no path, query or fragment, compared as scheme + host + port; `*` is
+  refused at startup — credentials are never allowed (Alvo's credentials travel in headers), and a wildcard would let
+  any site's script read answers.
+- Allowed methods `GET POST PUT PATCH DELETE`; allowed request headers `Authorization`, `Content-Type`, the configured
+  API-key and tenant headers, `Idempotency-Key`, `If-Match`, `If-None-Match`, `Prefer`; exposed `ETag`, `Location`,
+  `WWW-Authenticate`, `Retry-After`, `Preference-Applied`; preflight max age 10 minutes. `If-None-Match`, `Prefer` and
+  `Preference-Applied` go beyond the S2 plan's list: the Data API reads and answers them, and a browser client could not
+  make a conditional read or ask for a count without them.
+- **Not covered:** host-mapped commands (`MapAlvoCommand`). The host picks their path, so there is no Alvo group to own
+  a preflight; a host that serves commands to a browser on another origin adds its own CORS for them. The Management
+  API is not covered either — it is an operator surface, not a browser app's.
+
+**Rate limits** (`Alvo:Api:RateLimits`, `AlvoRateLimits`). A `PartitionedRateLimiter<HttpContext>` per budget, charged
+by a filter on the route (the `AlvoAdminCredentialLimit` precedent): fixed one-minute windows, no queue, partitioned by
+`Connection.RemoteIpAddress` — IPv4-mapped as IPv4, IPv6 by its `/64`, no address as one shared partition. Over budget is
+429 `rate-limited` with `Retry-After` in whole seconds (60 when the limiter does not say). S2 charges the token endpoint
+(`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3/S4 add
+`Invitations` (20) and `Create` (10). A host behind a proxy configures forwarded headers so the address is the client's.
+
 ## The status and `type`-slug catalogue
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.

@@ -108,6 +108,39 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:Token` allows. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
           }
         }
       }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using MMLib.Alvo.Api.Internal;
 using System.Buffers.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -53,16 +54,19 @@ internal static class DiscoveryEndpoints
     /// <param name="endpoints">The route builder the sign-in group was created on, for the path-inserted metadata URL.</param>
     /// <param name="group">The sign-in group.</param>
     /// <param name="prefix">The group's prefix.</param>
-    internal static void Map(IEndpointRouteBuilder endpoints, RouteGroupBuilder group, string prefix)
+    /// <param name="cors">The CORS filter each route carries first.</param>
+    internal static void Map(IEndpointRouteBuilder endpoints, RouteGroupBuilder group, string prefix, AlvoCors cors)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(group);
-        group.MapGet(MetadataPath, Metadata).AddEndpointFilter(CacheFor).WithName(MetadataOperationId);
-        group.MapGet(JwksPath, JwksAsync).AddEndpointFilter(CacheFor).WithName(JwksOperationId);
+        ArgumentNullException.ThrowIfNull(cors);
+        group.MapGet(MetadataPath, Metadata).AddEndpointFilter(cors.Filter).AddEndpointFilter(CacheFor).WithName(MetadataOperationId);
+        group.MapGet(JwksPath, JwksAsync).AddEndpointFilter(cors.Filter).AddEndpointFilter(CacheFor).WithName(JwksOperationId);
         var inserted = prefix.TrimEnd('/');
         if (inserted.Length > 0)
         {
-            endpoints.MapGet(MetadataPath + inserted, Metadata).AddEndpointFilter(CacheFor).ExcludeFromDescription();
+            endpoints.MapGet(MetadataPath + inserted, Metadata).AddEndpointFilter(cors.Filter).AddEndpointFilter(CacheFor)
+                .ExcludeFromDescription();
         }
     }
 

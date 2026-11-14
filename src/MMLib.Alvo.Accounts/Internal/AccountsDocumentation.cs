@@ -101,7 +101,8 @@ internal static class AccountsDocumentation
             "403",
             "`access_denied`: `sign-up-refused` (the descriptor's `auth.signUp` admits no new account for this identity; "
             + "`policy` names the rule) or `sign-in-refused` (the account cannot sign in).",
-            document));
+            document),
+        RateLimited(document));
 
     private static OpenApiResponses UpdateResponses(OpenApiDocument document) => Answers(
         document,
@@ -135,6 +136,17 @@ internal static class AccountsDocumentation
         + "`error=\"invalid_token\"` or `error=\"invalid_request\"`.",
         document,
         challenge: true);
+
+    private static (string, OpenApiResponse) RateLimited(OpenApiDocument document)
+    {
+        var (status, response) = Refusal(
+            "429",
+            "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:Token` allows. "
+            + "Wait for `Retry-After`, then send the request again.",
+            document);
+        response.Headers!["Retry-After"] = Header("Whole seconds until the window admits this client again.", "60");
+        return (status, response);
+    }
 
     private static (string, OpenApiResponse) Refusal(string status, string description, OpenApiDocument document, bool challenge = false)
     {

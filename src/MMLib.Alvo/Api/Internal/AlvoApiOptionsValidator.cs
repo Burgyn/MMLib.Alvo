@@ -27,6 +27,8 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
         ValidateRoutePrefix(options.RoutePrefix, failures);
         ValidatePaging(options, failures);
         ValidatePayloadBounds(options, failures);
+        ValidateCors(options.Cors, failures);
+        RequirePositive(options.RateLimits?.Token ?? 0, "RateLimits:Token", failures);
 
         return failures.Count == 0
             ? ValidateOptionsResult.Success
@@ -139,6 +141,38 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
     /// Zero is refused along with a negative value: a bound of zero rejects every request, which is a
     /// silently disabled endpoint rather than a configured limit.
     /// </summary>
+    /// <summary>
+    /// Every configured origin is one a browser could send: an absolute <c>http</c>/<c>https</c> URI with no path beyond
+    /// <c>/</c>, no query, fragment or user info — and never <c>*</c>, because Alvo's routes take credentials in headers.
+    /// </summary>
+    private static void ValidateCors(AlvoCorsOptions? cors, List<string> failures)
+    {
+        foreach (var origin in cors?.Origins ?? [])
+        {
+            if (string.Equals(origin?.Trim(), "*", StringComparison.Ordinal))
+            {
+                failures.Add(
+                    "Alvo:Api:Cors:Origins may not contain '*': Alvo's routes take credentials in headers, so name each origin.");
+            }
+            else if (!IsOrigin(origin))
+            {
+                failures.Add(
+                    $"Alvo:Api:Cors:Origins entry '{origin}' is not an origin. Give the scheme, host and optional port only, "
+                    + "e.g. \"https://app.example.com\" — no path, query or fragment.");
+            }
+        }
+    }
+
+    private static bool IsOrigin(string? origin) =>
+        Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+        && uri.AbsolutePath == "/"
+        && uri.Query.Length == 0
+        && uri.Fragment.Length == 0
+        && uri.UserInfo.Length == 0
+        && !origin!.EndsWith('?')
+        && !origin.EndsWith('#');
+
     private static void RequirePositive(int value, string option, List<string> failures)
     {
         if (value <= 0)

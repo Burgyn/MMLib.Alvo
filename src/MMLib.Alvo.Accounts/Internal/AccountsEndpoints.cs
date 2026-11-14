@@ -4,10 +4,16 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using MMLib.Alvo.Api.Internal;
 
 namespace MMLib.Alvo.Accounts.Internal;
 
 /// <summary>The sign-in routes, mapped under <see cref="AlvoAccountsOptions.Prefix"/> and tagged <see cref="Tag"/>.</summary>
+/// <remarks>
+/// Every route carries the core's CORS filter first (spec §7.3, S2 D3), and the group answers preflights when origins are
+/// configured; the token endpoint is charged the <see cref="AlvoRateLimit.Token"/> budget after <see cref="NoStore"/>, so a
+/// 429 is uncacheable and readable from an allowed origin.
+/// </remarks>
 internal static class AccountsEndpoints
 {
     /// <summary>The OpenAPI tag every sign-in route carries.</summary>
@@ -29,13 +35,18 @@ internal static class AccountsEndpoints
                 "End-user sign-in is not registered. Call services.AddAlvoAccounts(...) before MapAlvoAccounts().");
         }
 
-        var prefix = endpoints.ServiceProvider.GetRequiredService<IOptions<AlvoAccountsOptions>>().Value.Prefix;
+        var services = endpoints.ServiceProvider;
+        var prefix = services.GetRequiredService<IOptions<AlvoAccountsOptions>>().Value.Prefix;
+        var cors = services.GetRequiredService<AlvoCors>();
         var group = endpoints.MapGroup(prefix).WithTags(Tag);
         group.MapPost("/token", static (HttpContext http, TokenEndpoint token) => token.HandleAsync(http))
+            .AddEndpointFilter(cors.Filter)
             .AddEndpointFilter(NoStore)
+            .AddEndpointFilter(services.GetRequiredService<AlvoRateLimits>().For(AlvoRateLimit.Token))
             .WithName(TokenOperationId);
-        UserEndpoints.Map(group);
-        DiscoveryEndpoints.Map(endpoints, group, prefix);
+        UserEndpoints.Map(group, cors);
+        DiscoveryEndpoints.Map(endpoints, group, prefix, cors);
+        cors.MapPreflight(group, string.Empty);
         return group;
     }
 

@@ -46,6 +46,13 @@ internal sealed class AccountsWorld : IAsyncDisposable
     /// <summary>The issuer Google signs as, which <see cref="IdToken"/> mints with.</summary>
     internal const string GoogleIssuer = "https://accounts.google.com";
 
+    /// <summary>
+    /// The token endpoint's per-minute budget in a world: every request through the test server is one client (it presents
+    /// no address), so the production default of 30 would throttle a fact that signs in and refreshes in a loop. A fact
+    /// about the limit sets its own through <c>api</c>.
+    /// </summary>
+    internal const int UnthrottledTokenRequests = 10_000;
+
     /// <summary>The instant every world's clock starts at.</summary>
     internal static DateTimeOffset Start { get; } = new(2026, 11, 13, 9, 0, 0, TimeSpan.Zero);
 
@@ -104,7 +111,11 @@ internal sealed class AccountsWorld : IAsyncDisposable
         var keyFile = Path.Combine(Path.GetTempPath(), $"alvo-accounts-world-{Guid.NewGuid():N}.key");
         await File.WriteAllTextAsync(keyFile, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), TestContext.Current.CancellationToken);
         var setup = new AlvoApiWorldSetup(
-            ConfigureApi: api,
+            ConfigureApi: options =>
+            {
+                options.RateLimits.Token = UnthrottledTokenRequests;
+                api?.Invoke(options);
+            },
             MapOpenApiDocument: openApi,
             MapManagementApi: true,
             ConfigureServicesAfterAlvo: host =>

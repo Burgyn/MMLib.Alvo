@@ -44,12 +44,17 @@ internal static class UserEndpoints
 
     /// <summary>Maps the three routes into the sign-in group.</summary>
     /// <param name="group">The group mapped at <see cref="AlvoAccountsOptions.Prefix"/>.</param>
-    internal static void Map(RouteGroupBuilder group)
+    /// <param name="cors">The CORS filter each route carries first.</param>
+    internal static void Map(RouteGroupBuilder group, AlvoCors cors)
     {
         ArgumentNullException.ThrowIfNull(group);
-        group.MapGet("/user", GetAsync).AddEndpointFilter(AccountsEndpoints.NoStore).WithName(GetUserOperationId);
-        group.MapPatch("/user", PatchAsync).AddEndpointFilter(AccountsEndpoints.NoStore).WithName(UpdateUserOperationId);
-        group.MapPost("/logout", LogoutAsync).AddEndpointFilter(AccountsEndpoints.NoStore).WithName(LogoutOperationId);
+        ArgumentNullException.ThrowIfNull(cors);
+        group.MapGet("/user", GetAsync).AddEndpointFilter(cors.Filter).AddEndpointFilter(AccountsEndpoints.NoStore)
+            .WithName(GetUserOperationId);
+        group.MapPatch("/user", PatchAsync).AddEndpointFilter(cors.Filter).AddEndpointFilter(AccountsEndpoints.NoStore)
+            .WithName(UpdateUserOperationId);
+        group.MapPost("/logout", LogoutAsync).AddEndpointFilter(cors.Filter).AddEndpointFilter(AccountsEndpoints.NoStore)
+            .WithName(LogoutOperationId);
     }
 
     private static async Task<IResult> GetAsync(

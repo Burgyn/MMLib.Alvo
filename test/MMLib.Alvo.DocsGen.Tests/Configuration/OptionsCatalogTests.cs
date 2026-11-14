@@ -41,8 +41,21 @@ public class OptionsCatalogTests
 
         OptionsCatalog.Discover(_assemblies).Where(type => !accounted.Contains(type))
             .ShouldBe(
-                [typeof(AlvoHostForwardedHeadersOptions), typeof(AlvoHostDatabaseOptions), typeof(AlvoHostDocsOptions), typeof(AlvoOidcProviderOptions)],
+                [
+                    typeof(AlvoHostForwardedHeadersOptions), typeof(AlvoHostDatabaseOptions), typeof(AlvoHostDocsOptions),
+                    typeof(AlvoOidcProviderOptions), typeof(AlvoCorsOptions), typeof(AlvoRateLimitOptions),
+                ],
                 ignoreOrder: true);
+    }
+
+    /// <summary>The API section's two nested sections are published under it.</summary>
+    [Fact]
+    public void The_api_section_carries_cors_and_rate_limits()
+    {
+        var api = _sections.Single(s => s.Name == "Alvo:Api").Keys.Select(k => k.Key).ToList();
+
+        api.ShouldContain(key => key.StartsWith("Alvo:Api:Cors:Origins", StringComparison.Ordinal));
+        api.ShouldContain("Alvo:Api:RateLimits:Token");
     }
 
     /// <summary>An options type held as a dictionary's value is a nested section keyed by name, not a section of its own.</summary>
