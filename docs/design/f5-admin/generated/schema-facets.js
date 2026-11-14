@@ -119,7 +119,11 @@ export const SCHEMA_FACETS = {
       "FunctionFailed": "function-failed",
       "ChainDepthExceeded": "chain-depth-exceeded",
       "HookFailed": "hook-failed",
-      "ExpressionFailed": "expression-failed"
+      "ExpressionFailed": "expression-failed",
+      "TokenRefused": "token-refused",
+      "SignUpRefused": "sign-up-refused",
+      "SignInRefused": "sign-in-refused",
+      "RateLimited": "rate-limited"
     }
   }
 };
