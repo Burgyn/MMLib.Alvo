@@ -68,6 +68,15 @@
          this repository's 10.0.10. Bumping EF instead would move the data layer's dependency floor for
          a package the data layer does not use. -->
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
+    <!-- End-user sign-in (MMLib.Alvo.Accounts): JWT signing and validation, and the OIDC discovery document and JWKS
+         an ID token is verified against. The two dependencies that earn the package (package-boundary.md rule (a)):
+         an embedded host that wants only the Data API must not acquire them. MIT and first-party (verified on the
+         8.23.0 nuspecs: <license type="expression">MIT</license>, and on the IdentityModel packages they bring),
+         so no licensing question arises. One version for both, because they are one release train and
+         Protocols.OpenIdConnect pins Tokens at its own version; nothing else in the graph reaches IdentityModel, so
+         the transitive pin moves no other project. -->
+    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
     <!-- Microsoft.AspNetCore.OpenApi 10.0.10 transitively drags in Microsoft.OpenApi 2.0.0, which carries
          a known-high NuGet audit advisory (GHSA-v5pm-xwqc-g5wc — a circular schema reference terminates
          parsing, fixed upstream in 2.7.5). Same central transitive-pinning trick as SQLitePCLRaw and

@@ -143,8 +143,56 @@
             "$ref": "#/$defs/identifier"
           },
           "description": "Application roles beyond the built-in ones (anon, authenticated, admin). Referenced in CEL via @user.roles (a set; test membership with 'editor' in @user.roles)."
+        },
+        "signUp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "description": "Who may create an account by signing in. Required as soon as providers lists a provider Alvo honours for end users (today google); absent, apply refuses with both choices spelled out. Explicit because adding a provider changes what 'authenticated' means: from a provisioned caller to anyone who can sign in.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "open",
+                "invitationOnly"
+              ],
+              "description": "open: any person the provider vouches for may create an account. invitationOnly: an account is created only while accepting a valid invitation."
+            },
+            "allowedEmailDomains": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+              },
+              "description": "Optional. Only accounts whose trusted email is in one of these domains may sign up — a company app restricted to kros.sk. Lower-case hostnames, no wildcard."
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "providers"
+            ],
+            "properties": {
+              "providers": {
+                "contains": {
+                  "const": "google"
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "signUp"
+            ]
+          }
+        }
+      ]
     },
     "access": {
       "type": "object",

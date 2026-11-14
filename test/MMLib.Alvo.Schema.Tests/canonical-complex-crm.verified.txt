@@ -14,7 +14,10 @@
       "sales",
       "manager",
       "finance"
-    ]
+    ],
+    "signUp": {
+      "mode": "invitationOnly"
+    }
   },
   "automation": {
     "bulk-import-index": {

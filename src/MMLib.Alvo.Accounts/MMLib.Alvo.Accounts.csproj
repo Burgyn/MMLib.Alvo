@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    End-user sign-in. Its own package by package-boundary.md rule (a) — it brings
+    Microsoft.IdentityModel.JsonWebTokens and Microsoft.IdentityModel.Protocols.OpenIdConnect, which an
+    embedded host that wants only the Data API must not acquire — and rule (b): sign-in is a real swap
+    point, and a host with its own identity provider (#210) replaces exactly this package. It references
+    Abstractions and the core (spec 2026-11-13 §11.1); the core grants it InternalsVisibleTo (S2 D1).
+  -->
+  <PropertyGroup>
+    <Description>End-user sign-in for Alvo: the OAuth token endpoint, sessions, signing keys and the OIDC ID-token verifier.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+    <ProjectReference Include="../MMLib.Alvo/MMLib.Alvo.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+  </ItemGroup>
+
+  <!-- Minimal-API endpoints, the options/DI surfaces and the generic host arrive with the framework
+       reference; taking Microsoft.Extensions.* as explicit PackageReferences beside it would raise NU1510,
+       the same reason MMLib.Alvo and MMLib.Alvo.Identity do not. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

@@ -53,3 +53,28 @@
 // evaluated against a negative price and a zero one — never by its spelling, which has as many right forms as CEL
 // has ways to say "not negative". The eval is a measurement project in no ring, never packed or shipped.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Ai.Eval")]
+
+// End-user sign-in (spec 2026-11-13 §11.1, S2 D1): the first shipped product assembly to see the core's internals.
+// What MMLib.Alvo.Accounts consumes is core by the spec — CallerResolution and its person-resolver key,
+// ProblemResultFactory, the CORS and rate-limit filters, membership resolution and SignInPolicy — and publishing those
+// would make five seams public for one in-family consumer, which un-publishing could never take back. The grant reaches
+// every other internal here too, so an architecture fact in the Accounts suite (AccountsArchitectureTests) holds
+// that it references none of the security-core members and none of the ambient flow's setters the Abstractions grants
+// already police. The same forgeability caveat applies: an unsigned grant is a name match.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Accounts")]
+
+// The standalone host, for one internal: ClientPartition, the per-client key its dashboard credential budget is charged
+// under — the same key the token endpoint's budget uses, so the two cannot partition differently (it was a verbatim
+// copy until the S2 review of Tasks 10-11). A linked source file was tried and refused: the OpenAPI XML-comment
+// generator reads both assemblies' documentation and two types with one documentation id fail every document request.
+// The host is IsPackable=false and ships only in the image. The grant itself is assembly-wide; an architecture fact in
+// the host's suite (HostInternalGrantTests) holds that ClientPartition.Of is the only member of an internal, non-generic
+// core type the host's IL calls or reads. It does not see an internal member of a public type, a member of a generic
+// internal type, or a type named without a member (typeof, a field's or a base type) — review holds those. The same
+// forgeability caveat applies: an unsigned grant is a name match.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Host")]
+
+// And to its suite, which compiles the Data API's test world (test/_shared/api) to drive a signed-in person through the
+// generated routes, so it reaches the two internals that world needs (SchemaMigrationRunner, InMemoryApiKeyStore) on
+// the MMLib.Alvo.Api.Tests terms above, plus what it stubs the package's core seams with.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]

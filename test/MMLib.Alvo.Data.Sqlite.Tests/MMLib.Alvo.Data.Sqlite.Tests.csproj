@@ -47,6 +47,7 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/OutboxTableFacts.cs" Link="_shared/OutboxTableFacts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/LedgerFacts.cs" Link="_shared/LedgerFacts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/AccountStoreFacts.cs" Link="_shared/AccountStoreFacts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/UnitSavepointFacts.cs" Link="_shared/UnitSavepointFacts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/RelationEngineFacts.cs" Link="_shared/RelationEngineFacts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/TenantGuardSchemas.cs" Link="_shared/TenantGuardSchemas.cs" />

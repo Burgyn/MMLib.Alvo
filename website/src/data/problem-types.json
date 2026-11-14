@@ -205,5 +205,47 @@
     "violationCodes": [],
     "guides": ["guides/before-hooks", "guides/custom-cel-functions", "guides/handle-errors"],
     "needsProblemDetails": false
+  },
+  "token-refused": {
+    "causes": [
+      "Only on a host that maps the sign-in routes (`AddAlvoAccounts`, `MapAlvoAccounts`). The document's `error` member carries the OAuth 2.0 code, and `error_description` repeats `detail`.",
+      "`invalid_request`: the form is malformed — not `application/x-www-form-urlencoded`, over 16 KiB, a parameter sent twice, a required one missing, or a `subject_token_type` other than `urn:ietf:params:oauth:token-type:id_token`.",
+      "`invalid_request` too: the subject token is not a valid, fresh ID token from a provider this backend accepts — a bad signature, another app's audience, expired or older than five minutes, already used once, or from a provider the descriptor's `auth.providers` does not list (RFC 8693 §2.2.2).",
+      "`invalid_grant`: the refresh token is unknown, expired, idle too long, revoked, or was used again after its replacement was issued — which also ends the whole session.",
+      "`unsupported_grant_type` for any `grant_type` but token exchange and `refresh_token`; `invalid_target` when `audience` or `resource` is sent."
+    ],
+    "fix": "Branch on `error`. For `invalid_grant`, sign the person in again with a new ID token. For `invalid_request` on a subject token, ask the provider for a fresh ID token — each one starts at most one session. The description is the same for every refused credential, so it never says which check failed.",
+    "violationCodes": [],
+    "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "sign-up-refused": {
+    "causes": [
+      "Only on a host that maps the sign-in routes. A person signing in for the first time was not admitted by `auth.signUp`, and nothing was written; the document's `error` is `access_denied` and its `policy` member names the rule.",
+      "`policy: invitationOnly` — `auth.signUp.mode` is `invitationOnly`, so a new account is created only by accepting an invitation. People who already have an account still sign in.",
+      "`policy: allowedEmailDomains` — the person's email is not a trusted address in one of `auth.signUp.allowedEmailDomains` (an unverified email never counts, and a subdomain is not its parent)."
+    ],
+    "fix": "Nothing in the request can change the answer for this person. Change `auth.signUp` in the descriptor if they should be admitted, or sign in with an account whose trusted email is in an allowed domain.",
+    "violationCodes": [],
+    "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "sign-in-refused": {
+    "causes": [
+      "Only on a host that maps the sign-in routes. The ID token was valid and its account exists, but the account may not sign in — an operator disabled it. The document's `error` is `access_denied`, and its description names no reason."
+    ],
+    "fix": "Ask whoever operates this backend to enable the account again; no request can change the answer.",
+    "violationCodes": [],
+    "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "rate-limited": {
+    "causes": [
+      "This client address sent more requests to a limited route than it admits in its window — the token endpoint, `Alvo:Api:RateLimits:Token` per minute."
+    ],
+    "fix": "Wait the seconds `Retry-After` names, then send the same request again.",
+    "violationCodes": [],
+    "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
   }
 }

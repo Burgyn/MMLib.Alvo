@@ -1,0 +1,12 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "google-without-sign-up",
+  "auth": { "providers": ["google"] },
+  "entities": {
+    "notes": {
+      "fields": {
+        "title": { "type": "string", "required": true }
+      }
+    }
+  }
+}

@@ -212,6 +212,7 @@ Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pac
 | `MMLib.Alvo.Data.Sqlite` | The SQLite driver for Alvo, registered with UseSqlite. |
 | `MMLib.Alvo.Data.PostgreSql` | The PostgreSQL driver for Alvo, registered with UsePostgreSql. |
 | `MMLib.Alvo.Identity` | ASP.NET Core Identity for Alvo: administrator accounts, roles, cookie sign-in and the bootstrap administrator. |
+| `MMLib.Alvo.Accounts` | End-user sign-in for Alvo: the OAuth token endpoint, sessions, signing keys and the OIDC ID-token verifier. |
 | `MMLib.Alvo.Admin` | The Alvo admin dashboard: server-interactive Blazor components and the design system they ship with. |
 | `MMLib.Alvo.Ai` | The Alvo schema assistant: an agent that reads a project and proposes a descriptor change, and cannot apply one. |
 | `MMLib.Alvo.TestHost` | A real Alvo backend for tests: the production pipeline over an in-memory SQLite database, with events delivered when the test says so. |

@@ -210,6 +210,48 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string ExpressionFailed = "expression-failed";
 
+    /// <summary>The token endpoint refused the request, the subject token or the refresh token (400).</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One slug for every OAuth 2.0 token-endpoint error</b>, and the document's <c>error</c> member carries which:
+    /// <c>invalid_request</c> (a malformed form, or a subject token that is not a valid, fresh ID token from a provider
+    /// this backend accepts — RFC 8693 §2.2.2), <c>invalid_grant</c> (a refresh token that is unknown, expired, revoked
+    /// or reused), <c>unsupported_grant_type</c> and <c>invalid_target</c> (RFC 6749 §5.2). An OAuth client reads
+    /// <c>error</c> and <c>error_description</c> from any JSON body, so the problem document carries both beside
+    /// <c>detail</c>.
+    /// </para>
+    /// <para>
+    /// Answered only on the sign-in routes, so only by a host that called <c>AddAlvoAccounts</c> and
+    /// <c>MapAlvoAccounts</c>. Every refused credential gets one description, so the answer is no oracle for why.
+    /// </para>
+    /// </remarks>
+    public const string TokenRefused = "token-refused";
+
+    /// <summary>The sign-up policy refused to create an account for a person seen for the first time (403).</summary>
+    /// <remarks>
+    /// The document carries <c>error: access_denied</c> and a <c>policy</c> member naming the descriptor rule that refused:
+    /// <c>invitationOnly</c> (<c>auth.signUp.mode</c>) or <c>allowedEmailDomains</c> (the person's email is not a trusted
+    /// address in a listed domain). Nothing was written. Answered only on the sign-in routes. <c>access_denied</c> is an
+    /// authorization-endpoint code (RFC 6749 §4.1.2.1) rather than a §5.2 one — a deliberate choice, since a client treats an
+    /// unknown code generically and none of §5.2's codes says "the person may not sign up".
+    /// </remarks>
+    public const string SignUpRefused = "sign-up-refused";
+
+    /// <summary>An existing account may not sign in (403).</summary>
+    /// <remarks>
+    /// The document carries <c>error: access_denied</c> and one fixed description naming no reason — an operator disabled
+    /// the account, and only a person holding a valid ID token for that very identity ever sees this answer. Answered only
+    /// on the sign-in routes.
+    /// </remarks>
+    public const string SignInRefused = "sign-in-refused";
+
+    /// <summary>The caller sent more requests than the route admits in its window (429).</summary>
+    /// <remarks>
+    /// The response carries <c>Retry-After</c>, in seconds: the same request succeeds once the window has passed. Charged
+    /// per client address, on the routes Alvo limits — the token endpoint first.
+    /// </remarks>
+    public const string RateLimited = "rate-limited";
+
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
     /// assert the catalogue and the code agree without the assertion being satisfied by its own subject.
@@ -234,6 +276,10 @@ public static class AlvoProblemTypes
         ChainDepthExceeded,
         HookFailed,
         ExpressionFailed,
+        TokenRefused,
+        SignUpRefused,
+        SignInRefused,
+        RateLimited,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

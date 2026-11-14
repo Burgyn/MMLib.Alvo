@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.OpenApi;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Commands.Internal;
 using System.Globalization;
 
@@ -14,7 +15,10 @@ namespace MMLib.Alvo.Api.Internal;
 /// none — and the anonymous-or-API-key security every Alvo route documents.
 /// </summary>
 /// <remarks>Runs after <see cref="AlvoDocumentTransformer"/>, so it adds only the components that one did not.</remarks>
-internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth) : IOpenApiDocumentTransformer
+/// <param name="auth">The auth options the API-key header's name comes from.</param>
+/// <param name="resolvers">Says whether a person resolver is registered, which adds the Bearer alternative.</param>
+internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth, CallerResolvers resolvers)
+    : IOpenApiDocumentTransformer
 {
     /// <inheritdoc/>
     public Task TransformAsync(
@@ -30,10 +34,10 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
         }
 
         ProblemComponents.AddTo(document);
-        AlvoDocumentTransformer.AddCredential(document, auth.Value.HeaderName);
+        AlvoDocumentTransformer.AddCredential(document, auth.Value.HeaderName, resolvers.HasPerson);
         foreach (var (description, marker) in commands)
         {
-            Enrich(document, description, marker);
+            Enrich(document, description, marker, resolvers.HasPerson);
         }
 
         return Task.CompletedTask;
@@ -49,11 +53,12 @@ internal sealed class CommandDocumentTransformer(IOptions<AlvoAuthOptions> auth)
     private static CommandEndpointMetadata? MarkerOf(ApiDescription description) =>
         description.ActionDescriptor.EndpointMetadata.OfType<CommandEndpointMetadata>().FirstOrDefault();
 
-    private static void Enrich(OpenApiDocument document, ApiDescription description, CommandEndpointMetadata marker)
+    private static void Enrich(
+        OpenApiDocument document, ApiDescription description, CommandEndpointMetadata marker, bool person)
     {
         var operation = AlvoDocumentTransformer.FindOperation(document, description);
         operation.OperationId = CommandOperationIds.Of(marker.Name);
-        operation.Security = AlvoDocumentTransformer.SecurityOf(document);
+        operation.Security = AlvoDocumentTransformer.SecurityOf(document, person);
         Describe(operation, marker);
         operation.Responses ??= [];
         if (operation.RequestBody is not null)

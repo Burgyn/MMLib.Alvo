@@ -44,6 +44,23 @@
     ]
   },
   {
+    file: google-without-sign-up.json,
+    failures: [
+      {
+        Pointer: #/auth,
+        Message: Validation - allOf failed to validate against the schema.
+      },
+      {
+        Pointer: #/auth,
+        Message: Validation required - the required property 'signUp' was not present.
+      },
+      {
+        Pointer: #/auth,
+        Message: Validation then - failed to validate against the then schema
+      }
+    ]
+  },
+  {
     file: index-exclude-missing-to.json,
     failures: [
       {

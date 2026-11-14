@@ -63,8 +63,11 @@ internal enum BodyRefusal
 /// <see cref="Utf8JsonReader.CurrentDepth"/> reports it as 0, so the two numbers look like an off-by-one
 /// waiting to turn an accepted body into an uncaught <see cref="JsonException"/>. At
 /// <see cref="AlvoApiOptions.MaxPayloadDepth"/> levels the scan accepts and the parse succeeds; one level
-/// deeper the scan refuses first. <c>PayloadBindingTests</c> and <c>QueryBodyReaderTests</c> hold the
-/// boundary on both readers.
+/// deeper the scan refuses first. The scan judges the container's <em>opening</em> token, not the tokens inside
+/// it: an empty container one level past the bound holds no token deeper than its own brackets, so a scan that
+/// judged contents admitted it and the parse then threw — a 500. <c>PayloadBindingTests</c>,
+/// <c>QueryBodyReaderTests</c> and the accounts suite's <c>PATCH /user</c> facts hold the boundary, empty innermost
+/// container included.
 /// </para>
 /// </remarks>
 internal static class BoundedJsonBody
@@ -201,6 +204,11 @@ internal static class BoundedJsonBody
     /// the named message was unreachable — measured, not reasoned. The reader remains a hard backstop; it is
     /// simply never the first to speak.
     /// </para>
+    /// <para>
+    /// <b>A member name holding half a surrogate pair is malformed too.</b> <c>"\ud800"</c> is legal JSON escape text no
+    /// .NET string can hold, so reading the name throws <see cref="InvalidOperationException"/> rather than
+    /// <see cref="JsonException"/> — and was a 500 on every route that reads a body through here.
+    /// </para>
     /// </remarks>
     private static BodyRefusal? EnsureWithinShapeBounds(
         ReadOnlySpan<byte> utf8Body, AlvoApiOptions options, string? rowsMember)
@@ -222,7 +230,22 @@ internal static class BoundedJsonBody
         {
             return BodyRefusal.MalformedJson;
         }
+        catch (InvalidOperationException)
+        {
+            return BodyRefusal.MalformedJson;
+        }
     }
+
+    /// <summary>
+    /// Whether the token opens a container one level past <paramref name="maxDepth"/>: a container opened at
+    /// <see cref="Utf8JsonReader.CurrentDepth"/> <c>d</c> is level <c>d + 1</c> in <see cref="JsonDocumentOptions.MaxDepth"/>'s
+    /// count, empty or not.
+    /// </summary>
+    /// <param name="reader">The reader, positioned on the token.</param>
+    /// <param name="maxDepth">The configured <see cref="AlvoApiOptions.MaxPayloadDepth"/>.</param>
+    private static bool OpensPastTheBound(ref Utf8JsonReader reader, int maxDepth) =>
+        reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray
+        && reader.CurrentDepth >= maxDepth;
 
     /// <summary>
     /// Walks every token of the body, refusing as soon as the property-name count or the nesting depth
@@ -263,7 +286,7 @@ internal static class BoundedJsonBody
 
         while (reader.Read())
         {
-            if (reader.CurrentDepth > options.MaxPayloadDepth)
+            if (OpensPastTheBound(ref reader, options.MaxPayloadDepth))
             {
                 return BodyRefusal.TooDeep;
             }

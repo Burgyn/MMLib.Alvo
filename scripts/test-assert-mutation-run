@@ -502,9 +502,15 @@ done
 # suite jq's `test-projects` out of it on every PR (ci.yml's `Script suites` job), and
 # it is the only config that can adjudicate the blind spot the split creates — "is a
 # data-ef-rest survivor real, or did it only survive because Sqlite.Tests was not
-# there?". Both roles need it to stay the union of the two legs, and nothing else
+# there?". Both roles need it to stay the union of the legs, and nothing else
 # checks that. The rot direction is silent: forgetting to update data-ef-rest.json
 # fails a leg loudly, forgetting data-ef.json fails nothing.
+#
+# THREE legs since S2 of the accounts initiative: the account store's four files
+# (stryker-config.accounts-store.json) are mutated against the suites that run them —
+# Data.Sqlite.Tests and Accounts.Tests — and data-ef-rest, whose only suite never does,
+# excludes them. The store leg mutates the same EF project, so it is part of the same
+# partition and is checked exactly like the core leg.
 #
 # The comparison is over the literal mutate LISTS, not over resolved globs — exact,
 # and it cannot drift the way a re-implementation of Stryker's glob matching would.
@@ -513,28 +519,44 @@ if ! command -v jq >/dev/null 2>&1; then
 else
   whole="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.data-ef.json")"
   core_list="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.data-ef-core.json")"
+  store_list="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.accounts-store.json")"
   rest_list="$(jq -S '.["stryker-config"].mutate' "$ROOT/stryker-config.data-ef-rest.json")"
 
-  # rest must be exactly the whole shard plus an exclusion for each core entry.
-  expected_rest="$(jq -S -n --argjson whole "$whole" --argjson core "$core_list" \
-    '$whole + ($core | map("!" + .))' | jq -S '.')"
+  # rest must be exactly the whole shard plus an exclusion for each core entry, then
+  # one for each account-store entry, in that order.
+  expected_rest="$(jq -S -n --argjson whole "$whole" --argjson core "$core_list" --argjson store "$store_list" \
+    '$whole + ($core | map("!" + .)) + ($store | map("!" + .))' | jq -S '.')"
   if [ "$rest_list" = "$expected_rest" ]; then
-    pass "data-ef-rest.json is the whole shard minus exactly the core leg's files"
+    pass "data-ef-rest.json is the whole shard minus exactly the core and account-store legs' files"
   else
-    fail "data-ef-rest.json is the whole shard minus exactly the core leg's files" \
+    fail "data-ef-rest.json is the whole shard minus exactly the core and account-store legs' files" \
       "$expected_rest" "$rest_list"
   fi
 
-  # And every core entry must be a file the whole shard actually mutates — an entry
-  # naming a file data-ef.json excludes would mutate something the union does not.
-  stray="$(jq -r -n --argjson whole "$whole" --argjson core "$core_list" \
-    '($whole | map(select(startswith("!")) | ltrimstr("!"))) as $ex
-     | $core | map(select(. as $c | $ex | index($c))) | join(", ")')"
-  if [ -z "$stray" ]; then
-    pass "every data-ef-core.json entry is a file the whole shard mutates, not one it excludes"
+  # And every core and store entry must be a file the whole shard actually mutates — an
+  # entry naming a file data-ef.json excludes would mutate something the union does not.
+  for leg in core store; do
+    if [ "$leg" = core ]; then list="$core_list"; else list="$store_list"; fi
+    name="data-ef-core.json"; [ "$leg" = store ] && name="accounts-store.json"
+    stray="$(jq -r -n --argjson whole "$whole" --argjson leg "$list" \
+      '($whole | map(select(startswith("!")) | ltrimstr("!"))) as $ex
+       | $leg | map(select(. as $c | $ex | index($c))) | join(", ")')"
+    if [ -z "$stray" ]; then
+      pass "every $name entry is a file the whole shard mutates, not one it excludes"
+    else
+      fail "every $name entry is a file the whole shard mutates, not one it excludes" \
+        "no overlap with data-ef.json's exclusions" "also excluded there: $stray"
+    fi
+  done
+
+  # And no file sits on two legs: the partition is disjoint, or one mutant is paid for twice
+  # and scored on two legs' terms.
+  shared="$(jq -r -n --argjson core "$core_list" --argjson store "$store_list" \
+    '$core | map(select(. as $c | $store | index($c))) | join(", ")')"
+  if [ -z "$shared" ]; then
+    pass "no file is on both the data-ef-core and the account-store leg"
   else
-    fail "every data-ef-core.json entry is a file the whole shard mutates, not one it excludes" \
-      "no overlap with data-ef.json's exclusions" "also excluded there: $stray"
+    fail "no file is on both the data-ef-core and the account-store leg" "disjoint lists" "on both: $shared"
   fi
 fi
 

@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- test/_shared/api/AlvoApiWorld.cs calls AddOpenApi itself, which makes ASP.NET's OpenApi XML-comment source
+         generator emit an interceptor into this compilation (the MMLib.Alvo.Api.Tests precedent). -->
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.AspNetCore.OpenApi.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj" />
+    <!-- The core and a real engine: every fact here is about how sign-in composes with a real Alvo container over a
+         real database — a session that only a fake store ends proves nothing about the next request. SQLite keeps
+         ring0 Docker-free. -->
+    <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The token endpoint and the Bearer channel are driven over HTTP in a real pipeline. -->
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <!-- Every lifetime boundary (ID-token skew, iat freshness, access-token expiry, the refresh grace) is a fact about
+         time, so the clock is a fake. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <!-- The store's refusals are reached through a substituted IAccountStore, without an engine. -->
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- The Data API's test world, linked exactly as MMLib.Alvo.Api.Tests links it, so a person signed in here reaches
+       the same generated routes those suites pin; the accounts world shared with the integration leg; and the
+       metadata reader every granted product suite holds its grant with (here AccountsArchitectureTests). -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/api/%(Filename)%(Extension)" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ef/SqlCapture.cs" Link="_shared/SqlCapture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/accounts/*.cs" Link="_shared/accounts/%(Filename)%(Extension)" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="VerifyXunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)../_shared/api/descriptors/*.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)../_shared/accounts/descriptors/*.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

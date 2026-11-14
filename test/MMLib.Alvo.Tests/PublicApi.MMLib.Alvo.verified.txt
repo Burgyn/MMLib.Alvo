@@ -1,4 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Ai.Eval")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Analyzers.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Invariants.Tests.Integration")]
@@ -7,6 +9,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests.Integration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Host")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Host.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
@@ -27,6 +30,7 @@ namespace MMLib.Alvo.Api
     public sealed class AlvoApiOptions
     {
         public AlvoApiOptions() { }
+        public MMLib.Alvo.Api.AlvoCorsOptions Cors { get; set; }
         public int DefaultPageSize { get; set; }
         public int MaxBatchRows { get; set; }
         public int MaxIdempotencyKeyBytes { get; set; }
@@ -34,12 +38,18 @@ namespace MMLib.Alvo.Api
         public int MaxPayloadDepth { get; set; }
         public int MaxPayloadKeys { get; set; }
         public int MaxRequestBodyBytes { get; set; }
+        public MMLib.Alvo.Api.AlvoRateLimitOptions RateLimits { get; set; }
         public string RoutePrefix { get; set; }
     }
     public sealed class AlvoCaller : Microsoft.AspNetCore.Http.IBindableFromHttpContext<MMLib.Alvo.Api.AlvoCaller>
     {
         public MMLib.Alvo.AlvoContext Context { get; }
         public static System.Threading.Tasks.ValueTask<MMLib.Alvo.Api.AlvoCaller?> BindAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Reflection.ParameterInfo parameter) { }
+    }
+    public sealed class AlvoCorsOptions
+    {
+        public AlvoCorsOptions() { }
+        public System.Collections.Generic.List<string> Origins { get; }
     }
     public enum AlvoEndpointKind
     {
@@ -84,12 +94,21 @@ namespace MMLib.Alvo.Api
         public const string OutOfScope = "out-of-scope";
         public const string PreconditionFailed = "precondition-failed";
         public const string PreconditionRequired = "precondition-required";
+        public const string RateLimited = "rate-limited";
+        public const string SignInRefused = "sign-in-refused";
+        public const string SignUpRefused = "sign-up-refused";
+        public const string TokenRefused = "token-refused";
         public const string Unauthenticated = "unauthenticated";
         public const string UnreadableRequest = "unreadable-request";
         public const string UnsupportedMediaType = "unsupported-media-type";
         public const string Validation = "validation";
         public static System.Collections.Generic.IReadOnlyList<string> All { get; }
         public static string UriOf(string slug) { }
+    }
+    public sealed class AlvoRateLimitOptions
+    {
+        public AlvoRateLimitOptions() { }
+        public int Token { get; set; }
     }
     public sealed class AlvoViolation : System.IEquatable<MMLib.Alvo.Api.AlvoViolation>
     {

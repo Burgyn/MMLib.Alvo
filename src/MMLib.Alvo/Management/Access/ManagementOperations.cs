@@ -40,6 +40,7 @@ internal static class ManagementOperations
         [ManagementOperation.SetAiConnection] = ManagementLevel.Admin,
         [ManagementOperation.ManageApiKeys] = ManagementLevel.Admin,
         [ManagementOperation.ManageUsers] = ManagementLevel.Admin,
+        [ManagementOperation.ManageAccounts] = ManagementLevel.Admin,
         [ManagementOperation.DeleteProject] = ManagementLevel.Admin,
     };
 

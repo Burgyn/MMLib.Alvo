@@ -69,11 +69,16 @@ public class DeclaredLimitsTests
     public void A_physical_entity_with_nothing_declared_lists_nothing()
         => Slots("""{ "entities": { "notes": { "storage": "physical" } } }""").ShouldBeEmpty();
 
-    /// <summary>A provider other than <c>local</c> names the provider slot, and <c>local</c> alone does not (§8d item 27).</summary>
+    /// <summary>
+    /// A provider other than <c>local</c> or <c>google</c> names the provider slot, and those two do not (§8d item 27;
+    /// <c>google</c> is honoured since S2).
+    /// </summary>
     [Theory]
-    [InlineData("""{ "auth": { "providers": ["local", "google"] } }""", true)]
+    [InlineData("""{ "auth": { "providers": ["local", "microsoft"] } }""", true)]
+    [InlineData("""{ "auth": { "providers": ["local", "google"] } }""", false)]
+    [InlineData("""{ "auth": { "providers": ["google", "apple"] } }""", true)]
     [InlineData("""{ "auth": { "providers": ["local"], "roles": ["clerk"] } }""", false)]
-    public void Only_a_provider_other_than_local_lists_the_provider_slot(string descriptor, bool listed)
+    public void Only_a_provider_other_than_local_or_google_lists_the_provider_slot(string descriptor, bool listed)
         => Slots(descriptor).Contains("auth.providers").ShouldBe(listed);
 
     /// <summary>

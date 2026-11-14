@@ -2,6 +2,7 @@
   "decimal-without-scale.json": { "pointer": "#/entities/orders/fields/total", "messageContains": "scale" },
   "events-exclude-duplicate.json": { "pointer": "#/entities/notes/events/exclude/0", "messageContains": "uniqueItems" },
   "events-exclude-typo.json": { "pointer": "#/entities/notes/events/exclud" },
+  "google-without-sign-up.json": { "pointer": "#/auth", "messageContains": "signUp" },
   "format-without-pattern.json": { "pointer": "#/formats/slug", "messageContains": "pattern" },
   "index-exclude-missing-to.json": { "pointer": "#/entities/bookings/indexes/0/exclude", "messageContains": "to" },
   "index-where-not-cel-string.json": { "pointer": "#/entities/members/indexes/0/where" },

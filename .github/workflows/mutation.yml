@@ -1,7 +1,7 @@
 name: Mutation
 
 # Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Eight targets run in parallel via a matrix, the
+# when a mutated project changes. Ten targets run in parallel via a matrix, the
 # canary first (see THE CANARY below):
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
@@ -35,6 +35,14 @@ name: Mutation
 #                        docs/architecture/data-path.md ("Mutation-testing notes").
 #   - "data-sqlite"    → src/MMLib.Alvo.Data.Sqlite     (stryker-config.data-sqlite.json)
 #   - "data-postgresql"→ src/MMLib.Alvo.Data.PostgreSql (stryker-config.data-postgresql.json)
+#   - "accounts"       → src/MMLib.Alvo.Accounts, end-user sign-in (stryker-config.accounts.json),
+#                        against MMLib.Alvo.Accounts.Tests.
+#   - "accounts-store" → the EF adapter's account store — EfCoreAccountStore{,.Sessions,.Keys}.cs
+#                        and Internal/AuthTables.cs (stryker-config.accounts-store.json) — against
+#                        MMLib.Alvo.Data.Sqlite.Tests and MMLib.Alvo.Accounts.Tests. A third
+#                        partition of the EF project beside data-ef-core and data-ef-rest; see
+#                        "THE ACCOUNTS LEGS" below for why, and for how their thresholds were set
+#                        without a measurement.
 #
 # The two driver targets exist because F3 PR2 moved security-relevant RENDERING into
 # them: the boolean literal that lands inside a policy WHERE clause (TrueLiteral /
@@ -380,6 +388,60 @@ name: Mutation
 # all — the leg that runs it is the 60-minute one. Its first post-merge score is the
 # measurement.
 #
+# THE ACCOUNTS LEGS (accounts S2, 2026-11-14) — TWO LEGS, AND BOTH ARE UNMEASURED.
+#
+# WHY TWO. A Stryker config mutates ONE project, and sign-in lives in two: the
+# MMLib.Alvo.Accounts package, and the account store inside the EF adapter. The store's
+# four files used to fall into data-ef-rest by its `**/*.cs` glob — whose only suite,
+# MMLib.Alvo.Data.EntityFrameworkCore.Tests, never runs them: the store's contract facts
+# (test/_shared/ef/AccountStoreFacts.cs) compile into MMLib.Alvo.Data.Sqlite.Tests and the
+# PostgreSQL integration suite, and the engine facts that drive it end to end
+# (SqliteAccountsEngineTests) live in MMLib.Alvo.Accounts.Tests. So every store mutant
+# would have been a survivor by construction — the data-ef-rest blind spot this header
+# already describes, on purpose this time. data-ef-rest now excludes the four files and
+# `accounts-store` mutates them against the two suites that do run them. Both reference the
+# EF project only transitively (through Data.Sqlite), which Stryker resolves the way it
+# already does for Data.Sqlite.Tests on data-ef-core. No test filter: under MTP a filtered
+# run executes the whole assembly anyway (stryker-net#3750, under WHY coverage-analysis
+# above), so a filter would only make the cost look smaller than it is.
+#
+# `accounts` mutates every file of the package except AssemblyInfo.cs. The registration
+# surface (AddAlvoAccounts, MapAlvoAccounts) stays IN, against the drivers' precedent,
+# because here it is not plain DI wiring: it registers the startup refusals
+# (ValidateOnStart) and every AccountsOptionsTests fact builds a real host through it.
+#
+# WHY THE THRESHOLDS ARE `break: 30`, `low: 40`, `high: 80`, PROVISIONAL. This header has
+# one rule for setting `break` — the KILLED-ONLY score of a measured run minus max(2 pp,
+# 2 mutants) — and these legs have no measured run: running Stryker to take one was out of
+# scope for the change that added them. The prescribed procedure is therefore not
+# applicable yet, and a calibrated-LOOKING number would be the fabrication the api.json
+# paragraph above refuses. 30 is chosen as a COLLAPSE floor, not a latch: it is below the
+# lowest honest score any leg here has ever measured (38.15 %, the ten-file commands-http
+# run), so it does not fire on ordinary test debt, and it does fire on the failure no
+# count check sees — a suite that runs, is counted, and has stopped reaching the code (all
+# survivors). It sits low on purpose because of the MOVEMENT RULE below: raising it after
+# the first run needs no ceremony, lowering it would. `low` 40 only colours the report;
+# `high` 80 is the ambition every leg shares.
+#
+# `mutants:` AND `suite:` ARE ESTIMATES TOO, and they are marked as such in the matrix.
+# `suite:` is MTP's own case count from `dotnet test` on 2026-11-14 (Accounts.Tests 237,
+# Data.Sqlite.Tests 1228) — the same unit Stryker's "Number of tests found" sums per
+# project (data-ef-core's 2156 = 1286 + 870 on 2026-10-30), but not taken from Stryker.
+# `mutants:` is a lower-bound estimate from code lines (comments, blanks and raw-string SQL
+# bodies dropped), at the lowest mutants-per-line ratio of the measured legs (0.16,
+# data-postgresql; commands-http is 0.48, data-ef-core 0.26): Accounts ~1593 lines -> 240,
+# the store ~466 lines -> 70. Both floors are one-sided, so an under-estimate is the safe
+# direction; the upper end of the same ratios (765 and 224) is what the budgets are sized on.
+#
+# THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
+# evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
+# its "Number of tests found", `timeout:` with ~2x its wall clock, and `break` with
+# KILLED-ONLY − max(2 pp, 2 mutants), floored — then delete this paragraph's
+# "PROVISIONAL". Check its timeout share against check 6 and its RuntimeError count too:
+# Accounts.Tests drives a real HTTP pipeline over TestHost the way Api.Tests does, and
+# commands-http's run on that kind of suite once came back all RuntimeError (run
+# 42335661278, above) — which is why both configs set `log-to-file`.
+#
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
 # mutates the Data API's query parsing, authorization filter, idempotency or ETag
@@ -640,7 +702,8 @@ name: Mutation
 # reddens the PR gate; it is the only config with committed logs captured from both a
 # scoped and a solution-mode run, which is what exercises the guard's real-regression
 # branch; and it is the adjudicator for the blind spot above. That suite also asserts it
-# stays the exact union of the two legs — nothing else would, and the rot direction is
+# stays the exact union of the legs that partition the EF project — data-ef-core,
+# data-ef-rest and, since accounts S2, accounts-store — nothing else would, and the rot direction is
 # silent (forgetting data-ef-rest.json fails a leg loudly, forgetting data-ef.json fails
 # nothing). It is deliberately NOT in the `paths:` filter below, on api.json's
 # precedent: no leg reads it, so a change to it would start a multi-hour run that cannot
@@ -672,6 +735,7 @@ on:
       - 'src/MMLib.Alvo.Data.EntityFrameworkCore/**'
       - 'src/MMLib.Alvo.Data.Sqlite/**'
       - 'src/MMLib.Alvo.Data.PostgreSql/**'
+      - 'src/MMLib.Alvo.Accounts/**'
       - 'stryker-config.json'
       - 'stryker-config.expressions.json'
       - 'stryker-config.data-ef-core.json'
@@ -680,6 +744,8 @@ on:
       - 'stryker-config.data-postgresql.json'
       - 'stryker-config.canary.json'
       - 'stryker-config.commands-http.json'
+      - 'stryker-config.accounts.json'
+      - 'stryker-config.accounts-store.json'
       # The test projects belong in the filter too: mutation judges the test
       # suite, so deleting or loosening an adversarial test drops the score
       # without touching src/. Post-merge is now the only run that can catch it.
@@ -689,6 +755,8 @@ on:
       - 'test/MMLib.Alvo.Data.EntityFrameworkCore.Tests/**'
       - 'test/MMLib.Alvo.Data.Sqlite.Tests/**'
       - 'test/MMLib.Alvo.Data.PostgreSql.Tests/**'
+      # The two accounts legs' suite (Data.Sqlite.Tests is listed above).
+      - 'test/MMLib.Alvo.Accounts.Tests/**'
       # The canary leg's suite, and the shared sources every leg's suite compiles.
       # test/_shared/mutation/** is what makes a run's verdict honest at all (#142):
       # break it and every leg reports 100 % again, which is the failure this filter
@@ -864,7 +932,9 @@ jobs:
           - name: data-ef-rest
             config: stryker-config.data-ef-rest.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 1816  # probed 2026-10-30 (was 649)
+            mutants: 1816  # probed 2026-10-30 (was 649). Unchanged by accounts S2 on purpose: the four
+                           # account-store files postdate that probe, so excluding them (they sit on the
+                           # accounts-store leg) removes nothing it counted. Not re-probed — no Stryker run.
             suite: 1286    # probed 2026-10-30 (was 554); one test project
             timeout: 120   # measured 2 min for 565 mutants on CI with ZERO timeouts — one fast
                            # assembly, so `additional-timeout` changes nothing here. The budget is
@@ -885,6 +955,25 @@ jobs:
             mutants: 33     # probed 2026-10-30 (was 20)
             suite: 180      # probed 2026-10-30 (was 110)
             timeout: 30     # measured 2 min
+          # THE ACCOUNTS LEGS — UNMEASURED. Every number on the two legs below is an estimate,
+          # and so are their configs' thresholds; "THE ACCOUNTS LEGS" in the header says how each
+          # was derived and what the first real run must replace it with.
+          - name: accounts
+            config: stryker-config.accounts.json
+            project: src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj
+            mutants: 240    # ESTIMATED lower bound, not a probe (code lines x 0.16); re-probe on the first run
+            suite: 237      # MTP's own count, 2026-11-14 — not yet Stryker's
+            timeout: 120    # ESTIMATED: one ~11 s assembly, up to ~765 mutants at concurrency 4 is
+                            # ~45 min on a 10-core box, ~60 on a 4-vCPU runner (the 1.35x data-ef-core
+                            # scaling), and 2x that. Cut to 2x the first run's wall clock.
+          - name: accounts-store
+            config: stryker-config.accounts-store.json
+            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+            mutants: 70     # ESTIMATED lower bound, not a probe (code lines x 0.16); re-probe on the first run
+            suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
+            timeout: 90     # ESTIMATED: two assemblies (~13 s + ~11 s a run), up to ~224 mutants at
+                            # concurrency 4 is ~28 min on a 10-core box, ~38 on a runner, and 2x that
+                            # rounded up. Cut to 2x the first run's wall clock.
     steps:
       - name: Checkout
         uses: actions/checkout@v7

@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
@@ -110,6 +111,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
         builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
         builder.Services.TryAddSingleton<ITimerStore>(CreateTimerStore);
+        builder.Services.TryAddSingleton<IAccountStore>(CreateAccountStore);
         AddSecretStore(builder.Services);
 
         return builder;
@@ -207,6 +209,16 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         services.GetRequiredService<TimeProvider>(),
         services.GetRequiredService<EfAlvoData>);
+
+    /// <summary>Creates the end-user account store (accounts spec §5.1), over the same key file the secret store uses.</summary>
+    /// <remarks>
+    /// Registered whether or not accounts are enabled, like every other store here: resolving it costs nothing until a
+    /// call, and <c>MMLib.Alvo.Accounts</c> refuses to start without a key file before it ever asks for a key.
+    /// </remarks>
+    private static EfCoreAccountStore CreateAccountStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value,
+        Cipher(services));
 
     private static EfCoreHookRejectionLog CreateHookRejectionLog(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),

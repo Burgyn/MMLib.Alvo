@@ -1,6 +1,8 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Abstractions.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Admin")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Admin.Tests.EndToEnd")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Ai")]
@@ -667,6 +669,7 @@ namespace MMLib.Alvo.Descriptor
         public Auth() { }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AuthProvider>? Providers { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+        public MMLib.Alvo.Descriptor.AuthSignUp? SignUp { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.AuthProvider>))]
     public enum AuthProvider
@@ -683,6 +686,12 @@ namespace MMLib.Alvo.Descriptor
         Apple = 4,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("oidc")]
         Oidc = 5,
+    }
+    public sealed class AuthSignUp : System.IEquatable<MMLib.Alvo.Descriptor.AuthSignUp>
+    {
+        public AuthSignUp() { }
+        public System.Collections.Generic.IReadOnlyList<string>? AllowedEmailDomains { get; init; }
+        public required MMLib.Alvo.Descriptor.SignUpMode Mode { get; init; }
     }
     [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.EmailAction), "email")]
     [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.EntityUpdateAction), "entity.update")]
@@ -1068,6 +1077,14 @@ namespace MMLib.Alvo.Descriptor
         Month = 1,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
         Day = 2,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SignUpMode>))]
+    public enum SignUpMode
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("open")]
+        Open = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("invitationOnly")]
+        InvitationOnly = 1,
     }
     public sealed class StateTransition : System.IEquatable<MMLib.Alvo.Descriptor.StateTransition>
     {

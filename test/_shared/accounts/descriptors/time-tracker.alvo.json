@@ -1,0 +1,32 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "time-tracker",
+  "description": "Spec 2026-11-13 §3's level 1: per-person data, no tenancy. Google signs people in, anyone may sign up, and each person reads and writes only the rows they created.",
+  "auth": {
+    "providers": [
+      "google"
+    ],
+    "signUp": {
+      "mode": "open"
+    }
+  },
+  "entities": {
+    "time_entries": {
+      "audit": true,
+      "fields": {
+        "minutes": {
+          "type": "integer",
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "created_by == @user.id",
+        "get": "created_by == @user.id",
+        "create": "'authenticated' in @user.roles",
+        "update": "created_by == @user.id",
+        "delete": "created_by == @user.id"
+      }
+    }
+  }
+}

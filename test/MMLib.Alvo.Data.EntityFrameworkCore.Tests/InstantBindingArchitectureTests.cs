@@ -71,6 +71,8 @@ public class InstantBindingArchitectureTests
     private static readonly IReadOnlyDictionary<string, string> _exempt = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["MMLib.Alvo.Api.Internal.NoStoreResponseFilter::InvokeAsync"] = "sets a response header; evaluates no CEL",
+        ["MMLib.Alvo.Api.Internal.AlvoCors/CorsFilter::InvokeAsync"] = "writes the CORS response headers; evaluates no CEL",
+        ["MMLib.Alvo.Api.Internal.AlvoRateLimits/Charged::InvokeAsync"] = "charges a per-client budget; evaluates no CEL",
         ["MMLib.Alvo.Management.Internal.ManagementAccessEndpointFilter::InvokeAsync"] =
             "judges the access CEL profile, which refuses now() when it compiles (CelTypeChecker.AccessNoInstantMessage)",
         ["MMLib.Alvo.Data.IAlvoTransactions::TransactAsync"] =

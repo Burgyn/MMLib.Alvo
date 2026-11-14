@@ -72,15 +72,21 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     /// Anything the caller adds to the builder before <see cref="AlvoHost.BuildAsync"/> runs — the seam a fact
     /// about a <em>failed</em> start needs, since it never gets a world back to read anything off.
     /// </param>
+    /// <param name="environment">
+    /// The host environment, passed as the container's <c>--environment</c> would be; the default leaves the process's
+    /// own (Production unless <c>ASPNETCORE_ENVIRONMENT</c> says otherwise). Setting it on the builder afterwards does not
+    /// reach the <c>IHostEnvironment</c> the container hands out, so it has to arrive here.
+    /// </param>
     internal static async Task<AlvoHostWorld> StartAsync(
         string descriptor = DefaultDescriptorFileName,
         IReadOnlyDictionary<string, string?>? overrides = null,
         string? databasePath = null,
-        Action<WebApplicationBuilder>? configure = null)
+        Action<WebApplicationBuilder>? configure = null,
+        string? environment = null)
     {
         var ownedDatabasePath = databasePath is null ? TempDatabasePath() : null;
         var logs = new CapturingLoggerProvider();
-        var builder = Builder(descriptor, databasePath ?? ownedDatabasePath!, overrides, logs, configure);
+        var builder = Builder(descriptor, databasePath ?? ownedDatabasePath!, overrides, logs, configure, environment);
 
         var app = await AlvoHost.BuildAsync(builder);
         await app.StartAsync(TestContext.Current.CancellationToken);
@@ -112,18 +118,21 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     /// <param name="overrides">Configuration keys to overlay; a <see langword="null"/> value unsets one.</param>
     /// <param name="logs">Where the host's log records are captured.</param>
     /// <param name="configure">Anything the caller adds before <see cref="AlvoHost.BuildAsync"/> runs.</param>
+    /// <param name="environment">The host environment as a command-line argument, or none.</param>
     private static WebApplicationBuilder Builder(
         string descriptor,
         string databasePath,
         IReadOnlyDictionary<string, string?>? overrides,
         CapturingLoggerProvider logs,
-        Action<WebApplicationBuilder>? configure)
+        Action<WebApplicationBuilder>? configure,
+        string? environment = null)
     {
         var descriptorPath = Path.IsPathRooted(descriptor) ? descriptor : DescriptorPath(descriptor);
         var settings = Settings(descriptorPath, databasePath, overrides);
 
         var builder = AlvoHost.CreateBuilder(
-            [], configuration => configuration.AddInMemoryCollection(settings));
+            environment is null ? [] : ["--environment", environment],
+            configuration => configuration.AddInMemoryCollection(settings));
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
         builder.WebHost.UseTestServer();

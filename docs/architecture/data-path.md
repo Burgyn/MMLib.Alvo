@@ -2124,6 +2124,8 @@ stale with nothing reporting it (`rules, auth, rest` 1638 → 1713, and both sui
 | `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the whole shard) | 1135 | 1108 | **no — on demand** |
 | `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 333 | 1502 | **no — on demand** |
 
+**The account store is a third partition of the EF project since accounts S2 (2026-11-14).** `EfCoreAccountStore.cs`, `EfCoreAccountStore.Sessions.cs`, `EfCoreAccountStore.Keys.cs` and `Internal/AuthTables.cs` are excluded from `data-ef-rest` — whose only suite, `EntityFrameworkCore.Tests`, never runs them — and mutated by `stryker-config.accounts-store.json` against `Data.Sqlite.Tests` (where `AccountStoreFacts` compile) and `Accounts.Tests`. The `MMLib.Alvo.Accounts` package has its own leg, `stryker-config.accounts.json`. Neither has been measured yet: their counts, budgets and thresholds are provisional estimates, and `.github/workflows/mutation.yml` (*THE ACCOUNTS LEGS*) says how each was derived and what the first run replaces. `scripts/test-assert-mutation-run` checks the three-way partition against `stryker-config.data-ef.json`.
+
 **`data-ef` is two legs since #205, and it is split by *test project* rather than by file.** The model that
 predicts the cost is not mutants × test *count*: measured runner-seconds per mutant on the 4-vCPU runner are
 ~6.2 s for `rules, auth, rest` (1188 tests, **one** assembly) and ~26 s for the single `data-ef` leg (1135

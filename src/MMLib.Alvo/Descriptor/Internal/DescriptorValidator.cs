@@ -243,6 +243,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             into.AddRange(ExclusionIndexCheck.Check(descriptor));
             into.AddRange(StateMachineCheck.Check(descriptor));
             into.AddRange(EntityTimerCheck.Check(descriptor));
+            into.AddRange(SignUpCheck.Check(descriptor));
             schema = DescriptorToSchemaMapper.Map(descriptor);
 
             return true;
@@ -424,6 +425,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         if (SecretReferenceCheck.IsReferenceSlot(instancePath))
         {
             return SecretReferenceCheck.Refusal(instancePath);
+        }
+
+        if (SignUpCheck.IsSchemaRefusal(instancePath, result.Message))
+        {
+            return SignUpCheck.Refusal;
         }
 
         var schemaPath = PointerOrRoot(result.Location?.SchemaLocation.ToString());

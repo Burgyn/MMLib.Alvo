@@ -89,7 +89,8 @@ public class ManagementOperationsTests
     /// <em>what the backend is</em>; an admin also decides <em>who may reach it</em>. The AI connection is
     /// in that second set because it is a credential: repointing the endpoint sends the descriptor, the
     /// schema and every operator's prompts wherever it now points. Switching an extension off is in it too:
-    /// it removes host code the project's integrity may rest on.
+    /// it removes host code the project's integrity may rest on. So is disabling an end user's account
+    /// (accounts spec §5.6): it decides who may reach the backend at all.
     /// </summary>
     [Fact]
     public void Only_an_admin_may_reach_settings()
@@ -100,16 +101,18 @@ public class ManagementOperationsTests
             ManagementOperation.SetAiConnection,
             ManagementOperation.DeleteProject,
             ManagementOperation.SetExtensionEnabled,
+            ManagementOperation.ManageAccounts,
         ]);
 
     /// <summary>
-    /// The surface is twenty-six operations: seventeen over the descriptor and its settings, nine over the
-    /// deliveries of host code. A count rather than a comment, so adding a twenty-seventh fails here until
-    /// somebody decides its level — which is the decision this table exists to force.
+    /// The surface is twenty-seven operations: seventeen over the descriptor and its settings, nine over the
+    /// deliveries of host code, and one over end users' accounts. A count rather than a comment, so adding a
+    /// twenty-eighth fails here until somebody decides its level — which is the decision this table exists to
+    /// force.
     /// </summary>
     [Fact]
-    public void The_management_surface_is_twenty_six_operations()
-        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(26);
+    public void The_management_surface_is_twenty_seven_operations()
+        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(27);
 
     [Fact]
     public void The_levels_are_ordered_so_the_highest_match_is_the_greatest_value()
