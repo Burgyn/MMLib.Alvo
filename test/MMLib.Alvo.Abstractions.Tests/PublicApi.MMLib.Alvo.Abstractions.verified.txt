@@ -667,9 +667,17 @@ namespace MMLib.Alvo.Descriptor
     public sealed class Auth : System.IEquatable<MMLib.Alvo.Descriptor.Auth>
     {
         public Auth() { }
+        public MMLib.Alvo.Descriptor.AuthAccessTokens? AccessTokens { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AuthProvider>? Providers { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
         public MMLib.Alvo.Descriptor.AuthSignUp? SignUp { get; init; }
+    }
+    public sealed class AuthAccessTokens : System.IEquatable<MMLib.Alvo.Descriptor.AuthAccessTokens>
+    {
+        public AuthAccessTokens() { }
+        public int? MaxLifetimeDays { get; init; }
+        public bool? Personal { get; init; }
+        public bool? Service { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.AuthProvider>))]
     public enum AuthProvider

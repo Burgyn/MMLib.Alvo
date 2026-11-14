@@ -73,6 +73,7 @@ internal static class PolicyCatalogBuilder
         {
             SignIn = SignInPolicy.From(descriptor),
             SelfService = selfService,
+            AppTokens = AppTokenPolicy.From(descriptor),
         };
         errors = [];
         return true;

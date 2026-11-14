@@ -104,6 +104,25 @@ public sealed record Auth
     /// for end users (today <c>google</c>).
     /// </summary>
     public AuthSignUp? SignUp { get; init; }
+
+    /// <summary>Which self-service tokens for integrators people may mint; <see langword="null"/> mints none.</summary>
+    public AuthAccessTokens? AccessTokens { get; init; }
+}
+
+/// <summary>Self-service tokens for integrators (schema <c>auth.accessTokens</c>).</summary>
+public sealed record AuthAccessTokens
+{
+    /// <summary>Whether a person may mint tokens that act as them; <see langword="null"/> means <see langword="false"/>.</summary>
+    public bool? Personal { get; init; }
+
+    /// <summary>
+    /// Whether a tenant owner may mint tokens that act as a shared tenant; <see langword="null"/> means
+    /// <see langword="false"/>. Requires <c>tenancy.selfService.createTenants</c>.
+    /// </summary>
+    public bool? Service { get; init; }
+
+    /// <summary>The longest expiry a token may ask for, in days (1–365); <see langword="null"/> means 90.</summary>
+    public int? MaxLifetimeDays { get; init; }
 }
 
 /// <summary>Who may create an account by signing in with an end-user provider (schema <c>auth.signUp</c>).</summary>

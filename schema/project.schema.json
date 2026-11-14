@@ -226,6 +226,30 @@
               "description": "Optional. Only accounts whose trusted email is in one of these domains may sign up — a company app restricted to kros.sk. Lower-case hostnames, no wildcard."
             }
           }
+        },
+        "accessTokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Self-service tokens for integrators: personal tokens that act as a person, service tokens that act as a tenant. Optional; absent = no self-service tokens.",
+          "properties": {
+            "personal": {
+              "type": "boolean",
+              "default": false,
+              "description": "A person may mint tokens that act as them."
+            },
+            "service": {
+              "type": "boolean",
+              "default": false,
+              "description": "A tenant owner may mint tokens that act as the tenant. Requires tenancy.selfService with createTenants: a service token acts as a shared tenant, never a personal one."
+            },
+            "maxLifetimeDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 90,
+              "description": "The longest expiry a token may ask for: 1–365 days, default 90."
+            }
+          }
         }
       },
       "allOf": [

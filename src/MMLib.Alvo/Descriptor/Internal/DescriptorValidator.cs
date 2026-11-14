@@ -246,6 +246,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             into.AddRange(EntityTimerCheck.Check(descriptor));
             into.AddRange(SignUpCheck.Check(descriptor));
             into.AddRange(SelfServiceCheck.Check(descriptor));
+            into.AddRange(AccessTokensCheck.Check(descriptor));
             schema = DescriptorToSchemaMapper.Map(descriptor);
 
             return true;
