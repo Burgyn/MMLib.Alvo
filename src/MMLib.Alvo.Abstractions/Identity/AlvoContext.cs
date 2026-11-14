@@ -45,6 +45,13 @@ public sealed record AlvoContext
     /// else: not in a global entity's rule nor in anything reached from one, not past a global hop, not at Management,
     /// and not without a tenant.
     /// </summary>
+    /// <remarks>
+    /// <b>The live request only, for roles a host gives itself.</b> On the event side — an after-hook <c>when</c>, a delivery
+    /// run as the writer — a recorded tenant role counts only while the applied descriptor's
+    /// <c>tenancy.selfService.assignableRoles</c> lists it, and a person's are narrowed to the membership they still hold
+    /// in the self-service registry. A host that sets this from its own <c>IAlvoContextResolver</c> without
+    /// <c>selfService</c> therefore has these roles on the request and none of them on the event side (fail-closed).
+    /// </remarks>
     /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The value holds <c>anon</c>, <c>authenticated</c> or <c>admin</c>.</exception>
     public IReadOnlySet<Role> TenantRoles
