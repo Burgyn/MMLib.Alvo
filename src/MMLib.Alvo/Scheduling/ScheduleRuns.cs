@@ -122,6 +122,7 @@ internal sealed class ScheduleRuns
     }
 
     private static InvalidOperationException NoTenantCatalog() => new(
-        "A per-tenant schedule or data migration ran in a host that registers no IAlvoTenantCatalog. Register one, or use "
-        + "AlvoScheduleScope.Global.");
+        "A per-tenant schedule or data migration ran with no tenant list: the host registers no IAlvoTenantCatalog, and the "
+        + "descriptor it was judged by declares no tenancy.selfService over a tenant registry. Register a catalog, declare "
+        + "selfService, or use AlvoScheduleScope.Global.");
 }

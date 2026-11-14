@@ -48,11 +48,17 @@ public sealed class TenantCatalogsTests
         var refusal = Should.Throw<AlvoStartupRefusedException>(() => binder.EnsureBindable(Catalog(selfService: false)));
 
         refusal.Message.ShouldContain($"'{Nightly}' (schedule) at extensions/{Nightly}/scope");
-        refusal.Message.ShouldContain($"'{Nightly}' runs once per tenant, and this host registers no IAlvoTenantCatalog to list them.");
-        refusal.FixSuggestion.ShouldContain("Register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global.");
+        refusal.Message.ShouldContain(
+            $"'{Nightly}' runs once per tenant, and nothing lists them under this descriptor: this host registers no "
+            + "IAlvoTenantCatalog, and the descriptor does not declare tenancy.selfService, whose registry would.");
+        refusal.FixSuggestion.ShouldContain(
+            "Declare tenancy.selfService in the descriptor, or register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global.",
+            customMessage: "on a host with a registry the descriptor is the cure the refusal names first");
         using var bare = Host(registry: false);
-        Should.Throw<AlvoStartupRefusedException>(bare.GetRequiredService<ExtensionBinder>().EnsureRegistrable)
-            .Message.ShouldContain($"extensions/{Nightly}/scope", customMessage: "no descriptor can cure a host with neither");
+        var bareRefusal = Should.Throw<AlvoStartupRefusedException>(bare.GetRequiredService<ExtensionBinder>().EnsureRegistrable);
+        bareRefusal.Message.ShouldContain($"'{Nightly}' runs once per tenant, and this host registers no IAlvoTenantCatalog to list them.");
+        bareRefusal.FixSuggestion.ShouldContain("Register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global.");
+        bareRefusal.FixSuggestion.ShouldNotContain("selfService", customMessage: "no descriptor can cure a host with neither");
     }
 
     [Fact]
@@ -158,8 +164,11 @@ public sealed class TenantCatalogsTests
         }
         else
         {
-            Should.Throw<DescriptorValidationException>(Build).Result.Errors
-                .ShouldContain(error => error.Path == "/automation/close-day/trigger/schedule");
+            var refused = Should.Throw<DescriptorValidationException>(Build).Result.Errors
+                .Single(error => error.Path == "/automation/close-day/trigger/schedule");
+            refused.FixSuggestion.ShouldBe(registry
+                ? "Declare tenancy.selfService in the descriptor, or register an IAlvoTenantCatalog in DI, or trigger the rule from an entity event."
+                : "Register an IAlvoTenantCatalog, or trigger the rule from an entity event.");
         }
     }
 
@@ -173,6 +182,7 @@ public sealed class TenantCatalogsTests
         var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => check.RefuseAsync(Catalog(selfService: false), Ct));
 
         refusal.Message.ShouldContain($"extensions/{Backfill}/tenants");
+        refusal.FixSuggestion.ShouldContain("Declare tenancy.selfService in the descriptor, or register an IAlvoTenantCatalog in DI.");
     }
 
     [Theory]

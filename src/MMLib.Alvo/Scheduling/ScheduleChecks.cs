@@ -33,9 +33,25 @@ internal static class ScheduleChecks
     /// </param>
     internal static IEnumerable<ExtensionProblem> Check(ExtensionRegistry registry, IServiceProviderIsService services, DateTimeOffset now, bool selfService)
     {
-        var lists = TenantCatalogs.Lists(services, selfService);
+        var lists = new TenantListing(TenantCatalogs.Lists(services, selfService), TenantCatalogs.Registry(services));
         return registry.Handlers.Where(handler => handler.Job is { IsSchedule: true }).SelectMany(handler => Problems(handler, handler.Job!, lists, now));
     }
+
+    /// <summary>
+    /// Why nothing lists the tenants (S3 plan D13): on a host with a self-service registry it is the descriptor that lacks
+    /// <c>tenancy.selfService</c> as much as the host that lacks a catalog, so the text names both.
+    /// </summary>
+    /// <param name="registry">Whether the host registers a self-service tenant registry.</param>
+    internal static string NoTenantList(bool registry) => registry
+        ? "nothing lists them under this descriptor: this host registers no IAlvoTenantCatalog, and the descriptor does not "
+            + "declare tenancy.selfService, whose registry would"
+        : "this host registers no IAlvoTenantCatalog to list them";
+
+    /// <summary>What cures <see cref="NoTenantList(bool)"/>, the most direct cure first.</summary>
+    /// <param name="registry">Whether the host registers a self-service tenant registry.</param>
+    internal static string ListTheTenants(bool registry) => registry
+        ? "Declare tenancy.selfService in the descriptor, or register an IAlvoTenantCatalog in DI"
+        : "Register an IAlvoTenantCatalog in DI";
 
     /// <summary>
     /// The boot's own check of every data migration not yet started against the schema it primes: a scoped schema needs a tenant
@@ -43,16 +59,21 @@ internal static class ScheduleChecks
     /// at run time; and a migration that has run needs nothing more.
     /// </summary>
     internal static IEnumerable<ExtensionProblem> CheckBoot(
-        ExtensionRegistry registry, PolicyCatalog catalog, IServiceProviderIsService services, IReadOnlySet<string> started) =>
-        NeedsTenants(registry, catalog, services)
-            ? registry.Handlers.Where(handler => handler.Job is { IsMigration: true } && !started.Contains(handler.Id)).Select(handler => new ExtensionProblem(
-                handler.Id,
-                Kinds.Migration,
-                $"extensions/{handler.Id}/tenants",
-                $"'{handler.Id}' has not run yet and runs once per tenant on this scoped schema, and this host registers no "
-                    + "IAlvoTenantCatalog to list them.",
-                "Register an IAlvoTenantCatalog in DI."))
-            : [];
+        ExtensionRegistry registry, PolicyCatalog catalog, IServiceProviderIsService services, IReadOnlySet<string> started)
+    {
+        if (!NeedsTenants(registry, catalog, services))
+        {
+            return [];
+        }
+
+        var tenantRegistry = TenantCatalogs.Registry(services);
+        return registry.Handlers.Where(handler => handler.Job is { IsMigration: true } && !started.Contains(handler.Id)).Select(handler => new ExtensionProblem(
+            handler.Id,
+            Kinds.Migration,
+            $"extensions/{handler.Id}/tenants",
+            $"'{handler.Id}' has not run yet and runs once per tenant on this scoped schema, and {NoTenantList(tenantRegistry)}.",
+            $"{ListTheTenants(tenantRegistry)}."));
+    }
 
     /// <summary>Whether any registered data migration could need a tenant list this host lacks on <paramref name="catalog"/>.</summary>
     internal static bool NeedsTenants(ExtensionRegistry registry, PolicyCatalog catalog, IServiceProviderIsService services) =>
@@ -63,7 +84,7 @@ internal static class ScheduleChecks
     /// <summary>Whether <paramref name="schema"/> has an entity whose rows belong to a tenant.</summary>
     internal static bool IsScoped(SchemaModel schema) => schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped);
 
-    private static IEnumerable<ExtensionProblem> Problems(HandlerRegistration handler, JobSpec job, bool listsTenants, DateTimeOffset now)
+    private static IEnumerable<ExtensionProblem> Problems(HandlerRegistration handler, JobSpec job, TenantListing tenants, DateTimeOffset now)
     {
         if (CronSchedule.CronProblem(job.Cron!, now) is { } cron)
         {
@@ -75,15 +96,18 @@ internal static class ScheduleChecks
             yield return Problem(handler.Id, "timeZone", zone, "Use an IANA time zone id, such as 'Europe/Bratislava', or leave the default 'UTC'.");
         }
 
-        if (job.Scope is AlvoScheduleScope.EachTenant && !listsTenants)
+        if (job.Scope is AlvoScheduleScope.EachTenant && !tenants.Lists)
         {
             yield return Problem(
                 handler.Id,
                 "scope",
-                $"'{handler.Id}' runs once per tenant, and this host registers no IAlvoTenantCatalog to list them.",
-                "Register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global.");
+                $"'{handler.Id}' runs once per tenant, and {NoTenantList(tenants.Registry)}.",
+                $"{ListTheTenants(tenants.Registry)}, or use AlvoScheduleScope.Global.");
         }
     }
+
+    /// <summary>Whether a tenant list exists under the descriptor judged, and whether the host has a registry that could be one.</summary>
+    private readonly record struct TenantListing(bool Lists, bool Registry);
 
     private static ExtensionProblem Problem(string id, string slot, string message, string fix) =>
         new(id, Kind, $"extensions/{id}/{slot}", message, fix);
