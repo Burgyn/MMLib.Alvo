@@ -41,7 +41,9 @@ internal static partial class ManagementEndpoints
     /// </para>
     /// <para>
     /// <b>The body is optional at binding and <c>disabled</c> is required after the gate</b> (the operations routes'
-    /// reason): a body of <c>{}</c> must not read as "enable".
+    /// reason): a body of <c>{}</c> must not read as "enable". Binding runs before the gate's filter, so a present body
+    /// that is not JSON is a 400 for any caller, admitted or not; an absent body or <c>{}</c> binds, reaches the gate, and
+    /// is refused 422 after it.
     /// </para>
     /// </remarks>
     /// <param name="endpoints">The route builder, for asking whether an implementation is registered.</param>

@@ -16,9 +16,11 @@ namespace MMLib.Alvo.Api.Internal;
 /// </para>
 /// <para>
 /// <b>One copy, two budgets.</b> The core charges the token endpoint's budget with it (<c>AlvoRateLimits</c>), and the
-/// standalone host its dashboard credential posts (<c>AlvoAdminCredentialLimit</c>), through an
-/// <c>InternalsVisibleTo</c> granted for this type alone (see the core's <c>AssemblyInfo</c>), so the two budgets
-/// cannot partition differently. Its facts are <c>ClientPartitionTests</c> in the Data API suite.
+/// standalone host its dashboard credential posts (<c>AlvoAdminCredentialLimit</c>), so the two budgets cannot partition
+/// differently. The host reaches it through the core's <c>InternalsVisibleTo</c> grant (see the core's
+/// <c>AssemblyInfo</c>), which is assembly-wide: this type is the reason for it, not its limit, and the host suite's
+/// <c>HostInternalGrantTests</c> narrows what the host references only as far as its remarks say. Its facts are
+/// <c>ClientPartitionTests</c> in the Data API suite.
 /// </para>
 /// </remarks>
 internal static class ClientPartition

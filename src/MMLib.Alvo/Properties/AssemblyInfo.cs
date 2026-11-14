@@ -67,9 +67,11 @@
 // under — the same key the token endpoint's budget uses, so the two cannot partition differently (it was a verbatim
 // copy until the S2 review of Tasks 10-11). A linked source file was tried and refused: the OpenAPI XML-comment
 // generator reads both assemblies' documentation and two types with one documentation id fail every document request.
-// The host is IsPackable=false and ships only in the image; an architecture fact in its suite
-// (HostInternalGrantTests) holds that ClientPartition is the only core internal it references. The same forgeability
-// caveat applies: an unsigned grant is a name match.
+// The host is IsPackable=false and ships only in the image. The grant itself is assembly-wide; an architecture fact in
+// the host's suite (HostInternalGrantTests) holds that ClientPartition.Of is the only member of an internal, non-generic
+// core type the host's IL calls or reads. It does not see an internal member of a public type, a member of a generic
+// internal type, or a type named without a member (typeof, a field's or a base type) — review holds those. The same
+// forgeability caveat applies: an unsigned grant is a name match.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Host")]
 
 // And to its suite, which compiles the Data API's test world (test/_shared/api) to drive a signed-in person through the
