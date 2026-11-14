@@ -202,18 +202,23 @@ internal sealed partial class EfCoreTenantStore
     /// Removes <paramref name="member"/>, revokes their personal tokens for the tenant and the service tokens they minted into
     /// it (S5 D10), and, when they were an owner, sweeps the invitations they created (D6).
     /// </summary>
+    /// <remarks>
+    /// Lock order: every sweep touches invitations before tokens (as the ban and the demotion do), so two sweeps of one
+    /// person never wait on each other's rows in opposite order (a PostgreSQL 40P01).
+    /// </remarks>
     private async Task RemoveAsync(
         DbConnection connection, DbTransaction transaction, MemberRemoval removal, StoredMembership member, CancellationToken ct)
     {
         await ExecuteAsync(
             connection, transaction, _tables.RemoveMemberSql, command => BindMemberKey(command, removal.Tenant, removal.Member), ct)
             .ConfigureAwait(false);
-        await SweepTokensAsync(
-            connection, transaction, _appTokens.RevokeForMemberSql, removal.Tenant, removal.Member, removal.Now, ct).ConfigureAwait(false);
         if (member.IsOwner)
         {
             await SweepInvitationsAsync(connection, transaction, removal.Tenant, removal.Member, removal.Now, ct).ConfigureAwait(false);
         }
+
+        await SweepTokensAsync(
+            connection, transaction, _appTokens.RevokeForMemberSql, removal.Tenant, removal.Member, removal.Now, ct).ConfigureAwait(false);
     }
 
     /// <summary>Runs one of <see cref="AppTokenTables"/>' member sweeps (S5 D10) over <paramref name="member"/> in <paramref name="tenant"/>.</summary>
