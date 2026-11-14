@@ -100,6 +100,25 @@ public sealed class TenantCatalogsTests
             host.GetRequiredService<ScheduleRuns>().EventsAsync(Schedule(host), _now, manual: false, Ct));
     }
 
+    /// <summary>
+    /// The other half of moving the refusal out of the catalog-free pass: once a <c>selfService</c> descriptor has bound
+    /// an each-tenant schedule to the registry, an apply that drops <c>selfService</c> would unbind it — and the apply guard
+    /// refuses that as it refuses any unbinding, naming the schedule; re-applying with <c>selfService</c> passes clean.
+    /// </summary>
+    [Fact]
+    public void An_apply_dropping_self_service_under_a_bound_each_tenant_schedule_is_refused()
+    {
+        using var host = Host(registry: true);
+        Apply(host, Catalog(selfService: true));
+        var guard = host.GetRequiredService<ExtensionApplyGuard>();
+
+        var refusal = Should.Throw<DescriptorValidationException>(() => guard.Check(Catalog(selfService: false)));
+
+        refusal.Result.Errors.ShouldContain(error =>
+            error.Severity == DescriptorValidationSeverity.Error && error.Message.Contains($"'{Nightly}'", StringComparison.Ordinal));
+        guard.Check(Catalog(selfService: true)).Warnings.ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData(true, true, true)]
     [InlineData(true, false, false)]

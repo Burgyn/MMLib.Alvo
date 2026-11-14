@@ -107,7 +107,15 @@ RFC 6750 (the Bearer challenge on the self-service routes), RFC 9110 §15.5.10 (
   `TenantCatalogs`: the host's `IAlvoTenantCatalog` if registered; else `RegistryTenantCatalog` (lists every
   `_tenants` id — self-service tenants only, said on the type and in the docs) when an `ITenantStore` is registered and
   the descriptor in question has `selfService`; else none. Every "is there a catalog" check asks it with the descriptor
-  it is judging, so the boot refusal keeps firing everywhere else.
+  it is judging, so the boot refusal keeps firing wherever a descriptor exists to judge. **Recorded deviation (Task 9):**
+  on a host with a registry and no catalog the refusal moved from the boot's catalog-free pass to the per-descriptor
+  one, because a `selfService` descriptor cures it and every EF provider registers `ITenantStore` (its presence says
+  nothing about intent) — kept in the catalog-free pass, a dashboard-first self-service host with such a schedule could
+  never boot. So (a) a relational host with no descriptor now boots, the schedule unbound; (b) its first apply without
+  `selfService` only warns; (c) the next restart stands down not-ready; (d) a stored-descriptor boot stands down instead
+  of exiting. A file boot still exits with the same locator and fix; an apply that drops `selfService` under a bound
+  schedule is refused as an unbinding (`TenantCatalogsTests.An_apply_dropping_self_service_under_a_bound_each_tenant_schedule_is_refused`);
+  a host with no registry still refuses in the catalog-free pass. Spec §6.6 records the same.
 - **D14 — Rate limit.** `AlvoRateLimitOptions.Create` (default 10/min per client, spec §7.3/§11.2's `Create`) and
   `AlvoRateLimit.Create`, charged on `POST {prefix}/tenants` (S5 adds token minting to the same budget).
 - **D15 — Members arrive only through invitations (S4).** In S3 a shared tenant's only member is its creator; tests seed
