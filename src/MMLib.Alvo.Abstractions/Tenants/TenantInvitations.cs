@@ -75,7 +75,8 @@ internal enum AcceptInvitationStatus
 
     /// <summary>
     /// The invitation admits nobody, or not this person: unknown, expired, revoked, used up, into a personal tenant, its
-    /// creator no longer an owner, or bound to an email this person's account does not hold trusted — one answer for all.
+    /// creator no longer an owner or disabled, or bound to an email this person's account does not hold trusted — one
+    /// answer for all.
     /// </summary>
     Dead,
 

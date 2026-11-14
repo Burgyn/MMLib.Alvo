@@ -90,7 +90,8 @@ internal interface IAccountStore
     /// Disables an account or enables a disabled one, and either way revokes every live session of it
     /// (<see cref="SessionRevocations.Disabled"/>) in the same transaction (spec §5.6): ending a ban is a clean slate, so
     /// no session from before it comes back, even one that reached the table after the ban's revocation. Enabling an
-    /// account that is not disabled changes nothing and revokes nothing.
+    /// account that is not disabled changes nothing and revokes nothing. Disabling also revokes every live invitation
+    /// the account created, in the same transaction (S4 D16); enabling it again revives none of them.
     /// </summary>
     /// <param name="account">The account's id.</param>
     /// <param name="disabled">Whether the account is to be disabled.</param>

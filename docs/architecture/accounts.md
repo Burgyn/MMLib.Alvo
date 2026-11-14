@@ -546,18 +546,21 @@ these two sections as tests, on SQLite and on PostgreSQL.
   prefix is GitHub's secret-scanning precedent). Only its SHA-256 is stored. It is shown once, in the create answer,
   and travels only in request bodies — never in a URL, which access logs, browser history and `Referer` would keep.
 - **Every dead code gets the same answer.** Unknown, malformed, expired, revoked, used up, bound to another (or an
-  untrusted) email, into a personal tenant, or created by someone who is no longer an owner: `preview` and `accept`
+  untrusted) email, into a personal tenant, or created by someone who is no longer an owner or is disabled: `preview` and `accept`
   answer the S3 routes' `not-found` 404, byte for byte, and the exchange answers one `invalid_grant`. A caller holding a
   code learns whether it works, and nothing about why it does not (the OWASP rule for failed secret lookups).
 - **The use count is decided by one conditional `UPDATE`, never a read followed by a write.** Two people racing for a
   single-use code make exactly one member; the loser's `UPDATE` finds no row and answers dead.
-- **An invitation is only as good as its creator's ownership.** Demoting, removing or losing an owner revokes their
-  live invitations in the same transaction, and creating an invitation is serialised against that change.
+- **An invitation is only as good as its creator's ownership — and their account.** Demoting, removing or losing an
+  owner revokes their live invitations in the same transaction, and creating an invitation is serialised against that
+  change. Disabling an account revokes every live invitation it created, in every tenant, in the ban's own transaction
+  (D16); enabling it again revives none.
 - **A preview needs no account.** Under `invitationOnly` the invitee has none yet, and the app wants to show "Ada
   invites you to Acme" before sign-in. So preview reads no credential; it cannot judge an email binding, so it says only
   whether one exists.
 - **Signing up by invitation is all or nothing.** A dead code refuses the whole exchange — even for an existing account
-  that would sign in without it. The client asked for both at once, and it can always sign in again without the code.
+  that would sign in without it, unless that account already is a member of the code's tenant, which signs in whatever
+  the code's state (step 3 below). The client asked for both at once, and it can always sign in again without the code.
 
 ### The table
 
@@ -587,11 +590,13 @@ when the exchange carries `invitation_code`. In order:
 2. **Find the invitation's tenant** by `code_hash`, in any state. No row → `Dead`.
 3. **Already a member of that tenant?** → `AlreadyMember`, with roles unchanged and no use consumed, however dead the
    code is. A double-submitted accept therefore answers 200 twice.
-4. **Read the invitation live**: not revoked, not expired, uses left, the tenant `shared`, its creator still an owner.
+4. **Read the invitation live**: not revoked, not expired, uses left, the tenant `shared`, its creator still an owner
+   and not disabled.
    Otherwise → `Dead`.
 5. **Check the email binding** against the account's email, only if trusted, ignoring case. Otherwise → `Dead`.
 6. **Consume one use** with `UPDATE … SET uses = uses + 1 WHERE id = @id AND uses < max_uses AND revoked_at IS NULL AND
-   expires_at > @now`. Zero rows → `Dead`. Otherwise insert the membership with the invitation's roles, owner flag and
+   expires_at > @now`. Zero rows → `Dead`, unless a re-read finds the person already a member (`AlreadyMember`) — defence
+   in depth, since step 1's lock already serialises one person's accepts. Otherwise insert the membership with the invitation's roles, owner flag and
    id → `Joined`.
 
 On PostgreSQL the loser of a race waits on the row lock of step 6 and re-evaluates the predicate after the winner
@@ -636,6 +641,7 @@ the code's hash.
 | Level 3 with invitations, and an `invitationOnly` app, end to end on both engines | `InvitationEngineFacts.Level_three_with_invitations_end_to_end`, `…Invitation_only_end_to_end` (`SqliteInvitationEngineTests`, `PostgresInvitationEngineTests`) |
 | Two people accepting one single-use code at once make one member; two strangers signing up with it make one account (Review Focus 1) | `InvitationStoreFacts.Two_people_accepting_a_single_use_invitation_at_once_make_one_member`, `…Five_people_accepting_a_three_use_invitation_at_once_make_three_members`; `AccountStoreFacts.Two_new_identities_racing_for_one_single_use_invitation_create_one_account` (20 iterations, both engines); `InvitationEngineFacts.Two_people_accepting_…`, `…Two_strangers_signing_up_with_one_single_use_code_at_once_make_one_account` (over HTTP, 10 iterations, both engines) |
 | An owner's invitations die with their ownership, in the same transaction, and a create racing the demotion never outlives it (Review Focus 2) | `InvitationStoreFacts.Demoting_an_owner_revokes_…`, `…Removing_an_owner_or_an_owner_leaving_revokes_their_invitations`, `…An_invitation_created_while_its_creator_is_demoted_never_outlives_the_demotion`, `…An_accept_racing_its_creator_s_demotion_never_joins_after_the_sweep`, `…An_accept_that_waited_on_a_revocation_finds_the_invitation_revoked`; `InvitationEngineFacts.A_demoted_owner_s_invitations_are_dead_on_the_next_request` |
+| A disabled owner's invitations are dead and stay dead after enabling (D16) | `InvitationStoreFacts.Disabling_an_owner_revokes_their_invitations_and_enabling_revives_none`, `…Every_dead_invitation_previews_and_accepts_as_dead` (`creator disabled`), both engines |
 | One person double-submitting accept: one membership, both 200, one use (Review Focus 3) | `InvitationStoreFacts.One_person_accepting_twice_at_once_joins_once` (`maxUses` 1 and 3), `…Accepting_a_single_use_invitation_again_is_already_a_member`; `InvitationAcceptTests.Accepting_again_is_200_with_the_roles_unchanged` |
 | A dead code on a sign-up writes nothing — no account, identity, session, refresh token, personal tenant or membership (Review Focus 4) | `AccountStoreFacts.A_dead_invitation_creates_nothing` (six table counts); `InvitationSignUpTests.A_dead_code_refuses_and_creates_nothing` |
 | Every dead reason, one answer: a byte-identical 404 on preview and accept, one `invalid_grant` on the exchange (Review Focus 5) | `InvitationStoreFacts.Every_dead_invitation_previews_and_accepts_as_dead`; `InvitationAcceptTests.Every_dead_reason_answers_one_byte_identical_404`; `InvitationSignUpTests.A_dead_code_refuses_and_creates_nothing` |
@@ -669,7 +675,8 @@ From the plan (`2026-11-13-accounts-s4-invitations.md`, D1–D15), one line each
 - **D6** — an owner's invitations are revoked in the demotion's or removal's own transaction, and create and revoke go
   through S3's version bump, so a create racing its creator's demotion is serialised. The liveness read also requires the
   creator to still be an owner.
-- **D7** — a dead code refuses the whole exchange, even for an account that would sign in without it.
+- **D7** — a dead code refuses the whole exchange, even for an account that would sign in without it — except an
+  account already a member of the code's tenant, which signs in whatever the code's state.
 - **D8** — preview is anonymous and says only `emailBound`. **Deviation from spec §6.4:** "email-bound to someone else
   → the same 404" holds for accept and the exchange, not for an anonymous preview, which has no "someone" to compare.
 - **D9** — owner rules on create, refused never clamped: `maxUses` 1–100 (the spec gives only the default), `expiresAt`
@@ -683,6 +690,12 @@ From the plan (`2026-11-13-accounts-s4-invitations.md`, D1–D15), one line each
 - **D14** — `tenancy.selfService.invitations` is honoured. It left the unhonoured list, the dashboard's warned-slot
   mirror and the `alvo-descriptor-capabilities-and-limits` skill's generated region.
 - **D15** — an accepted membership records `invitation_id`. No membership event is emitted (spec D9 defers them).
+- **D16** — a disabled owner's invitations are dead. **Beyond spec §6.4**, which ties invitations to ownership only: a
+  ban (spec §5.6) that left the banned owner's codes live would keep admitting people — under `invitationOnly`, creating
+  accounts — for up to 30 days. Disabling an account revokes every live invitation it created, in every tenant, in the
+  ban's transaction, so the consume's `revoked_at IS NULL` refuses an accept that read the code live before the ban
+  committed; the liveness read also requires the creator's account not to be disabled (the second line, as in D6).
+  Enabling the account revives none — the revocation is a fact, like D6's sweep, and the owner issues new codes.
 
 And where the implementation answered differently from the plan's first wording, or a test had to look further:
 

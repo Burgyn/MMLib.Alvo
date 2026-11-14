@@ -330,6 +330,7 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
     [InlineData("creator demoted")]
     [InlineData("creator removed")]
     [InlineData("creator no owner")]
+    [InlineData("creator disabled")]
     [InlineData("bound to another email")]
     public async Task Every_dead_invitation_previews_and_accepts_as_dead(string reason)
     {
@@ -358,6 +359,7 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
     [InlineData("creator demoted")]
     [InlineData("creator removed")]
     [InlineData("creator no owner")]
+    [InlineData("creator disabled")]
     [InlineData("bound to another email")]
     public async Task A_member_accepting_a_dead_invitation_of_their_tenant_is_already_a_member(string reason)
     {
@@ -457,6 +459,37 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
 
         (await store.FindMembershipAsync(disabled, tenant, Ct)).ShouldBeNull();
         (await UsesAsync(services, request.Id)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Disabling an owner revokes every live invitation they created, in every tenant, in the ban's own transaction (S4
+    /// D16) — and enabling them again revives none: the codes are listed as revoked and stay dead.
+    /// </summary>
+    [Fact]
+    public async Task Disabling_an_owner_revokes_their_invitations_and_enabling_revives_none()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var accounts = services.GetRequiredService<IAccountStore>();
+        var other = TenantId.New();
+        await store.CreateSharedAsync(new CreateTenantRequest(other, "Other", owner, [], 5, _now), Ct);
+        var request = Invite(tenant, owner, maxUses: 5);
+        await store.CreateInvitationAsync(request, Ct);
+        await store.CreateInvitationAsync(Invite(other, owner), Ct);
+        (await accounts.SetDisabledAsync(owner, disabled: true, _now, Ct)).ShouldBeTrue();
+
+        (await store.PreviewInvitationAsync(request.CodeHash, _now.AddHours(1), Ct)).ShouldBeNull();
+        (await AcceptAsync(store, request.CodeHash, await SignedUpAsync(services))).Status.ShouldBe(AcceptInvitationStatus.Dead);
+        (await UsesAsync(services, request.Id)).ShouldBe(0, "a dead code consumes nothing");
+
+        (await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem().RevokedAt.ShouldBe(_now, "the ban revoked it");
+        (await store.ListInvitationsAsync(other, Ct)).ShouldHaveSingleItem().RevokedAt.ShouldBe(_now, "in every tenant");
+
+        (await accounts.SetDisabledAsync(owner, disabled: false, _now.AddHours(1), Ct)).ShouldBeTrue();
+
+        (await store.PreviewInvitationAsync(request.CodeHash, _now.AddHours(2), Ct)).ShouldBeNull("enabling revives no code");
+        (await AcceptAsync(store, request.CodeHash, await SignedUpAsync(services), _now.AddHours(2))).Status
+            .ShouldBe(AcceptInvitationStatus.Dead);
     }
 
     [Fact]
@@ -684,6 +717,12 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
         if (reason == "revoked")
         {
             (await store.RevokeInvitationAsync(Revoke(tenant, owner, request.Id), Ct)).ShouldBe(MemberChangeStatus.Changed);
+            return later;
+        }
+
+        if (reason == "creator disabled")
+        {
+            (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(owner, disabled: true, _now, Ct)).ShouldBeTrue();
             return later;
         }
 

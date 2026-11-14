@@ -89,9 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `POST /auth/v1/invitations/accept` and acts in the tenant with its roles on their next request. Accepting again
     answers the same membership and consumes nothing. Codes travel only in request bodies, never in a URL.
   - **One answer for every dead code.** Unknown, expired, revoked, used up, bound to another or an untrusted email, into
-    a personal tenant, or created by someone no longer an owner: the same 404 as an unknown tenant, byte for byte.
-  - **An owner's invitations die with their ownership.** Demoting or removing an owner, or an owner leaving, revokes
-    their live invitations in the same transaction. Two people racing for a single-use code make exactly one member.
+    a personal tenant, or created by someone no longer an owner or disabled: the same 404 as an unknown tenant, byte for byte.
+  - **An owner's invitations die with their ownership or their account.** Demoting or removing an owner, or an owner
+    leaving, revokes their live invitations in the same transaction; so does disabling the owner's account, and enabling
+    it again revives none. Two people racing for a single-use code make exactly one member.
   - **`signUp.mode: invitationOnly` admits people.** The token exchange accepts `invitation_code` (an RFC 8693
     extension parameter) in any mode. The new account, its identity, its session and the membership commit together,
     or nothing does: a dead code is one `400 invalid_grant`, also for an existing account. `allowedEmailDomains` now

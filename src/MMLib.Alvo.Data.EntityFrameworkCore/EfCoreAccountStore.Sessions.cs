@@ -158,6 +158,9 @@ internal sealed partial class EfCoreAccountStore
         }
 
         await RevokeAccountSessionsAsync(connection, transaction, account, now, ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection, transaction, _invitationTables.RevokeCreatedByAccountSql,
+            command => Bind(command, ("@now", Instant(now)), ("@user_id", Id(account))), ct).ConfigureAwait(false);
         return true;
     }
 

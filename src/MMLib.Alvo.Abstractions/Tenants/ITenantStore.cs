@@ -124,8 +124,8 @@ internal interface ITenantStore
 
     /// <summary>
     /// What a live invitation offers, read for anyone holding its code — or <see langword="null"/> for every dead one
-    /// (unknown, expired, revoked, used up, into a personal tenant, or whose creator is no longer an owner), all alike
-    /// (S4 plan D3, D8). Reads without a lock and consumes nothing; it cannot judge an email binding, so it only says
+    /// (unknown, expired, revoked, used up, into a personal tenant, or whose creator is no longer an owner or is
+    /// disabled), all alike (S4 plan D3, D8). Reads without a lock and consumes nothing; it cannot judge an email binding, so it only says
     /// whether there is one.
     /// </summary>
     /// <param name="codeHash">The SHA-256 of the presented code, lowercase hex.</param>

@@ -93,16 +93,27 @@ internal sealed class InvitationTables(string schemaPrefix)
         $"UPDATE {Invitations} SET revoked_at = @now WHERE tenant_id = @tenant_id AND created_by = @user_id AND revoked_at IS NULL";
 
     /// <summary>
+    /// Gets the statement revoking every live invitation one account created, in every tenant (S4 D16) — run in the
+    /// transaction that disables the account, so <see cref="ConsumeSql"/>'s <c>revoked_at IS NULL</c> refuses an accept
+    /// that read the invitation live before the ban committed. Enabling the account revives none of them.
+    /// </summary>
+    internal string RevokeCreatedByAccountSql =>
+        $"UPDATE {Invitations} SET revoked_at = @now WHERE created_by = @user_id AND revoked_at IS NULL";
+
+    /// <summary>
     /// The condition a live invitation <c>i</c>, joined to its tenant <c>t</c>, meets for <c>@code_hash</c> at <c>@now</c>
     /// (<see cref="InvitationAcceptance"/>'s step 3): its tenant a shared one — a personal tenant is never invited into,
     /// which the store enforces here because the table does not — not revoked, not expired, not used up, and its creator
-    /// still an owner of the tenant (D6's second line).
+    /// still an owner of the tenant (D6's second line), and that creator's account not disabled (S4 D16, the second
+    /// line behind <see cref="RevokeCreatedByAccountSql"/>). <c>NOT EXISTS … disabled</c> rather than
+    /// <c>EXISTS … enabled</c>, so a creator without an account row stays an owner.
     /// </summary>
     private string LiveWhere =>
         $"""
         i.code_hash = @code_hash AND t.kind = '{TenantTables.SharedKind}'
            AND i.revoked_at IS NULL AND i.expires_at > @now AND i.uses < i.max_uses
            AND EXISTS (SELECT 1 FROM {Members} o WHERE o.tenant_id = i.tenant_id AND o.user_id = i.created_by AND o.is_owner = 1)
+           AND NOT EXISTS (SELECT 1 FROM {Accounts} d WHERE d.id = i.created_by AND d.disabled_at IS NOT NULL)
         """;
 
     /// <summary>
