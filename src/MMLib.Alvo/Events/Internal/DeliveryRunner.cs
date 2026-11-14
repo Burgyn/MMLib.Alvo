@@ -65,7 +65,7 @@ internal enum DeliveryRunOutcome
 /// </para>
 /// <para>
 /// <b>An actor's tenant roles are the ones its membership still holds</b> (S3 plan D10b). An <c>EventActor</c> run of a
-/// person (<see cref="AlvoActorKind.User"/>) with a tenant and tenant roles reads that person's membership in the event's
+/// person (<see cref="AlvoActorKind.User"/> — by session or by a personal token, S5 plan D6) with a tenant and tenant roles reads that person's membership in the event's
 /// tenant through <see cref="IMembershipResolution"/>, inside the attempt: a person removed since the event runs with no
 /// tenant role, a demoted one with the recorded roles they still hold — never one they gained since. Project roles stay as
 /// at the event (E8). Every other run reads nothing; a failed read fails the attempt, which is retried.

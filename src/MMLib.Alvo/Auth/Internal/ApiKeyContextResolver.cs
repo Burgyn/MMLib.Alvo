@@ -7,7 +7,9 @@ namespace MMLib.Alvo.Auth.Internal;
 /// Resolves the framework's built-in dev API-key credential (<c>"&lt;keyId&gt;.&lt;secret&gt;"</c>)
 /// into an <see cref="AlvoPrincipal"/>. Every failure path returns <see langword="null"/>: an
 /// absent, malformed, or wrong credential, an unknown key id, an unusable (expired/revoked) key,
-/// an undeclared role name, and a tenant mismatch are all indistinguishable to the caller. An
+/// an undeclared role name, and a tenant mismatch are all indistinguishable to the caller — and so, for an app token
+/// (<c>alvo_pat_</c>/<c>alvo_svc_</c>), are a kind the applied descriptor does not turn on and a membership that no longer
+/// answers (<see cref="AppTokenPrincipals"/>). An
 /// unknown key id still runs a hash comparison against a same-length dummy hash, so the response
 /// time does not reveal whether the key id exists.
 /// </summary>
@@ -26,7 +28,8 @@ internal sealed class ApiKeyContextResolver(
     RoleCatalog roleCatalog,
     TimeProvider clock,
     TenantResolver tenantResolver,
-    IRoleCatalogProvider roleCatalogProvider)
+    IRoleCatalogProvider roleCatalogProvider,
+    AppTokenPrincipals appTokens)
     : IAlvoContextResolver
 {
     private const char KeySeparator = '.';
@@ -61,6 +64,11 @@ internal sealed class ApiKeyContextResolver(
             return null;
         }
 
+        if (usable.Kind is not ApiKeyKind.Configured)
+        {
+            return await ResolveAppTokenAsync(usable, requestedTenant, now, cancellationToken).ConfigureAwait(false);
+        }
+
         if (!TryResolveRoles(usable.RoleNames, out var roles))
         {
             return null;
@@ -73,6 +81,27 @@ internal sealed class ApiKeyContextResolver(
 
         await store.TouchAsync(keyId, now, cancellationToken).ConfigureAwait(false);
         return BuildPrincipal(usable, roles, tenant);
+    }
+
+    /// <summary>
+    /// An app token (S5 plan D5, D6): its tenant confirmed like any key's, then the principal its kind acts as, then the
+    /// (throttled) touch — every refusal before the touch, so a refused token records no use.
+    /// </summary>
+    private async ValueTask<AlvoPrincipal?> ResolveAppTokenAsync(
+        ApiKeyRecord token, string? requestedTenant, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (!tenantResolver.TryResolve(token, requestedTenant, out var tenant))
+        {
+            return null;
+        }
+
+        var principal = await appTokens.ResolveAsync(token, tenant, cancellationToken).ConfigureAwait(false);
+        if (principal is not null)
+        {
+            await store.TouchAsync(token.KeyId, now, cancellationToken).ConfigureAwait(false);
+        }
+
+        return principal;
     }
 
     private static bool TrySplitPresentedKey(

@@ -37,7 +37,9 @@ internal static class AuthSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoAuthOptions>, Internal.AlvoAuthOptionsValidator>());
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton(RoleCatalog.BuiltInOnly);
-        services.TryAddSingleton<IApiKeyStore, Internal.InMemoryApiKeyStore>();
+        services.TryAddSingleton<Internal.InMemoryApiKeyStore>();
+        services.TryAddSingleton<IApiKeyStore>(ApiKeyStoresFor);
+        services.TryAddSingleton<Internal.AppTokenPrincipals>();
         services.TryAddSingleton<IAlvoContextResolver, Internal.ApiKeyContextResolver>();
         services.TryAddSingleton<Internal.CallerResolvers>();
         services.TryAddSingleton(MembershipResolutionFor);
@@ -47,6 +49,15 @@ internal static class AuthSetup
         services.TryAddSingleton<TenantResolver>();
         return services;
     }
+
+    /// <summary>
+    /// The routing key store: configured dev keys, and the persisted app-token registry where a relational driver registers
+    /// one (S5 plan D4).
+    /// </summary>
+    private static Internal.ApiKeyStores ApiKeyStoresFor(IServiceProvider provider) => new(
+        provider.GetRequiredService<Internal.InMemoryApiKeyStore>(),
+        provider.GetService<IAppTokenStore>(),
+        provider.GetRequiredService<TimeProvider>());
 
     /// <summary>
     /// The registry's membership resolution where a tenant registry is registered (a relational store), else the one that
