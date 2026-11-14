@@ -55,6 +55,7 @@ internal static class InvitationAcceptance
         ArgumentNullException.ThrowIfNull(invitations);
         ArgumentNullException.ThrowIfNull(tenants);
         ArgumentNullException.ThrowIfNull(auth);
+        ArgumentNullException.ThrowIfNull(codeHash);
         var steps = new Steps(connection, transaction, invitations, tenants, person, now);
 
         if (!await steps.LockedAsync(ct).ConfigureAwait(false))
@@ -200,11 +201,11 @@ internal static class InvitationAcceptance
             }
         }
 
-        private static void Bind(DbCommand command, params (string Name, object Value)[] parameters)
+        private static void Bind(DbCommand command, params (string Name, object? Value)[] parameters)
         {
             foreach (var (name, value) in parameters)
             {
-                RelationalSqlBatch.AddParameter(command, name, value);
+                RelationalSqlBatch.AddParameter(command, name, value ?? DBNull.Value);
             }
         }
 

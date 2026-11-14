@@ -67,7 +67,7 @@ internal sealed class InvitationTables(string schemaPrefix)
         )
         """;
 
-    /// <summary>Gets the statement inserting a new invitation, used by nobody yet.</summary>
+    /// <summary>Gets the statement inserting a new invitation, unused and live (<c>uses</c> 0, <c>revoked_at</c> null).</summary>
     internal string InsertSql =>
         $"""
         INSERT INTO {Invitations} (id, tenant_id, code_hash, roles, grants_owner, email, max_uses, uses, expires_at, created_by, created_at, revoked_at)

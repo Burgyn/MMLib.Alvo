@@ -13,7 +13,8 @@ namespace MMLib.Alvo.Tests.Accounts;
 /// The world's tenants as a person sees them over HTTP, and a member seeded beside them — on both engines.
 /// </summary>
 /// <remarks>
-/// <b>A member is seeded with the registry's own column list</b> (S3 plan D15: members arrive through invitations, in S4).
+/// <b>A member is seeded with the registry's own column list</b> (S3 plan D15), for the facts that are about a member
+/// and not about how they joined — joining by invitation is <see cref="InvitationEngineFacts"/>' subject.
 /// <c>TenantSeed</c> runs <c>TenantTables</c>' statement, but that type is internal to the EF adapter, which grants neither
 /// suite that links this file — and no new grant is opened for a seed. The table is named by its suffix as the framework
 /// reserves it (<c>AlvoFrameworkTables.TenantMembersSuffix</c>, internal to Abstractions, which the PostgreSQL suite is not

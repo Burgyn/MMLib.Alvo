@@ -13,6 +13,10 @@ public sealed class PostgreSqlInvitationStoreTests : InvitationStoreFacts, IAsyn
     private readonly PostgreSqlAlvoDataFixture _fixture = new();
 
     /// <inheritdoc/>
+    protected override string? LockWaitsSql =>
+        "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'";
+
+    /// <inheritdoc/>
     public ValueTask InitializeAsync() => _fixture.InitializeAsync();
 
     /// <inheritdoc/>

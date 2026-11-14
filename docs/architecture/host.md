@@ -152,12 +152,15 @@ host, path base and prefix — `http://localhost:5000/auth/v1` on a local run), 
 with `PUT /management/projects/{project}/accounts/{account}/disabled` (`admin`; see `management-api.md`, *Disabling an
 end user*).
 
-**`Alvo:Api:Cors:Origins`**, **`Alvo:Api:RateLimits:Token`** and **`Alvo:Api:RateLimits:Create`** come with the `Alvo:Api` binding the host already
+**`Alvo:Api:Cors:Origins`**, **`Alvo:Api:RateLimits:Token`**, **`Alvo:Api:RateLimits:Create`** and **`Alvo:Api:RateLimits:Invitations`** come with the `Alvo:Api` binding the host already
 makes into `AlvoApiOptions` — nothing host-specific. `Cors:Origins` lists the exact browser origins
 (`https://app.example.com`, no path, no `*`) allowed to call the Data API and the auth routes; empty, which is the
 default, sends no CORS headers and answers no preflight. `RateLimits:Token` is the token endpoint's budget per client
 IP per minute (default 30); `RateLimits:Create` is the same per-client budget for creating tenants, `POST
-/auth/v1/tenants` (default 10, at least 1 — the only self-service route it charges). The client IP is the connection's, so behind a proxy it is honest only with
+/auth/v1/tenants` (default 10, at least 1 — the only self-service route it charges); `RateLimits:Invitations` is the
+per-client budget shared by the five invitation routes — creating, listing and revoking an invitation, previewing and
+accepting a code (default 20, at least 1). The token exchange keeps the `Token` budget even when it carries an
+`invitation_code`. The client IP is the connection's, so behind a proxy it is honest only with
 `Alvo:ForwardedHeaders:Enabled` — see *Behind a reverse proxy*. See `data-api.md`, *CORS and rate limits*.
 
 **`Alvo:Admin:Dashboard:Enabled`** (`Alvo__Admin__Dashboard__Enabled`) is the whole of the

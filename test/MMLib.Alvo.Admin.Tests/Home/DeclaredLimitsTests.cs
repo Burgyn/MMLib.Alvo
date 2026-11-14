@@ -123,11 +123,12 @@ public class DeclaredLimitsTests
     [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": false } } }""")]
     public void Invitations_are_never_listed(string descriptor)
     {
-        var older = new ManagementCapabilities(
-            ["entities"], [new ManagementWarnedBlock("tenancy.selfService.invitations", "owners cannot invite anyone in this build")], []);
+        var invitations = new ManagementWarnedBlock("tenancy.selfService.invitations", "owners cannot invite anyone in this build");
+        var older = new ManagementCapabilities(["entities"], [invitations], []);
+        var olderBesideTheRest = _capabilities with { Warned = [.. _capabilities.Warned, invitations] };
 
-        Slots(descriptor).ShouldNotContain("tenancy.selfService.invitations");
         DeclaredLimits.Of(descriptor, older).ShouldBeEmpty();
+        DeclaredLimits.Of(descriptor, olderBesideTheRest).Select(block => block.Block).ShouldNotContain(invitations.Block);
     }
 
     /// <summary>Every qualified slot this screen detects, which a Host test holds against the real build's report.</summary>

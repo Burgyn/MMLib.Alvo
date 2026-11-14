@@ -36,6 +36,12 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
     /// <summary>Disposes the engine fixture.</summary>
     protected abstract ValueTask DisposeFixtureAsync();
 
+    /// <summary>
+    /// Gets a query counting the sessions of this database that wait on a lock, or <see langword="null"/> where no such
+    /// wait can be observed — see <see cref="UntilASessionWaitsOnALockAsync"/>.
+    /// </summary>
+    protected virtual string? LockWaitsSql => null;
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
@@ -610,12 +616,37 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
         }
 
         var accepting = Task.Run(() => AcceptAsync(store, request.CodeHash, person), Ct);
-        await Task.Delay(TimeSpan.FromMilliseconds(500), Ct);
+        await UntilASessionWaitsOnALockAsync(services);
         await revocation.CommitAsync(Ct);
 
         (await accepting).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.Dead, null));
         (await store.FindMembershipAsync(person, tenant, Ct)).ShouldBeNull();
         (await UsesAsync(services, request.Id)).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// Returns once another session of the database waits on a lock (<see cref="LockWaitsSql"/>), so a fact commits the
+    /// lock holder only after its contender is really blocked behind it — an order, not a timing. Without the query it
+    /// returns at once: on SQLite the open writer holds the database's write lock, so the contender cannot get ahead of it
+    /// whatever the order.
+    /// </summary>
+    private async Task UntilASessionWaitsOnALockAsync(IServiceProvider services)
+    {
+        if (LockWaitsSql is not { } sql)
+        {
+            return;
+        }
+
+        await using var connection = services.GetRequiredService<RelationalConnectionFactory>().Create();
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (Convert.ToInt64(await command.ExecuteScalarAsync(Ct), CultureInfo.InvariantCulture) == 0)
+        {
+            DateTimeOffset.UtcNow.ShouldBeLessThan(deadline, "no session ever waited on the open writer's lock");
+            await Task.Delay(TimeSpan.FromMilliseconds(10), Ct);
+        }
     }
 
     /// <summary>Builds the dead invitation <paramref name="reason"/> names and returns its hash and the instant to try it at.</summary>

@@ -119,8 +119,12 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   without invitations — `tenancy.selfService`, the tenant registry (`_tenants`, `_tenant_members`), the personal
   tenant, `/auth/v1/tenants` and its members routes, the tenant header selecting among a person's memberships in the
   session's one read, the registry as the default tenant list under `selfService`; every tenant wall proven end to end
-  on SQLite and PostgreSQL (`TenancyEngineFacts`). The initiative's `← YOU ARE HERE` is **S4** — invitations (owners
-  invite people into shared tenants; `tenancy.selfService.invitations` stops being unhonoured).
+  on SQLite and PostgreSQL (`TenancyEngineFacts`). **S4**: invitations — owners invite people into shared tenants by a
+  128-bit code shown once (`_tenant_invitations`, `/auth/v1/tenants/{id}/invitations`, anonymous preview, accept),
+  every dead code one 404, an owner's invitations dying with their ownership, and `signUp.mode: invitationOnly` signing
+  people up through `invitation_code` on the token exchange with account and membership in one transaction;
+  `tenancy.selfService.invitations` is honoured; proven end to end and under both races on SQLite and PostgreSQL
+  (`InvitationEngineFacts`). The initiative's `← YOU ARE HERE` is **S5** — personal and service tokens.
 
 ## 3a. What closed F4
 
