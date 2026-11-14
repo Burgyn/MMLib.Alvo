@@ -34,7 +34,11 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
     private readonly string _keyFile = Path.Combine(Path.GetTempPath(), $"alvo-account-key-{Guid.NewGuid():N}");
 
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    /// <summary>Gets the instant every fact's sign-in starts at.</summary>
+    protected static DateTimeOffset Start => _now;
+
+    /// <summary>Gets the running fact's cancellation token.</summary>
+    protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>Starts one fresh database and returns its host container.</summary>
     /// <param name="configure">Applied to the collection after <c>AddAlvo</c>, before it is built.</param>
@@ -433,18 +437,26 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         stored.ToString().ShouldContain("kid-1");
     }
 
-    private static async Task<(UserId Account, SignInRequest Session)> SignedInAsync(IAccountStore store)
+    /// <summary>Signs a fresh identity in and returns its account and the request that started its session.</summary>
+    /// <param name="store">The store under test.</param>
+    private protected static async Task<(UserId Account, SignInRequest Session)> SignedInAsync(IAccountStore store)
     {
         var request = SignIn(Identity("sub-" + Guid.NewGuid().ToString("N")));
         var outcome = await store.SignInAsync(request, Ct);
         return (outcome.Account!.Value, request);
     }
 
-    private static RefreshRequest Refresh(Guid token, DateTimeOffset now) => new(token, Guid.NewGuid(), now, _grace, _idle);
+    /// <summary>A presentation of <paramref name="token"/> at <paramref name="now"/> with a fresh child id.</summary>
+    /// <param name="token">The refresh token id.</param>
+    /// <param name="now">The instant of the presentation.</param>
+    private protected static RefreshRequest Refresh(Guid token, DateTimeOffset now) => new(token, Guid.NewGuid(), now, _grace, _idle);
 
     private static KeyCandidate Candidate(string purpose, string kid, string material) => new(purpose, 1, kid, material, _now);
 
-    private static async Task<long> ChildrenAsync(IServiceProvider services, Guid parent) => Convert.ToInt64(
+    /// <summary>How many children <paramref name="parent"/> has.</summary>
+    /// <param name="services">The host container.</param>
+    /// <param name="parent">The refresh token id.</param>
+    protected static async Task<long> ChildrenAsync(IServiceProvider services, Guid parent) => Convert.ToInt64(
         await ScalarAsync(
             services,
             $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE parent_id = '{parent:D}'"),
@@ -454,7 +466,9 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         services,
         $"SELECT revoked_reason FROM {TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix)} WHERE id = '{session:D}'");
 
-    private async Task<(IAccountStore Store, IServiceProvider Services)> StoreAsync(bool withKey = true)
+    /// <summary>Starts a fresh database and returns its account store and container.</summary>
+    /// <param name="withKey">Whether the secrets key file is mounted.</param>
+    private protected async Task<(IAccountStore Store, IServiceProvider Services)> StoreAsync(bool withKey = true)
     {
         var services = await StartAsync(withKey ? MountKey : null);
         return (services.GetRequiredService<IAccountStore>(), services);
@@ -474,16 +488,24 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         string subject, string? email = "ada@gmail.com", bool trusted = true, string? name = "Ada", string? picture = null) =>
         new("google", subject, email, trusted, name, picture);
 
-    private static SignInRequest SignIn(VerifiedIdentity identity) =>
+    /// <summary>A sign-in of <paramref name="identity"/> that may create an account, with fresh ids.</summary>
+    /// <param name="identity">The verified identity.</param>
+    private protected static SignInRequest SignIn(VerifiedIdentity identity) =>
         new(identity, MayCreate: true, Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), _now, _now + _session);
 
-    private static string TableOf(IServiceProvider services, string suffix) =>
+    /// <summary>The prefixed name of the framework table <paramref name="suffix"/> names.</summary>
+    /// <param name="services">The host container.</param>
+    /// <param name="suffix">An <c>AlvoFrameworkTables</c> suffix.</param>
+    protected static string TableOf(IServiceProvider services, string suffix) =>
         services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix + suffix;
 
     private static async Task<long> CountAsync(IServiceProvider services, string suffix) =>
         Convert.ToInt64(await ScalarAsync(services, $"SELECT COUNT(*) FROM {TableOf(services, suffix)}"), CultureInfo.InvariantCulture);
 
-    private static async Task<object?> ScalarAsync(IServiceProvider services, string sql)
+    /// <summary>Runs <paramref name="sql"/> on its own connection and returns the first column of the first row.</summary>
+    /// <param name="services">The host container.</param>
+    /// <param name="sql">The statement.</param>
+    protected static async Task<object?> ScalarAsync(IServiceProvider services, string sql)
     {
         await using var connection = services.GetRequiredService<RelationalConnectionFactory>().Create();
         await connection.OpenAsync(Ct);
