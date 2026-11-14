@@ -37,6 +37,11 @@ internal readonly record struct MembershipPlan(MembershipPlanKind Kind, Membersh
 /// descriptor change counts on the next request and no stored name outlives its reason.
 /// </para>
 /// <para>
+/// <b>Only a personal tenant's owner holds <c>personalTenant.roles</c></b> — defence in depth: a personal tenant has exactly
+/// one member, its owner (spec §6.1), so a personal row that is not the owner's is one the registry should never hold, and it
+/// is honoured as no membership at all rather than lending the personal roles to whoever it names.
+/// </para>
+/// <para>
 /// <b>Never a principal without the tenant it named</b> (spec §5.7 step 3): every path that has a named tenant and no
 /// membership answering it is <see cref="MembershipResolution.Refusal"/>.
 /// </para>
@@ -84,11 +89,11 @@ internal static class MembershipRules
 
     /// <summary>
     /// Whether <paramref name="found"/> is a membership the policy honours for this request: the tenant named (or, with
-    /// none named, a personal one), personal only while the descriptor gives personal tenants.
+    /// none named, a personal one), personal only while the descriptor gives personal tenants and only its owner's.
     /// </summary>
     private static bool Answers(TenantId? requested, StoredMembership? found, SelfServicePolicy policy) =>
         found is not null
         && policy.Enabled
         && (requested is { } tenant ? found.Tenant == tenant : found.Kind == TenantKind.Personal)
-        && (found.Kind != TenantKind.Personal || policy.HasPersonalTenant);
+        && (found.Kind != TenantKind.Personal || (policy.HasPersonalTenant && found.IsOwner));
 }

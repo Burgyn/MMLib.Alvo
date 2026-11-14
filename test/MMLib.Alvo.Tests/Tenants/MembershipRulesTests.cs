@@ -35,6 +35,8 @@ public sealed class MembershipRulesTests
     private static StoredMembership Personal(params string[] roles) =>
         new(_personalId, TenantKind.Personal, "Ada", roles, IsOwner: true, DateTimeOffset.UnixEpoch);
 
+    private static StoredMembership PersonalNotOwned() => Personal() with { IsOwner = false };
+
     private static string[] Names(MembershipResolution resolution) =>
         [.. resolution.TenantRoles.Select(role => role.Name).Order(StringComparer.Ordinal)];
 
@@ -106,6 +108,18 @@ public sealed class MembershipRulesTests
         Names(resolution).ShouldBe(["technician"]);
         named.Tenant.ShouldBe(_personalId);
         Names(named).ShouldBe(["technician"]);
+    }
+
+    /// <summary>
+    /// Defence in depth: a personal tenant's only member is its owner, so a personal row that is not the owner's — one the
+    /// registry should never hold — lends nobody the personal roles; it is no membership.
+    /// </summary>
+    [Fact]
+    public void Only_a_personal_tenant_s_owner_holds_its_roles()
+    {
+        MembershipRules.Decide(_personalId, PersonalNotOwned(), _withPersonal).ShouldBeSameAs(MembershipResolution.Refusal);
+        MembershipRules.Decide(null, PersonalNotOwned(), _withPersonal).ShouldBeSameAs(MembershipResolution.NoTenant);
+        MembershipRules.Decide(null, Personal(), _withPersonal).TenantRoles.ShouldBe([_technician]);
     }
 
     [Fact]
