@@ -324,6 +324,7 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
     [InlineData("creator demoted")]
     [InlineData("creator removed")]
     [InlineData("creator no owner")]
+    [InlineData("bound to another email")]
     public async Task Every_dead_invitation_previews_and_accepts_as_dead(string reason)
     {
         var (store, services) = await StoreAsync();
@@ -331,9 +332,69 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
         var person = await SignedUpAsync(services);
         var (hash, now) = await DeadAsync(store, services, reason, tenant, owner, member);
 
-        (await store.PreviewInvitationAsync(hash, now, Ct)).ShouldBeNull(reason);
+        (await store.PreviewInvitationAsync(hash, now, Ct) is null)
+            .ShouldBe(reason != "bound to another email", $"{reason}: an anonymous preview judges no binding (D8)");
         (await AcceptAsync(store, hash, person, now)).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.Dead, null), reason);
         (await store.FindMembershipAsync(person, tenant, Ct)).ShouldBeNull(reason);
+    }
+
+    /// <summary>
+    /// A member of the tenant who accepts one of its invitations is already a member, whatever state the invitation is in:
+    /// membership is judged before liveness, so a double submit of a single-use code answers a membership both times. The
+    /// stored membership is unchanged and no use is consumed. A code nobody issued is still dead.
+    /// </summary>
+    /// <param name="reason">Why the invitation is dead.</param>
+    [Theory]
+    [InlineData("expired at the instant")]
+    [InlineData("expired after")]
+    [InlineData("revoked")]
+    [InlineData("used up")]
+    [InlineData("creator demoted")]
+    [InlineData("creator removed")]
+    [InlineData("creator no owner")]
+    [InlineData("bound to another email")]
+    public async Task A_member_accepting_a_dead_invitation_of_their_tenant_is_already_a_member(string reason)
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(store, services);
+        var (hash, now) = await DeadAsync(store, services, reason, tenant, owner, member);
+        var before = (await store.FindMembershipAsync(member, tenant, Ct)).ShouldNotBeNull(reason);
+        var uses = await ScalarAsync(services, $"SELECT SUM(uses) FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)}");
+
+        var outcome = await AcceptAsync(store, hash, member, now);
+
+        outcome.Status.ShouldBe(AcceptInvitationStatus.AlreadyMember, reason);
+        Same(outcome.Membership.ShouldNotBeNull(reason), before);
+        Same((await store.FindMembershipAsync(member, tenant, Ct)).ShouldNotBeNull(reason), before);
+        (await ScalarAsync(services, $"SELECT SUM(uses) FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)}"))
+            .ShouldBe(uses, reason);
+    }
+
+    [Fact]
+    public async Task A_member_presenting_a_code_nobody_issued_is_dead()
+    {
+        var (store, services) = await StoreAsync();
+        var (_, _, member) = await TeamAsync(store, services);
+
+        (await AcceptAsync(store, Hash(), member)).ShouldBe(new AcceptInvitationOutcome(AcceptInvitationStatus.Dead, null));
+    }
+
+    [Fact]
+    public async Task Accepting_a_single_use_invitation_again_is_already_a_member()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var invitee = await SignedUpAsync(services);
+        var request = Invite(tenant, owner, ["viewer"]);
+        await store.CreateInvitationAsync(request, Ct);
+
+        var first = await AcceptAsync(store, request.CodeHash, invitee);
+        var again = await AcceptAsync(store, request.CodeHash, invitee, _now.AddHours(2));
+
+        first.Status.ShouldBe(AcceptInvitationStatus.Joined);
+        again.Status.ShouldBe(AcceptInvitationStatus.AlreadyMember, "the double submit of a used-up code still answers a membership");
+        Same(again.Membership.ShouldNotBeNull(), first.Membership.ShouldNotBeNull());
+        (await UsesAsync(services, request.Id)).ShouldBe(1);
     }
 
     [Fact]
@@ -465,17 +526,21 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
 
     /// <summary>
     /// Review Focus 3 (S4 plan D4 step 1): one person submits the same accept twice at once. The account row lock
-    /// serialises the two, so the second sees the first's membership: one join, one use, both answers a membership.
+    /// serialises the two, so the second sees the first's membership: one join, one use, both answers a membership — for
+    /// a single-use invitation too, which the first accept used up, because membership is judged before liveness.
     /// </summary>
-    [Fact]
-    public async Task One_person_accepting_twice_at_once_joins_once()
+    /// <param name="maxUses">The invitation's use count.</param>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task One_person_accepting_twice_at_once_joins_once(int maxUses)
     {
         var (store, services) = await StoreAsync();
         var (tenant, owner, _) = await TeamAsync(store, services);
 
         for (var iteration = 0; iteration < Iterations; iteration++)
         {
-            var request = Invite(tenant, owner, maxUses: 3);
+            var request = Invite(tenant, owner, maxUses: maxUses);
             await store.CreateInvitationAsync(request, Ct);
             var person = await SignedUpAsync(services);
 
@@ -521,7 +586,7 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
     /// <summary>
     /// The deterministic half of Review Focus 2: an acceptance reads the invitation live while a revocation of it — the
     /// stand-in for a demotion's sweep — holds its row uncommitted, then reaches the conditional update only after the
-    /// revocation committed. Step 5's own <c>revoked_at IS NULL</c> is what refuses it: step 2's read was already past.
+    /// revocation committed. Step 5's own <c>revoked_at IS NULL</c> is what refuses it: step 3's read was already past.
     /// (On SQLite the open revocation holds the write lock, so the acceptance starts only after it and reads it dead.)
     /// </summary>
     [Fact]
@@ -565,6 +630,9 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
                 return (Hash(), later);
             case "creator no owner":
                 await TenantSeed.AddInvitationAsync(services, Invite(tenant, member, maxUses: 2) with { CodeHash = request.CodeHash });
+                return (request.CodeHash, later);
+            case "bound to another email":
+                await store.CreateInvitationAsync(request with { Email = "bob@example.com" }, Ct);
                 return (request.CodeHash, later);
         }
 

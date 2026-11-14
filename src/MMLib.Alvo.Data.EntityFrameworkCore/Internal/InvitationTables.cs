@@ -94,9 +94,9 @@ internal sealed class InvitationTables(string schemaPrefix)
 
     /// <summary>
     /// The condition a live invitation <c>i</c>, joined to its tenant <c>t</c>, meets for <c>@code_hash</c> at <c>@now</c>
-    /// (D4 step 2): its tenant a shared one — a personal tenant is never invited into, which the store enforces here
-    /// because the table does not — not revoked, not expired, not used up, and its creator still an owner of the tenant
-    /// (D6's second line).
+    /// (<see cref="InvitationAcceptance"/>'s step 3): its tenant a shared one — a personal tenant is never invited into,
+    /// which the store enforces here because the table does not — not revoked, not expired, not used up, and its creator
+    /// still an owner of the tenant (D6's second line).
     /// </summary>
     private string LiveWhere =>
         $"""
@@ -104,6 +104,12 @@ internal sealed class InvitationTables(string schemaPrefix)
            AND i.revoked_at IS NULL AND i.expires_at > @now AND i.uses < i.max_uses
            AND EXISTS (SELECT 1 FROM {Members} o WHERE o.tenant_id = i.tenant_id AND o.user_id = i.created_by AND o.is_owner = 1)
         """;
+
+    /// <summary>
+    /// Gets the statement reading the tenant of the invitation of one code in any state — live or dead — so the acceptance
+    /// judges membership before liveness (<see cref="InvitationAcceptance"/>'s step 2); no row when no invitation has the code.
+    /// </summary>
+    internal string TenantOfSql => $"SELECT tenant_id FROM {Invitations} WHERE code_hash = @code_hash";
 
     /// <summary>Gets the statement reading the live invitation of one code, in <see cref="ReadLive"/>'s order; no row when it is dead.</summary>
     internal string LiveSql =>
@@ -194,7 +200,7 @@ internal sealed class InvitationTables(string schemaPrefix)
         reader.IsDBNull(ordinal) ? null : StoredInstant.Of(reader.GetString(ordinal));
 }
 
-/// <summary>A live invitation, as the acceptance reads it (D4 step 2).</summary>
+/// <summary>A live invitation, as the acceptance reads it (<see cref="InvitationAcceptance"/>'s step 3).</summary>
 /// <param name="Id">The invitation.</param>
 /// <param name="Tenant">The shared tenant it invites into.</param>
 /// <param name="TenantName">The tenant's name.</param>
