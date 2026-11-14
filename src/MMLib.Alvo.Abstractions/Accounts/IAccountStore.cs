@@ -76,8 +76,9 @@ internal interface IAccountStore
     Task<bool> RevokeSessionAsync(Guid session, string reason, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
-    /// Disables an account and revokes every live session of it (<see cref="SessionRevocations.Disabled"/>) in one
-    /// transaction, or enables it again — which leaves those sessions revoked (spec §5.6).
+    /// Disables an account or enables it again, and either way revokes every live session of it
+    /// (<see cref="SessionRevocations.Disabled"/>) in the same transaction (spec §5.6): an enable is a clean slate, so no
+    /// session from before it comes back, even one that reached the table after the ban's revocation.
     /// </summary>
     /// <param name="account">The account's id.</param>
     /// <param name="disabled">Whether the account is to be disabled.</param>

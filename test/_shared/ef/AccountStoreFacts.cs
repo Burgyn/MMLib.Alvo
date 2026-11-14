@@ -351,6 +351,26 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await store.IsSessionLiveAsync(account, again.SessionId, _now, Ct)).ShouldBeTrue();
     }
 
+    /// <summary>
+    /// Enabling revokes every session the account still has (spec §5.6), not only those the ban revoked: a session that
+    /// reached the table after the ban's revocation — the window the PostgreSQL leg stages with a held transaction — does
+    /// not come back to life with the account.
+    /// </summary>
+    [Fact]
+    public async Task Enabling_an_account_revokes_a_session_the_ban_never_saw()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        await store.SetDisabledAsync(account, disabled: true, _now.AddMinutes(1), Ct);
+        var late = Guid.NewGuid();
+        await ScalarAsync(services, LateSessionSql(services, session.SessionId, late));
+
+        (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(2), Ct)).ShouldBeTrue();
+
+        (await store.IsSessionLiveAsync(account, late, _now.AddMinutes(3), Ct)).ShouldBeFalse();
+        (await RevokedReasonAsync(services, late)).ShouldBe(SessionRevocations.Disabled, "it ends as the ban's");
+    }
+
     [Fact]
     public async Task Signing_out_twice_is_the_same_as_once()
     {
@@ -462,9 +482,29 @@ public abstract class AccountStoreFacts : IAsyncDisposable
             $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE parent_id = '{parent:D}'"),
         CultureInfo.InvariantCulture);
 
-    private static async Task<string?> RevokedReasonAsync(IServiceProvider services, Guid session) => (string?)await ScalarAsync(
+    /// <summary>
+    /// The statement inserting session <paramref name="late"/> as a copy of <paramref name="session"/>, unrevoked — a
+    /// sign-in of the same account that commits whenever the fact runs it.
+    /// </summary>
+    /// <param name="services">The host container.</param>
+    /// <param name="session">The session whose account, provider and stamps the copy takes.</param>
+    /// <param name="late">The new session's id.</param>
+    protected static string LateSessionSql(IServiceProvider services, Guid session, Guid late)
+    {
+        var sessions = TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix);
+        return $"""
+            INSERT INTO {sessions} (id, account_id, provider, subject_token_id, created_at, last_refreshed_at, expires_at, revoked_at, revoked_reason)
+            SELECT '{late:D}', account_id, provider, '{late:N}', created_at, last_refreshed_at, expires_at, NULL, NULL
+              FROM {sessions} WHERE id = '{session:D}'
+            """;
+    }
+
+    /// <summary>The reason <paramref name="session"/> was revoked with, or <see langword="null"/> while it is live.</summary>
+    /// <param name="services">The host container.</param>
+    /// <param name="session">The session id.</param>
+    protected static async Task<string?> RevokedReasonAsync(IServiceProvider services, Guid session) => await ScalarAsync(
         services,
-        $"SELECT revoked_reason FROM {TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix)} WHERE id = '{session:D}'");
+        $"SELECT revoked_reason FROM {TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix)} WHERE id = '{session:D}'") as string;
 
     /// <summary>Starts a fresh database and returns its account store and container.</summary>
     /// <param name="withKey">Whether the secrets key file is mounted.</param>

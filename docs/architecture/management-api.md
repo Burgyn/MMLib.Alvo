@@ -577,9 +577,10 @@ Spec 2026-11-13 §5.6: an operator of an open-sign-up app must be able to ban a 
 `PUT {m}/projects/{project}/accounts/{account}/disabled` with `{"disabled": true}` stamps the account's `disabled_at`
 and revokes every live session of it (reason `disabled`) **in one transaction** — one `IAccountStore` call — so the
 person's next request with an access token is `401 invalid_token`, their next refresh `invalid_grant`, and their next
-sign-in `403 sign-in-refused`. `{"disabled": false}` clears the stamp and lets them sign in again; the sessions it
-revoked stay revoked, so a ban is also a force-logout. The success answer is `204`; an account id that does not exist
-is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
+sign-in `403 sign-in-refused`. `{"disabled": false}` clears the stamp and lets them sign in again, and revokes every
+session the account still has in the same transaction: a clean slate, so a ban is a force-logout even for a session
+the ban's own revocation never saw, and the person signs in afresh. The success answer is `204`; an account id that
+does not exist is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
 must not be the permissive one. The ban takes effect on the very next request, not when the access token expires:
 every Bearer request reads its session (spec §5.7's one store read), and that read sees the revocation.
 

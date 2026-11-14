@@ -51,7 +51,7 @@ internal sealed partial class EfCoreAccountStore
         InTransactionAsync(
             (connection, transaction, token) => disabled
                 ? DisabledAsync(connection, transaction, account, now, token)
-                : EnabledAsync(connection, transaction, account, token),
+                : EnabledAsync(connection, transaction, account, now, token),
             changed => changed,
             ct);
 
@@ -140,17 +140,36 @@ internal sealed partial class EfCoreAccountStore
             return false;
         }
 
-        await ExecuteAsync(
-            connection, transaction, _tables.RevokeAccountSessionsSql,
-            command => Bind(command, ("@now", Instant(now)), ("@reason", SessionRevocations.Disabled), ("@account_id", Id(account))),
-            ct).ConfigureAwait(false);
+        await RevokeAccountSessionsAsync(connection, transaction, account, now, ct).ConfigureAwait(false);
         return true;
     }
 
-    private async Task<bool> EnabledAsync(DbConnection connection, DbTransaction transaction, UserId account, CancellationToken ct) =>
-        await ExecuteAsync(
+    /// <summary>
+    /// Clears the stamp, then revokes every session the account still has — a clean slate, so a session that reached the
+    /// table after the ban's revocation never comes back with the account. The stamp's update takes the account's row
+    /// lock first, so a sign-in that waited on it inserts its session after this revocation and keeps it.
+    /// </summary>
+    private async Task<bool> EnabledAsync(
+        DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset now, CancellationToken ct)
+    {
+        if (await ExecuteAsync(
             connection, transaction, _tables.EnableAccountSql,
-            command => Bind(command, ("@account_id", Id(account))), ct).ConfigureAwait(false) == 1;
+            command => Bind(command, ("@account_id", Id(account))), ct).ConfigureAwait(false) != 1)
+        {
+            return false;
+        }
+
+        await RevokeAccountSessionsAsync(connection, transaction, account, now, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>Revokes every live session of <paramref name="account"/> as the ban's (<see cref="SessionRevocations.Disabled"/>).</summary>
+    private Task<int> RevokeAccountSessionsAsync(
+        DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset now, CancellationToken ct) =>
+        ExecuteAsync(
+            connection, transaction, _tables.RevokeAccountSessionsSql,
+            command => Bind(command, ("@now", Instant(now)), ("@reason", SessionRevocations.Disabled), ("@account_id", Id(account))),
+            ct);
 
     private async Task<TokenRow?> TokenAsync(DbConnection connection, DbTransaction transaction, Guid token, CancellationToken ct)
     {

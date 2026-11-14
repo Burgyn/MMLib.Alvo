@@ -68,6 +68,41 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
             CultureInfo.InvariantCulture).ShouldBe(1, "only the session that existed before the disable");
     }
 
+    /// <summary>
+    /// A sign-in racing a ban, held open across it, leaves no session an enable brings back. Holding the account's row
+    /// lock (the store's own sign-in takes it with its profile refresh), the ban waits for the sign-in and revokes its
+    /// session. Inserting the session alone takes no lock the ban meets, so it commits after the ban's revocation and
+    /// the ban never sees it: only the enable's own revocation keeps it dead.
+    /// </summary>
+    [Theory]
+    [InlineData("holding the account's row lock", true)]
+    [InlineData("committing after the ban's revocation", false)]
+    public async Task A_sign_in_racing_a_ban_leaves_no_session_an_enable_revives(string race, bool banWaits)
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var late = Guid.NewGuid();
+        await using var holder = await HoldAsync(services, LateSignIn(services, account, session.SessionId, late, banWaits));
+
+        var ban = store.SetDisabledAsync(account, disabled: true, Start.AddMinutes(1), Ct);
+        if (banWaits)
+        {
+            await WaitingOnALockAsync(services);
+        }
+        else
+        {
+            (await ban).ShouldBeTrue(race);
+        }
+
+        await holder.CommitAsync(Ct);
+        (await ban).ShouldBeTrue(race);
+        (await RevokedReasonAsync(services, late) is not null).ShouldBe(banWaits, race);
+        (await store.SetDisabledAsync(account, disabled: false, Start.AddMinutes(2), Ct)).ShouldBeTrue();
+
+        (await store.IsSessionLiveAsync(account, late, Start.AddMinutes(3), Ct)).ShouldBeFalse(race);
+        (await store.IsSessionLiveAsync(account, session.SessionId, Start.AddMinutes(3), Ct)).ShouldBeFalse(race);
+    }
+
     /// <inheritdoc/>
     protected override async Task<IServiceProvider> StartAsync(Action<IServiceCollection>? configure) =>
         (await _fixture.StartAsync(new SchemaModel([]), configure: configure)).Services;
@@ -86,6 +121,22 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
                 $"UPDATE {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} SET disabled_at = created_at WHERE id = '{account.Value:D}'",
                 $"UPDATE {sessions} SET revoked_at = created_at, revoked_reason = 'disabled' WHERE account_id = '{account.Value:D}' AND revoked_at IS NULL",
             ];
+    }
+
+    /// <summary>
+    /// A sign-in of <paramref name="account"/> starting session <paramref name="late"/>: with <paramref name="locksAccount"/>,
+    /// first the profile refresh's row lock on the account, as the store takes it; otherwise the session insert alone.
+    /// </summary>
+    private static string[] LateSignIn(IServiceProvider services, UserId account, Guid session, Guid late, bool locksAccount)
+    {
+        var insert = LateSessionSql(services, session, late);
+        return locksAccount
+            ?
+            [
+                $"UPDATE {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} SET last_sign_in_at = created_at WHERE id = '{account.Value:D}' AND disabled_at IS NULL",
+                insert,
+            ]
+            : [insert];
     }
 
     /// <summary>Runs <paramref name="statements"/> in a transaction left open, so their row locks are held.</summary>
