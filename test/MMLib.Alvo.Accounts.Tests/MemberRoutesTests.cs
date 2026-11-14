@@ -215,15 +215,20 @@ public sealed class MemberRoutesTests
         Names(members[2]["roles"]).ShouldBe(["technician"], "a stored name outside assignableRoles is never shown (D5)");
     }
 
+    /// <summary>
+    /// GitHub's rule (S3 plan D7): another person's shared tenant, another person's <em>personal</em> tenant — where an
+    /// owner's own change would be 409 — and an id naming nothing all answer a stranger the same 404, byte for byte.
+    /// </summary>
     [Fact]
     public async Task A_non_member_gets_404_on_every_member_route()
     {
         await using var team = await TeamAsync();
         var (carol, _) = await team.World.SignInAsync("carol", email: "carol@gmail.com");
         var unknown = Guid.NewGuid();
+        var adasPersonal = (await team.World.PersonalTenantAsync(team.Ada)).Value;
 
         var bodies = new List<byte[]>();
-        foreach (var tenant in new[] { team.Tenant.Value, unknown })
+        foreach (var tenant in new[] { team.Tenant.Value, adasPersonal, unknown })
         {
             foreach (var request in Requests(tenant, team.BobId.Value))
             {

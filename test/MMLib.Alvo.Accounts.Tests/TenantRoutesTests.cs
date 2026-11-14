@@ -158,11 +158,18 @@ public sealed class TenantRoutesTests
         await using var world = await AccountsWorld.StartAsync(_engine);
         var (access, _) = await world.SignInAsync("ada");
 
+        var (tenant, member) = (Guid.NewGuid(), Guid.NewGuid());
+        var members = $"{Tenants}/{tenant:D}/members";
+
         using var list = await world.AsPersonAsync(HttpMethod.Get, Tenants, access);
         using var create = await CreateAsync(world, access, "Acme");
-        using var rename = await RenameAsync(world, access, Guid.NewGuid(), "Acme");
+        using var rename = await RenameAsync(world, access, tenant, "Acme");
+        using var listMembers = await world.AsPersonAsync(HttpMethod.Get, members, access);
+        using var updateMember = await world.AsPersonAsync(
+            HttpMethod.Patch, $"{members}/{member:D}", access, new JsonObject { ["roles"] = new JsonArray() });
+        using var removeMember = await world.AsPersonAsync(HttpMethod.Delete, $"{members}/{member:D}", access);
 
-        foreach (var response in new[] { list, create, rename })
+        foreach (var response in new[] { list, create, rename, listMembers, updateMember, removeMember })
         {
             await FeatureDisabledAsync(response, "tenancy.selfService");
         }
@@ -196,6 +203,23 @@ public sealed class TenantRoutesTests
         anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await anonymous.ReadTextAsync());
         anonymous.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
         anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token()
+    {
+        var integration = new TestApiKey("integration", ["authenticated"], ["*:read", "*:write"]);
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, keys: [integration]);
+        var (access, _) = await world.SignInAsync("ada");
+
+        using var both = await world.Api.SendAsync(
+            HttpMethod.Get, Tenants, integration, headers: [new KeyValuePair<string, string>("Authorization", $"Bearer {access}")]);
+        using var forged = await world.AsPersonAsync(HttpMethod.Get, Tenants, access[..^4] + "AAAA");
+
+        both.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await both.ReadTextAsync());
+        both.Headers.WwwAuthenticate.ToString().ShouldContain("invalid_request");
+        forged.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await forged.ReadTextAsync());
+        forged.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer error=\"invalid_token\"");
     }
 
     [Theory]
