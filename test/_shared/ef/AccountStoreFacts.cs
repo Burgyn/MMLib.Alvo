@@ -385,6 +385,170 @@ public abstract class AccountStoreFacts : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_new_identity_with_a_live_invitation_creates_account_identity_session_and_membership_together()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, invitation) = await InvitedAsync(store, services, ["planner", "viewer"]);
+        var request = Invited(PersonalSignIn(Identity("sub-new")), invitation);
+
+        var outcome = await store.SignInAsync(request, Ct);
+
+        outcome.Status.ShouldBe(SignInStatus.Created);
+        var account = outcome.Account!.Value;
+        var membership = (await Tenants(services).FindMembershipAsync(account, tenant, Ct)).ShouldNotBeNull();
+        membership.Tenant.ShouldBe(tenant);
+        membership.Roles.ShouldBe(["planner", "viewer"]);
+        membership.IsOwner.ShouldBeFalse();
+        (await Tenants(services).FindMembershipAsync(account, null, Ct)).ShouldNotBeNull("the personal tenant commits with it");
+        (await IsLiveAsync(store, account, request.SessionId, _now)).ShouldBeTrue();
+        (await UsesAsync(services, invitation.Id)).ShouldBe(1);
+    }
+
+    /// <summary>Review Focus 4 (S4 plan D5): a dead code on a sign-up leaves no account, identity, session or membership.</summary>
+    [Fact]
+    public async Task A_dead_invitation_creates_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, invitation) = await InvitedAsync(store, services, ["viewer"]);
+        var owner = await OwnerOfAsync(services, tenant);
+        (await Tenants(services).RevokeInvitationAsync(new InvitationRevocation(tenant, owner, invitation.Id, _now), Ct))
+            .ShouldBe(MemberChangeStatus.Changed);
+        var before = await RowCountsAsync(services);
+
+        var revoked = await store.SignInAsync(Invited(PersonalSignIn(Identity("sub-new")), invitation), Ct);
+        var unknown = await store.SignInAsync(Invited(PersonalSignIn(Identity("sub-other")), Invitation(InvitationHash())), Ct);
+
+        revoked.ShouldBe(new SignInOutcome(SignInStatus.InvitationRefused, null));
+        unknown.ShouldBe(new SignInOutcome(SignInStatus.InvitationRefused, null));
+        (await RowCountsAsync(services)).ShouldBe(before);
+        (await UsesAsync(services, invitation.Id)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task An_existing_account_with_a_live_invitation_joins_while_signing_in()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, invitation) = await InvitedAsync(store, services, ["viewer"]);
+        var account = (await store.SignInAsync(SignIn(Identity("sub-1")), Ct)).Account!.Value;
+        var request = Invited(SignIn(Identity("sub-1")), invitation);
+
+        var outcome = await store.SignInAsync(request, Ct);
+
+        outcome.ShouldBe(new SignInOutcome(SignInStatus.SignedIn, account));
+        (await Tenants(services).FindMembershipAsync(account, tenant, Ct)).ShouldNotBeNull().Roles.ShouldBe(["viewer"]);
+        (await IsLiveAsync(store, account, request.SessionId, _now)).ShouldBeTrue();
+        (await UsesAsync(services, invitation.Id)).ShouldBe(1);
+    }
+
+    /// <summary>S4 plan D7: the client asked for a sign-in and an acceptance atomically, so a dead code refuses both.</summary>
+    [Fact]
+    public async Task An_existing_account_with_a_dead_invitation_does_not_sign_in()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, invitation) = await InvitedAsync(store, services, ["viewer"]);
+        var account = (await store.SignInAsync(SignIn(Identity("sub-1")), Ct)).Account!.Value;
+        (await store.SignInAsync(Invited(SignIn(Identity("sub-2")), invitation), Ct)).Status.ShouldBe(SignInStatus.Created);
+        var before = await RowCountsAsync(services);
+        var request = Invited(SignIn(Identity("sub-1")), invitation);
+
+        var outcome = await store.SignInAsync(request, Ct);
+
+        outcome.ShouldBe(new SignInOutcome(SignInStatus.InvitationRefused, null));
+        (await IsLiveAsync(store, account, request.SessionId, _now)).ShouldBeFalse();
+        (await RowCountsAsync(services)).ShouldBe(before, "no session, no refresh token");
+        (await Tenants(services).FindMembershipAsync(account, tenant, Ct)).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The controller's ruling on S4 plan D4: a member presenting their tenant's used-up invitation is already a member, so
+    /// the sign-in it rides on goes ahead, roles unchanged.
+    /// </summary>
+    [Fact]
+    public async Task A_member_signing_in_with_their_tenant_s_used_up_invitation_signs_in()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, invitation) = await InvitedAsync(store, services, ["viewer"]);
+        var account = (await store.SignInAsync(Invited(SignIn(Identity("sub-1")), invitation), Ct)).Account!.Value;
+        var request = Invited(SignIn(Identity("sub-1")), invitation);
+
+        var outcome = await store.SignInAsync(request, Ct);
+
+        outcome.ShouldBe(new SignInOutcome(SignInStatus.SignedIn, account));
+        (await IsLiveAsync(store, account, request.SessionId, _now)).ShouldBeTrue();
+        (await Tenants(services).FindMembershipAsync(account, tenant, Ct)).ShouldNotBeNull().Roles.ShouldBe(["viewer"]);
+        (await UsesAsync(services, invitation.Id)).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The sign-in refreshes the account's email before it accepts, in the same transaction, so an email binding is judged
+    /// by the identity signing in now — not by what an earlier sign-in asserted (spec §5.3).
+    /// </summary>
+    [Fact]
+    public async Task An_email_bound_invitation_is_judged_by_this_sign_in_s_identity()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, bound) = await InvitedAsync(store, services, ["viewer"], email: "ada@gmail.com", maxUses: 10);
+        var nowTrusted = (await store.SignInAsync(SignIn(Identity("sub-1", trusted: false)), Ct)).Account!.Value;
+        var nowUntrusted = (await store.SignInAsync(SignIn(Identity("sub-2")), Ct)).Account!.Value;
+
+        (await store.SignInAsync(Invited(SignIn(Identity("sub-1")), bound), Ct))
+            .ShouldBe(new SignInOutcome(SignInStatus.SignedIn, nowTrusted), "this sign-in's email is trusted");
+        (await store.SignInAsync(Invited(SignIn(Identity("sub-2", trusted: false)), bound), Ct))
+            .ShouldBe(new SignInOutcome(SignInStatus.InvitationRefused, null), "this sign-in's email is not");
+        (await store.SignInAsync(Invited(SignIn(Identity("sub-3")), bound), Ct)).Status.ShouldBe(SignInStatus.Created);
+        (await store.SignInAsync(Invited(SignIn(Identity("sub-4", trusted: false)), bound), Ct)).Status
+            .ShouldBe(SignInStatus.InvitationRefused);
+
+        (await Tenants(services).FindMembershipAsync(nowTrusted, tenant, Ct)).ShouldNotBeNull();
+        (await Tenants(services).FindMembershipAsync(nowUntrusted, tenant, Ct)).ShouldBeNull();
+        (await store.GetAccountAsync(nowUntrusted, Ct)).ShouldNotBeNull().EmailTrusted.ShouldBeTrue("the refused sign-in refreshed nothing");
+        (await UsesAsync(services, bound.Id)).ShouldBe(2);
+    }
+
+    /// <summary>
+    /// Review Focus 1 (S4 plan D4, D5): two new people sign up at once with one single-use code. The acceptance's
+    /// conditional update decides; the loser's whole sign-up rolls back.
+    /// </summary>
+    [Fact]
+    public async Task Two_new_identities_racing_for_one_single_use_invitation_create_one_account()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, _) = await InvitedAsync(store, services, ["viewer"]);
+        var owner = await OwnerOfAsync(services, tenant);
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var invitation = await InviteAsync(services, tenant, owner, ["viewer"]);
+            var accounts = await CountAsync(services, AlvoFrameworkTables.AuthAccountsSuffix);
+            var first = Invited(PersonalSignIn(Identity("first-" + iteration.ToString(CultureInfo.InvariantCulture))), invitation);
+            var second = Invited(PersonalSignIn(Identity("second-" + iteration.ToString(CultureInfo.InvariantCulture))), invitation);
+
+            var outcomes = await Task.WhenAll(store.SignInAsync(first, Ct), store.SignInAsync(second, Ct));
+
+            outcomes.Select(outcome => outcome.Status)
+                .ShouldBe([SignInStatus.Created, SignInStatus.InvitationRefused], ignoreOrder: true, $"iteration {iteration}");
+            (await CountAsync(services, AlvoFrameworkTables.AuthAccountsSuffix)).ShouldBe(accounts + 1, $"iteration {iteration}");
+            var joined = outcomes.Single(outcome => outcome.Status == SignInStatus.Created).Account!.Value;
+            (await Tenants(services).FindMembershipAsync(joined, tenant, Ct)).ShouldNotBeNull($"iteration {iteration}");
+            (await UsesAsync(services, invitation.Id)).ShouldBe(1, $"iteration {iteration}");
+        }
+    }
+
+    [Fact]
+    public async Task A_sign_in_without_an_invitation_is_unchanged()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, invitation) = await InvitedAsync(store, services, ["viewer"]);
+
+        var outcome = await store.SignInAsync(PersonalSignIn(Identity("sub-new")), Ct);
+
+        outcome.Status.ShouldBe(SignInStatus.Created);
+        (await Tenants(services).FindMembershipAsync(outcome.Account!.Value, tenant, Ct)).ShouldBeNull();
+        (await Tenants(services).FindMembershipAsync(outcome.Account!.Value, null, Ct)).ShouldNotBeNull();
+        (await UsesAsync(services, invitation.Id)).ShouldBe(0);
+    }
+
+    [Fact]
     public void The_tables_are_reserved_framework_names() =>
         _authTables.Except(AlvoFrameworkTables.NamesFor("alvo"), StringComparer.Ordinal).ShouldBeEmpty();
 
@@ -699,6 +863,69 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         store.ReadCallerAsync(new CallerQuery(account, session, now, membership), Ct);
 
     private static ITenantStore Tenants(IServiceProvider services) => services.GetRequiredService<ITenantStore>();
+
+    /// <summary>
+    /// A shared tenant <c>Acme</c> of a freshly signed-in owner, and a live invitation into it — an hour before the facts'
+    /// sign-ins, valid for a week.
+    /// </summary>
+    private protected static async Task<(TenantId Tenant, CreateInvitationRequest Invitation)> InvitedAsync(
+        IAccountStore store, IServiceProvider services, IReadOnlyList<string> roles, string? email = null, int maxUses = 1)
+    {
+        var owner = (await store.SignInAsync(SignIn(Identity("owner-" + Guid.NewGuid().ToString("N"))), Ct)).Account!.Value;
+        var tenant = new TenantId(Guid.NewGuid());
+        (await Tenants(services).CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", owner, [], 5, _now.AddHours(-1)), Ct))
+            .Status.ShouldBe(CreateTenantStatus.Created);
+        return (tenant, await InviteAsync(services, tenant, owner, roles, email, maxUses));
+    }
+
+    /// <summary>A live invitation of <paramref name="owner"/>'s into <paramref name="tenant"/>, under a fresh code hash.</summary>
+    private protected static async Task<CreateInvitationRequest> InviteAsync(
+        IServiceProvider services, TenantId tenant, UserId owner, IReadOnlyList<string> roles, string? email = null, int maxUses = 1)
+    {
+        var request = new CreateInvitationRequest(
+            Guid.NewGuid(), tenant, owner, InvitationHash(), roles, GrantsOwner: false, email, maxUses, _now.AddDays(7), _now.AddHours(-1));
+        (await Tenants(services).CreateInvitationAsync(request, Ct)).Status.ShouldBe(MemberChangeStatus.Changed);
+        return request;
+    }
+
+    /// <summary>The one owner of <paramref name="tenant"/>.</summary>
+    private protected static async Task<UserId> OwnerOfAsync(IServiceProvider services, TenantId tenant) => UserIdOf(
+        (string)(await ScalarAsync(
+            services,
+            $"SELECT user_id FROM {TableOf(services, AlvoFrameworkTables.TenantMembersSuffix)} WHERE tenant_id = '{tenant.Value:D}' AND is_owner = 1"))!);
+
+    /// <summary><paramref name="request"/> carrying <paramref name="invitation"/>'s code hash.</summary>
+    private protected static SignInRequest Invited(SignInRequest request, CreateInvitationRequest invitation) =>
+        Invited(request, Invitation(invitation.CodeHash));
+
+    /// <summary><paramref name="request"/> carrying <paramref name="invitation"/>.</summary>
+    private protected static SignInRequest Invited(SignInRequest request, SignInInvitation invitation) =>
+        request with { Invitation = invitation };
+
+    private static SignInInvitation Invitation(string codeHash) => new(codeHash);
+
+    /// <summary>A fresh code hash, in the shape the core stores: lowercase hex SHA-256.</summary>
+    private static string InvitationHash() => Convert.ToHexStringLower(SHA256.HashData(RandomNumberGenerator.GetBytes(16)));
+
+    /// <summary>The stored <c>uses</c> of one invitation.</summary>
+    private static async Task<long> UsesAsync(IServiceProvider services, Guid invitation) => Convert.ToInt64(
+        await ScalarAsync(
+            services,
+            $"SELECT uses FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} WHERE id = '{invitation:D}'"),
+        CultureInfo.InvariantCulture);
+
+    /// <summary>The row counts of every table a sign-in writes, in a fixed order.</summary>
+    private static async Task<long[]> RowCountsAsync(IServiceProvider services) =>
+    [
+        await CountAsync(services, AlvoFrameworkTables.AuthAccountsSuffix),
+        await CountAsync(services, AlvoFrameworkTables.AuthIdentitiesSuffix),
+        await CountAsync(services, AlvoFrameworkTables.AuthSessionsSuffix),
+        await CountAsync(services, AlvoFrameworkTables.AuthRefreshTokensSuffix),
+        await CountAsync(services, AlvoFrameworkTables.TenantsSuffix),
+        await CountAsync(services, AlvoFrameworkTables.TenantMembersSuffix),
+    ];
+
+    private static UserId UserIdOf(string text) => new(Guid.Parse(text, CultureInfo.InvariantCulture));
 
     private static KeyCandidate Candidate(string purpose, string kid, string material) => new(purpose, 1, kid, material, _now);
 

@@ -36,13 +36,20 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// one membership, and a refusal, which commits nothing, leaves none.
 /// </para>
 /// <para>
+/// <b>An invited sign-in accepts in its own transaction</b> (S4 plan D5, D7): after the session and the personal tenant,
+/// <see cref="InvitationAcceptance"/> — the tenant store's own routine — accepts the sign-in's invitation for the account.
+/// A dead one answers <see cref="SignInStatus.InvitationRefused"/>, which carries no account, so the transaction rolls back
+/// the account, identity, session, refresh token and personal tenant with it: all or nothing, for a new account and an
+/// existing one alike.
+/// </para>
+/// <para>
 /// <b>One read answers session and membership</b> (D4): <see cref="ReadCallerAsync"/> is one statement in each of its three
 /// shapes, the membership left-joined onto the live session.
 /// </para>
 /// <para>
-/// The tables — the tenant registry's too, which the personal tenant and the caller read reach — are created once per
-/// process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted; <c>SystemSchemaInitializer</c>
-/// creates them at boot.
+/// The tables — the tenant registry's too, which the personal tenant, the invitation and the caller read reach — are
+/// created once per process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted;
+/// <c>SystemSchemaInitializer</c> creates them at boot.
 /// </para>
 /// </remarks>
 internal sealed partial class EfCoreAccountStore : IAccountStore
@@ -50,6 +57,7 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
     private readonly RelationalConnectionFactory _connections;
     private readonly AuthTables _tables;
     private readonly TenantTables _tenantTables;
+    private readonly InvitationTables _invitationTables;
     private readonly SecretCipher? _cipher;
     private readonly OnceDdl _ddl;
 
@@ -67,6 +75,7 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
         _connections = connections;
         _tables = new AuthTables(options.SchemaPrefix);
         _tenantTables = new TenantTables(options.SchemaPrefix);
+        _invitationTables = new InvitationTables(options.SchemaPrefix);
         _cipher = cipher;
         _ddl = new OnceDdl(EnsureTablesAsync);
     }
@@ -149,7 +158,33 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
         }
 
         await PersonalTenantEnsuredAsync(connection, transaction, account, request.PersonalTenant, request.Now, ct).ConfigureAwait(false);
+        if (!await InvitationAcceptedAsync(connection, transaction, account, request, ct).ConfigureAwait(false))
+        {
+            return new SignInOutcome(SignInStatus.InvitationRefused, null);
+        }
+
         return new SignInOutcome(created ? SignInStatus.Created : SignInStatus.SignedIn, account);
+    }
+
+    /// <summary>
+    /// Accepts the sign-in's invitation, if it carries one, for <paramref name="account"/> with the tenant store's own
+    /// routine (S4 plan D4, D5); <see langword="false"/> when it is dead or the account could not be locked, and then the
+    /// caller answers <see cref="SignInStatus.InvitationRefused"/> and nothing commits. The account's email was refreshed
+    /// earlier in this transaction, so an email binding is judged by this sign-in's identity.
+    /// </summary>
+    private async Task<bool> InvitationAcceptedAsync(
+        DbConnection connection, DbTransaction transaction, UserId account, SignInRequest request, CancellationToken ct)
+    {
+        if (request.Invitation is not { } invitation)
+        {
+            return true;
+        }
+
+        var accepted = await InvitationAcceptance.AcceptAsync(
+            connection, transaction, _invitationTables, _tenantTables, _tables, invitation.CodeHash, account, request.Now, ct)
+            .ConfigureAwait(false);
+
+        return accepted.Status is AcceptInvitationStatus.Joined or AcceptInvitationStatus.AlreadyMember;
     }
 
     /// <summary>
@@ -400,6 +435,7 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
             {
                 await _tables.EnsureAsync(connection, ct).ConfigureAwait(false);
                 await _tenantTables.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _invitationTables.EnsureAsync(connection, ct).ConfigureAwait(false);
             }
         }
     }
