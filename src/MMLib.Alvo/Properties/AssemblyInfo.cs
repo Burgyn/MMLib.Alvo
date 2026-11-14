@@ -63,6 +63,15 @@
 // already police. The same forgeability caveat applies: an unsigned grant is a name match.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Accounts")]
 
+// The standalone host, for one internal: ClientPartition, the per-client key its dashboard credential budget is charged
+// under — the same key the token endpoint's budget uses, so the two cannot partition differently (it was a verbatim
+// copy until the S2 review of Tasks 10-11). A linked source file was tried and refused: the OpenAPI XML-comment
+// generator reads both assemblies' documentation and two types with one documentation id fail every document request.
+// The host is IsPackable=false and ships only in the image; an architecture fact in its suite
+// (HostInternalGrantTests) holds that ClientPartition is the only core internal it references. The same forgeability
+// caveat applies: an unsigned grant is a name match.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Host")]
+
 // And to its suite, which compiles the Data API's test world (test/_shared/api) to drive a signed-in person through the
 // generated routes, so it reaches the two internals that world needs (SchemaMigrationRunner, InMemoryApiKeyStore) on
 // the MMLib.Alvo.Api.Tests terms above, plus what it stubs the package's core seams with.

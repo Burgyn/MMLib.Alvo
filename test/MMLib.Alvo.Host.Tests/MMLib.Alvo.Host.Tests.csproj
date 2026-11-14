@@ -47,6 +47,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionClaims.cs" Link="_shared/InstructionClaims.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCatalogue.cs" Link="_shared/SkillCatalogue.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCaseAnswers.cs" Link="_shared/SkillCaseAnswers.cs" />
+    <!-- The metadata reader HostInternalGrantTests holds the core's grant to the host with. -->
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
     <Using Include="MMLib.Alvo.Ai.Tests" />
   </ItemGroup>
 

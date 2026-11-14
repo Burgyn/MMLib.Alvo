@@ -1,7 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
-using System.Net;
-using System.Net.Sockets;
 using System.Threading.RateLimiting;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -47,30 +45,6 @@ internal sealed class AlvoRateLimits : IDisposable
     /// <param name="limit">The budget to charge.</param>
     internal IEndpointFilter For(AlvoRateLimit limit) => _limits[limit];
 
-    /// <summary>The partition a client address is charged under.</summary>
-    /// <param name="address">The connection's remote address, or <see langword="null"/>.</param>
-    internal static string ClientOf(IPAddress? address)
-    {
-        if (address is null)
-        {
-            return string.Empty;
-        }
-
-        if (address.IsIPv4MappedToIPv6)
-        {
-            return address.MapToIPv4().ToString();
-        }
-
-        if (address.AddressFamily != AddressFamily.InterNetworkV6)
-        {
-            return address.ToString();
-        }
-
-        var bytes = address.GetAddressBytes();
-        Array.Clear(bytes, 8, 8);
-        return $"{new IPAddress(bytes)}/64";
-    }
-
     /// <inheritdoc/>
     public void Dispose()
     {
@@ -82,7 +56,7 @@ internal sealed class AlvoRateLimits : IDisposable
 
     private static PartitionedRateLimiter<HttpContext> FixedWindows(int perMinute)
         => PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
-            ClientOf(http.Connection.RemoteIpAddress),
+            ClientPartition.Of(http.Connection.RemoteIpAddress),
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = Math.Max(perMinute, 1),

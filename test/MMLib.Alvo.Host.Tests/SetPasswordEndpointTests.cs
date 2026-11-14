@@ -332,22 +332,6 @@ public sealed partial class SetPasswordEndpointTests
     }
 
     /// <summary>
-    /// A client is its address: an IPv6 one by its /64, which a single host is routinely handed whole, and an
-    /// IPv4-mapped one as the IPv4 address, so a dual-stack client has one budget.
-    /// </summary>
-    /// <param name="first">One address.</param>
-    /// <param name="second">Another.</param>
-    /// <param name="same">Whether they are one client.</param>
-    [Theory]
-    [InlineData("2001:db8:1:2:aaaa::1", "2001:db8:1:2:ffff:ffff:ffff:ffff", true)]
-    [InlineData("2001:db8:1:2::1", "2001:db8:1:3::1", false)]
-    [InlineData("::ffff:10.42.0.7", "10.42.0.7", true)]
-    [InlineData("10.42.0.7", "10.42.0.8", false)]
-    public void A_client_is_its_ipv4_address_or_its_ipv6_slash_64(string first, string second, bool same)
-        => (AlvoAdminCredentialLimit.ClientOf(IPAddress.Parse(first)) == AlvoAdminCredentialLimit.ClientOf(IPAddress.Parse(second)))
-            .ShouldBe(same);
-
-    /// <summary>
     /// <b>The ceiling bounds the limiter's memory</b>: once it refuses a client, that client's new subjects create no
     /// partition, however many it cycles.
     /// </summary>

@@ -4,9 +4,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Admin;
+using MMLib.Alvo.Api.Internal;
 using System.Globalization;
-using System.Net;
-using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -120,30 +119,6 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
     /// <summary>How many subject partitions have been created, for the fact that the ceiling bounds them.</summary>
     internal int SubjectPartitionsCreated => Volatile.Read(ref _subjectPartitionsCreated);
 
-    /// <summary>The partition a client address falls in: IPv4 as is, IPv6 by its /64, IPv4-mapped as IPv4.</summary>
-    /// <param name="address">The connection's remote address, when known.</param>
-    internal static string ClientOf(IPAddress? address)
-    {
-        if (address is null)
-        {
-            return string.Empty;
-        }
-
-        if (address.IsIPv4MappedToIPv6)
-        {
-            return address.MapToIPv4().ToString();
-        }
-
-        if (address.AddressFamily != AddressFamily.InterNetworkV6)
-        {
-            return address.ToString();
-        }
-
-        var bytes = address.GetAddressBytes();
-        Array.Clear(bytes, 8, 8);
-        return $"{new IPAddress(bytes)}/64";
-    }
-
     /// <summary>
     /// Charges one attempt at <paramref name="subject"/> from this request's client, and says how long to wait when
     /// either budget is spent.
@@ -159,7 +134,7 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
     /// <returns><see langword="null"/> when the attempt may proceed; otherwise how long to wait.</returns>
     internal TimeSpan? Charge(HttpContext http, string subject)
     {
-        var client = ClientOf(http.Connection.RemoteIpAddress);
+        var client = ClientPartition.Of(http.Connection.RemoteIpAddress);
 
         using (var ceiling = _clients.AttemptAcquire(client, 0))
         {
