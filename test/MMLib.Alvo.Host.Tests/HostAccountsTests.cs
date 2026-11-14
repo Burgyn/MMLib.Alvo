@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
@@ -63,6 +64,31 @@ public sealed class HostAccountsTests : IDisposable
         refusal.Message.ShouldContain("Alvo:Secrets:EncryptionKeyFile");
     }
 
+    /// <summary>
+    /// Outside Development the composed image refuses a provider without <c>Alvo:Accounts:Issuer</c>: the issuer every
+    /// token is signed as is configured, never taken from a request's <c>Host</c> header.
+    /// </summary>
+    [Fact]
+    public async Task A_host_with_a_provider_but_no_issuer_refuses_to_start_outside_development()
+    {
+        var refusal = await Should.ThrowAsync<OptionsValidationException>(
+            () => AlvoHostWorld.StartAsync(overrides: WithoutIssuer(), environment: Environments.Production));
+
+        refusal.Message.ShouldContain("Alvo:Accounts:Issuer is not set");
+    }
+
+    /// <summary>The control: in Development the same settings start, issuing from the URL the request reached.</summary>
+    [Fact]
+    public async Task In_development_a_provider_without_an_issuer_issues_from_the_request_url()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(overrides: WithoutIssuer(), environment: Environments.Development);
+
+        using var metadata = await world.SendAnonymouslyAsync(HttpMethod.Get, "/auth/v1/.well-known/oauth-authorization-server");
+
+        metadata.StatusCode.ShouldBe(HttpStatusCode.OK, await metadata.ReadTextAsync());
+        (await metadata.ReadJsonObjectAsync())["issuer"]!.GetValue<string>().ShouldBe("http://localhost/auth/v1");
+    }
+
     /// <summary>An issuer alone switches nothing on: only a provider does, so no key file is demanded.</summary>
     [Fact]
     public async Task Accounts_settings_without_a_provider_switch_nothing_on()
@@ -76,6 +102,13 @@ public sealed class HostAccountsTests : IDisposable
     }
 
     public void Dispose() => File.Delete(_keyFile);
+
+    private Dictionary<string, string?> WithoutIssuer()
+    {
+        var settings = Accounts(_keyFile);
+        settings["Alvo:Accounts:Issuer"] = null;
+        return settings;
+    }
 
     private static Dictionary<string, string?> Accounts(string? keyFile)
     {
