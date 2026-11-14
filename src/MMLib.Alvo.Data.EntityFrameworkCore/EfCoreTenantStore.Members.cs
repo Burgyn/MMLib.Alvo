@@ -22,6 +22,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// owner leaves: nobody changes their own membership, and another owner's demotion leaves the actor. It is still judged on
 /// every demotion and removal, so a write that ever ran without the bump would refuse rather than strand the tenant.
 /// </para>
+/// <para>
+/// <b>An owner's invitations die with their ownership</b> (S4 plan D6, spec §6.4): demoting an owner, removing one, or
+/// an owner leaving revokes every live invitation they created, in the same transaction — so a refused demotion or
+/// removal rolls the sweep back with it.
+/// </para>
 /// </remarks>
 internal sealed partial class EfCoreTenantStore
 {
@@ -111,7 +116,7 @@ internal sealed partial class EfCoreTenantStore
             return MemberChangeStatus.LastOwner;
         }
 
-        await WriteUpdateAsync(connection, transaction, update, ct).ConfigureAwait(false);
+        await WriteUpdateAsync(connection, transaction, update, member, ct).ConfigureAwait(false);
         return MemberChangeStatus.Changed;
     }
 
@@ -142,9 +147,7 @@ internal sealed partial class EfCoreTenantStore
             return MemberChangeStatus.LastOwner;
         }
 
-        await ExecuteAsync(
-            connection, transaction, _tables.RemoveMemberSql, command => BindMemberKey(command, removal.Tenant, removal.Member), ct)
-            .ConfigureAwait(false);
+        await RemoveAsync(connection, transaction, removal, member, ct).ConfigureAwait(false);
         return MemberChangeStatus.Changed;
     }
 
@@ -161,7 +164,8 @@ internal sealed partial class EfCoreTenantStore
             connection, transaction, _tables.OwnersSql, command => Bind(command, ("@tenant_id", Id(member.Tenant))), ct)
             .ConfigureAwait(false) <= 1;
 
-    private async Task WriteUpdateAsync(DbConnection connection, DbTransaction transaction, MemberUpdate update, CancellationToken ct)
+    private async Task WriteUpdateAsync(
+        DbConnection connection, DbTransaction transaction, MemberUpdate update, StoredMembership member, CancellationToken ct)
     {
         if (update.Roles is { } roles)
         {
@@ -177,6 +181,23 @@ internal sealed partial class EfCoreTenantStore
                 connection, transaction, _tables.SetOwnerSql,
                 command => BindMemberKey(command, update.Tenant, update.Member, ("@is_owner", isOwner ? 1 : 0)),
                 ct).ConfigureAwait(false);
+            if (!isOwner && member.IsOwner)
+            {
+                await SweepInvitationsAsync(connection, transaction, update.Tenant, update.Member, update.Now, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Removes <paramref name="member"/> and, when they were an owner, sweeps the invitations they created (D6).</summary>
+    private async Task RemoveAsync(
+        DbConnection connection, DbTransaction transaction, MemberRemoval removal, StoredMembership member, CancellationToken ct)
+    {
+        await ExecuteAsync(
+            connection, transaction, _tables.RemoveMemberSql, command => BindMemberKey(command, removal.Tenant, removal.Member), ct)
+            .ConfigureAwait(false);
+        if (member.IsOwner)
+        {
+            await SweepInvitationsAsync(connection, transaction, removal.Tenant, removal.Member, removal.Now, ct).ConfigureAwait(false);
         }
     }
 

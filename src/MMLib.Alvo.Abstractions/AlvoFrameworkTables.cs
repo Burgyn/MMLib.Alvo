@@ -132,6 +132,9 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding one row per (tenant, account) membership.</summary>
     internal const string TenantMembersSuffix = "_tenant_members";
 
+    /// <summary>The suffix of the table holding one row per invitation into a shared tenant (accounts spec §6.1).</summary>
+    internal const string TenantInvitationsSuffix = "_tenant_invitations";
+
     /// <summary>
     /// Every table <c>MMLib.Alvo.Identity</c> owns, reserved here whether or not that package is
     /// installed.
@@ -191,6 +194,7 @@ internal static class AlvoFrameworkTables
             schemaPrefix + AuthKeysSuffix,
             schemaPrefix + TenantsSuffix,
             schemaPrefix + TenantMembersSuffix,
+            schemaPrefix + TenantInvitationsSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

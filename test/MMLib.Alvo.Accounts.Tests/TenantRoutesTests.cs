@@ -339,6 +339,15 @@ public sealed class TenantRoutesTests
 
         public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) =>
             inner.RemoveMemberAsync(removal, ct);
+
+        public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
+            inner.CreateInvitationAsync(request, ct);
+
+        public Task<IReadOnlyList<InvitationView>> ListInvitationsAsync(TenantId tenant, CancellationToken ct) =>
+            inner.ListInvitationsAsync(tenant, ct);
+
+        public Task<MemberChangeStatus> RevokeInvitationAsync(InvitationRevocation revocation, CancellationToken ct) =>
+            inner.RevokeInvitationAsync(revocation, ct);
     }
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

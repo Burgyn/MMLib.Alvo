@@ -1,9 +1,9 @@
 ﻿namespace MMLib.Alvo.Tenants;
 
 /// <summary>
-/// The self-service tenant registry — tenants and the people who are members of them (accounts spec §6.1). Every write
-/// is one store call, one transaction. Implemented by the relational drivers; the core and <c>MMLib.Alvo.Accounts</c>
-/// reach it through <c>InternalsVisibleTo</c>.
+/// The self-service tenant registry — tenants, the people who are members of them, and the invitations into them
+/// (accounts spec §6.1). Every write is one store call, one transaction. Implemented by the relational drivers; the core
+/// and <c>MMLib.Alvo.Accounts</c> reach it through <c>InternalsVisibleTo</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -88,6 +88,39 @@ internal interface ITenantStore
     /// <param name="removal">The tenant, the actor and the member.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct);
+
+    /// <summary>
+    /// Creates an invitation into a shared tenant — an owner's act, through the same version bump as every membership
+    /// write (S4 plan D6), so a creation racing its creator's demotion is serialised with that demotion's sweep. The store
+    /// stores what it is given: the roles verbatim and the code's hash only; the bounds are the core's (D9).
+    /// </summary>
+    /// <param name="request">The invitation's id, tenant, creator, code hash, grants, bounds and instant.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <returns>
+    /// <see cref="MemberChangeStatus.Changed"/> with the stored invitation, or <see cref="MemberChangeStatus.NotFound"/>,
+    /// <see cref="MemberChangeStatus.PersonalTenant"/> or <see cref="MemberChangeStatus.NotOwner"/> with none.
+    /// </returns>
+    Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Every invitation of <paramref name="tenant"/> in every state, newest first — the caller checks that its actor owns
+    /// the tenant (the members routes' precedent).
+    /// </summary>
+    /// <param name="tenant">The tenant.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<IReadOnlyList<InvitationView>> ListInvitationsAsync(TenantId tenant, CancellationToken ct);
+
+    /// <summary>
+    /// Revokes one invitation of the tenant — any owner's act, through the version bump (D6). Revoking an already revoked
+    /// invitation is <see cref="MemberChangeStatus.Changed"/> again and keeps its first instant.
+    /// </summary>
+    /// <param name="revocation">The tenant, the actor, the invitation and the instant.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <returns>
+    /// <see cref="MemberChangeStatus.Changed"/>, <see cref="MemberChangeStatus.NotFound"/>,
+    /// <see cref="MemberChangeStatus.NotOwner"/> or <see cref="MemberChangeStatus.NoSuchInvitation"/>.
+    /// </returns>
+    Task<MemberChangeStatus> RevokeInvitationAsync(InvitationRevocation revocation, CancellationToken ct);
 }
 
 /// <summary>What kind of tenant a registry tenant is.</summary>
@@ -197,4 +230,7 @@ internal enum MemberChangeStatus
 
     /// <summary>The actor aimed a membership change at themself (spec §14 AC4); leaving is a removal.</summary>
     Self,
+
+    /// <summary>The invitation is not one of this tenant's.</summary>
+    NoSuchInvitation,
 }
