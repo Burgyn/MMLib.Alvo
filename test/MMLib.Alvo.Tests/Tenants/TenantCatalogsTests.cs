@@ -1,0 +1,257 @@
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Events;
+using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Functions.Internal;
+using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
+using MMLib.Alvo.Scheduling;
+using MMLib.Alvo.Tenants;
+using MMLib.Alvo.Tenants.SelfService;
+using MMLib.Alvo.Tests.Expressions;
+
+using NSubstitute;
+
+using static MMLib.Alvo.Tests.Extensions.HandlerCatalog;
+
+namespace MMLib.Alvo.Tests.Tenants;
+
+/// <summary>
+/// The default tenant list (spec §6.6, S3 plan D13): the self-service registry lists the tenants only while the descriptor
+/// judged declares <c>tenancy.selfService</c> and the host registers no <see cref="IAlvoTenantCatalog"/> — so the boot's
+/// refusal of a per-tenant run without a tenant list keeps firing everywhere else, and a host's own catalog always wins.
+/// </summary>
+public sealed class TenantCatalogsTests
+{
+    private const string Nightly = "nightly-roll";
+    private const string Backfill = "backfill-notes";
+
+    private static readonly TenantId _personal = new(Guid.Parse("11111111-1111-4111-8111-111111111111"));
+    private static readonly TenantId _shared = new(Guid.Parse("22222222-2222-4222-8222-222222222222"));
+    private static readonly TenantId _hostOnly = new(Guid.Parse("33333333-3333-4333-8333-333333333333"));
+    private static readonly DateTimeOffset _now = new(2026, 11, 14, 2, 0, 0, TimeSpan.Zero);
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    [Fact]
+    public void An_each_tenant_schedule_without_a_catalog_still_refuses_boot()
+    {
+        using var host = Host(registry: true);
+        var binder = host.GetRequiredService<ExtensionBinder>();
+
+        Should.NotThrow(binder.EnsureRegistrable, "a registry is a tenant list under a descriptor that declares selfService");
+        var refusal = Should.Throw<AlvoStartupRefusedException>(() => binder.EnsureBindable(Catalog(selfService: false)));
+
+        refusal.Message.ShouldContain($"'{Nightly}' (schedule) at extensions/{Nightly}/scope");
+        refusal.Message.ShouldContain($"'{Nightly}' runs once per tenant, and this host registers no IAlvoTenantCatalog to list them.");
+        refusal.FixSuggestion.ShouldContain("Register an IAlvoTenantCatalog in DI, or use AlvoScheduleScope.Global.");
+        using var bare = Host(registry: false);
+        Should.Throw<AlvoStartupRefusedException>(bare.GetRequiredService<ExtensionBinder>().EnsureRegistrable)
+            .Message.ShouldContain($"extensions/{Nightly}/scope", customMessage: "no descriptor can cure a host with neither");
+    }
+
+    [Fact]
+    public async Task Self_service_lists_the_registry_s_tenants()
+    {
+        using var host = Host(registry: true);
+        var catalog = Apply(host, Catalog(selfService: true));
+        var binder = host.GetRequiredService<ExtensionBinder>();
+
+        binder.EnsureRegistrable();
+        binder.EnsureBindable(catalog);
+        var runs = await host.GetRequiredService<ScheduleRuns>().EventsAsync(Schedule(host), _now, manual: false, Ct);
+
+        host.GetRequiredService<TenantCatalogs>().Current.ShouldBeOfType<RegistryTenantCatalog>();
+        runs.Select(run => run.Envelope.TenantId).ShouldBe([_personal.ToString(), _shared.ToString()]);
+    }
+
+    [Fact]
+    public async Task A_host_catalog_wins_over_the_registry()
+    {
+        var own = new FixedTenants(_hostOnly);
+        using var host = Host(registry: true, own);
+        Apply(host, Catalog(selfService: true));
+        var catalogs = host.GetRequiredService<TenantCatalogs>();
+
+        var runs = await host.GetRequiredService<ScheduleRuns>().EventsAsync(Schedule(host), _now, manual: false, Ct);
+
+        (catalogs.Current, catalogs.For(selfService: false)).ShouldBe((own, own));
+        runs.ShouldHaveSingleItem().Envelope.TenantId.ShouldBe(_hostOnly.ToString());
+    }
+
+    [Fact]
+    public async Task Dropping_self_service_stops_listing_the_registry()
+    {
+        using var host = Host(registry: true);
+        var catalogs = host.GetRequiredService<TenantCatalogs>();
+        Apply(host, Catalog(selfService: true));
+        catalogs.Current.ShouldNotBeNull();
+
+        Apply(host, Catalog(selfService: false));
+
+        catalogs.Current.ShouldBeNull();
+        host.GetRequiredService<ScheduleRuns>().ListsTenants(selfService: false).ShouldBeFalse();
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            host.GetRequiredService<ScheduleRuns>().EventsAsync(Schedule(host), _now, manual: false, Ct));
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void A_tenanted_automation_compiles_with_the_registry_only_under_self_service(bool registry, bool selfService, bool compiles)
+    {
+        var descriptor = AlvoDescriptor.Parse(Descriptor(selfService, CronAutomation));
+        var host = new DescriptorHost(new Dictionary<string, FunctionRegistration>(StringComparer.Ordinal), HasTenantCatalog: false, HasActionLedger: false)
+        {
+            HasTenantRegistry = registry,
+        };
+
+        PolicyCatalog Build() => PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), CelFixtures.Compiler, host);
+
+        if (compiles)
+        {
+            Build().Automation.ShouldHaveSingleItem().Trigger.ShouldBeOfType<CronTrigger>().PerTenant.ShouldBeTrue();
+        }
+        else
+        {
+            Should.Throw<DescriptorValidationException>(Build).Result.Errors
+                .ShouldContain(error => error.Path == "/automation/close-day/trigger/schedule");
+        }
+    }
+
+    [Fact]
+    public async Task A_migration_on_a_scoped_schema_boots_with_the_registry_under_self_service()
+    {
+        var registry = Registry(alvo => alvo.AddDataMigration<BackfillNotes>(Backfill, afterRevision: 1));
+        var check = new DataMigrationBootCheck(registry, OnlyTheRegistry(), store: null);
+
+        await check.RefuseAsync(Catalog(selfService: true), Ct);
+        var refusal = await Should.ThrowAsync<AlvoStartupRefusedException>(() => check.RefuseAsync(Catalog(selfService: false), Ct));
+
+        refusal.Message.ShouldContain($"extensions/{Backfill}/tenants");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_migration_starts_once_per_registry_tenant_only_at_a_self_service_revision(bool selfService)
+    {
+        using var host = Host(registry: true);
+        var store = Substitute.For<ITimerStore>();
+        store.StartedMigrationsAsync(Arg.Any<CancellationToken>()).Returns([]);
+        store.StartMigrationAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<IReadOnlyList<AlvoFrameworkEnvelope>>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        var catalog = Catalog(selfService);
+        var applied = Substitute.For<IAppliedSchemaStore>();
+        applied.GetCurrentAsync("desk", Arg.Any<CancellationToken>()).Returns(new AppliedSchema(catalog.Schema, Descriptor(selfService), 2, _now));
+        var starter = new DataMigrationStarter(host.GetRequiredService<ScheduleRuns>(), applied, TimeProvider.System, NullLogger<DataMigrationStarter>.Instance);
+        var bindings = ExtensionBindingCompiler.Compile(
+            Registry(alvo => alvo.AddDataMigration<BackfillNotes>(Backfill, afterRevision: 1)), catalog, CelFixtures.Compiler, EveryService()).Bindings;
+
+        var round = await starter.StartDueAsync(store, bindings, "desk", Ct);
+
+        round.Started.ShouldBe(selfService ? 1 : 0, "without selfService the registry is no tenant list, so the start is held");
+        var tenants = store.ReceivedCalls().Where(call => call.GetMethodInfo().Name == nameof(ITimerStore.StartMigrationAsync))
+            .SelectMany(call => (IReadOnlyList<AlvoFrameworkEnvelope>)call.GetArguments()[2]!).Select(run => run.Envelope.TenantId);
+        tenants.ShouldBe(selfService ? [_personal.ToString(), _shared.ToString()] : []);
+    }
+
+    private static ServiceProvider Host(bool registry, IAlvoTenantCatalog? own = null)
+    {
+        var services = new ServiceCollection();
+        services.AddAlvo(alvo => alvo.AddSchedule<NightlyRoll>(Nightly, "0 2 * * *", configure: options => options.Scope = AlvoScheduleScope.EachTenant));
+        if (registry)
+        {
+            services.AddSingleton<ITenantStore>(new ListingRegistry(_personal, _shared));
+        }
+
+        if (own is not null)
+        {
+            services.AddSingleton(own);
+        }
+
+        return services.BuildServiceProvider();
+    }
+
+    private static PolicyCatalog Apply(ServiceProvider host, PolicyCatalog catalog)
+    {
+        host.GetRequiredService<IPolicyCatalogProvider>().SetCurrent("desk", catalog);
+        return catalog;
+    }
+
+    private static HandlerRegistration Schedule(ServiceProvider host) =>
+        host.GetRequiredService<ExtensionRegistry>().Handlers.Single(handler => handler.Id == Nightly);
+
+    private static IServiceProviderIsService OnlyTheRegistry()
+    {
+        var services = Substitute.For<IServiceProviderIsService>();
+        services.IsService(Arg.Any<Type>()).Returns(call => (Type)call[0] == typeof(ITenantStore));
+        return services;
+    }
+
+    private static PolicyCatalog Catalog(bool selfService)
+    {
+        var descriptor = AlvoDescriptor.Parse(Descriptor(selfService));
+        return PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), CelFixtures.Compiler);
+    }
+
+    private const string CronAutomation = """
+        , "webhooks": { "endpoints": { "erp": { "url": "https://erp.example/hook", "secretRef": "erp-signing" } } },
+          "automation": { "close-day": { "trigger": { "schedule": "0 2 * * *" }, "actions": [ { "type": "webhook", "endpoint": "erp" } ] } }
+        """;
+
+    private static string Descriptor(bool selfService, string extra = "") => $$"""
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "desk",
+          "auth": { "roles": ["dispatcher"] },
+          "tenancy": { "enabled": true{{(selfService ? """, "selfService": { "assignableRoles": ["dispatcher"] }""" : string.Empty)}} },
+          "entities": { "notes": { "tenancy": "scoped", "fields": { "text": { "type": "string", "maxLength": 200 } } } }
+          {{extra}}
+        }
+        """;
+
+    private sealed class NightlyRoll : IAlvoScheduledJob
+    {
+        public Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class BackfillNotes : IAlvoDataMigration
+    {
+        public Task RunAsync(AlvoJobContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FixedTenants(params TenantId[] tenants) : IAlvoTenantCatalog
+    {
+        public Task<IReadOnlyList<TenantId>> ListTenantsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<TenantId>>(tenants);
+    }
+
+    /// <summary>A registry whose only answer is its tenant list — a personal tenant and a shared one.</summary>
+    private sealed class ListingRegistry(params TenantId[] tenants) : ITenantStore
+    {
+        public Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<TenantId>>(tenants);
+
+        public Task<CreateTenantOutcome> CreateSharedAsync(CreateTenantRequest request, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<StoredMembership>> ListMembershipsAsync(UserId user, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<StoredMembership?> FindMembershipAsync(UserId user, TenantId? tenant, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<MemberView>?> ListMembersAsync(TenantId tenant, UserId actor, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> UpdateMemberAsync(MemberUpdate update, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) => throw new NotSupportedException();
+    }
+}

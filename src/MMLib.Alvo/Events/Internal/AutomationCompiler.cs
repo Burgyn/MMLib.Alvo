@@ -191,7 +191,7 @@ internal static class AutomationCompiler
             return null;
         }
 
-        if (tenanted && !scope.Host.Host.HasTenantCatalog)
+        if (tenanted && !TenantCatalogs.Lists(scope.Host.Host, scope.Descriptor.Tenancy?.SelfService is not null))
         {
             scope.Errors.Add(Error(path, NoTenantCatalog, NoTenantCatalogFix));
             return null;

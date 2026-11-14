@@ -6,12 +6,13 @@ using MMLib.Alvo.Rules;
 namespace MMLib.Alvo.Scheduling;
 
 /// <summary>
-/// The boot's refusal of a data migration that has not run yet, on a scoped schema, in a host with no
-/// <see cref="IAlvoTenantCatalog"/>: it would be held forever. A migration that has run needs no tenant list, so its
-/// registration never refuses a boot.
+/// The boot's refusal of a data migration that has not run yet, on a scoped schema, with no tenant list — no
+/// <see cref="IAlvoTenantCatalog"/> of the host's, and no self-service registry under a descriptor declaring
+/// <c>tenancy.selfService</c> (<see cref="TenantCatalogs"/>): it would be held forever. A migration that has run needs no
+/// tenant list, so its registration never refuses a boot.
 /// </summary>
 /// <param name="registry">The registered extensions.</param>
-/// <param name="services">Tells whether a tenant list is registered.</param>
+/// <param name="services">Tells whether a host tenant list or a tenant registry is registered.</param>
 /// <param name="store">The timer store that records started migrations, or <see langword="null"/> when no provider registered one.</param>
 internal sealed class DataMigrationBootCheck(ExtensionRegistry registry, IServiceProviderIsService services, ITimerStore? store)
 {

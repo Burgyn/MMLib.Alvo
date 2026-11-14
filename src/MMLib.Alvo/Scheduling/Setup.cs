@@ -31,7 +31,8 @@ internal static class SchedulingSetup
             provider.GetRequiredService<TimeProvider>(),
             provider.GetRequiredService<ILogger<TimerPump>>()));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, TimerPump>(provider => provider.GetRequiredService<TimerPump>()));
-        services.TryAddSingleton(provider => new ScheduleRuns(provider.GetService<IAlvoTenantCatalog>(), provider.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(provider => new TenantCatalogs(provider, provider.GetRequiredService<IPolicyCatalogProvider>()));
+        services.TryAddSingleton(provider => new ScheduleRuns(provider.GetRequiredService<TenantCatalogs>(), provider.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton(provider => new DataMigrationBootCheck(
             provider.GetRequiredService<ExtensionRegistry>(),
             provider.GetRequiredService<IServiceProviderIsService>(),

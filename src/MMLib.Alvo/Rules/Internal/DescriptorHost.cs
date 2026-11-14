@@ -8,16 +8,23 @@ using MMLib.Alvo.Scheduling;
 namespace MMLib.Alvo.Rules.Internal;
 
 /// <summary>
-/// The host facts a descriptor's actions compile against: the functions it registers, whether it lists tenants, and whether
+/// The host facts a descriptor's actions compile against: the functions it registers, whether it lists tenants or keeps a
+/// self-service tenant registry that lists them under <c>tenancy.selfService</c>, and whether
 /// it keeps a command ledger an <c>entity.update</c> commits its key in. <see cref="Empty"/> refuses every function action
 /// and every <c>entity.update</c> — fail closed.
 /// </summary>
 /// <param name="Functions">The registered functions, by name.</param>
-/// <param name="HasTenantCatalog">Whether an <c>IAlvoTenantCatalog</c> is registered.</param>
+/// <param name="HasTenantCatalog">Whether the host registers an <c>IAlvoTenantCatalog</c> of its own.</param>
 /// <param name="HasActionLedger">Whether a command ledger and the transaction unit it commits in are both registered.</param>
 internal sealed record DescriptorHost(
     IReadOnlyDictionary<string, FunctionRegistration> Functions, bool HasTenantCatalog, bool HasActionLedger)
 {
+    /// <summary>
+    /// Gets whether a self-service tenant registry is registered — a tenant list only under a descriptor that declares
+    /// <c>tenancy.selfService</c>; ask <see cref="TenantCatalogs.Lists(DescriptorHost, bool)"/>, never this alone.
+    /// </summary>
+    internal bool HasTenantRegistry { get; init; }
+
     /// <summary>A host that registers nothing: what a catalog built outside a container compiles against.</summary>
     internal static DescriptorHost Empty { get; } =
         new(new Dictionary<string, FunctionRegistration>(StringComparer.Ordinal), HasTenantCatalog: false, HasActionLedger: false);
@@ -32,7 +39,10 @@ internal sealed record DescriptorHost(
 
         return new(
             registry.Functions.ToDictionary(function => function.Id, StringComparer.Ordinal),
-            services.IsService(typeof(IAlvoTenantCatalog)),
-            services.IsService(typeof(ICommandLedger)) && services.IsService(typeof(IAlvoTransactions)));
+            TenantCatalogs.HostCatalog(services),
+            services.IsService(typeof(ICommandLedger)) && services.IsService(typeof(IAlvoTransactions)))
+        {
+            HasTenantRegistry = TenantCatalogs.Registry(services),
+        };
     }
 }

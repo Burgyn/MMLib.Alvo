@@ -10,15 +10,32 @@ namespace MMLib.Alvo.Scheduling;
 
 /// <summary>
 /// The boot's checks of every schedule, all reported at once: a cron Cronos cannot read or that never fires, a zone this
-/// machine does not know, and a per-tenant schedule in a host with no <see cref="IAlvoTenantCatalog"/> to list the tenants — and,
-/// against the catalog the boot primes, a data migration not yet started on a scoped schema with no tenant list.
+/// machine does not know, and a per-tenant schedule with no tenant list — and, against the catalog the boot primes, a data
+/// migration not yet started on a scoped schema with no tenant list.
 /// </summary>
+/// <remarks>
+/// <b>A tenant list is <see cref="TenantCatalogs.Lists(IServiceProviderIsService, bool)"/>'s answer for the descriptor
+/// judged</b> (S3 plan D13): the host's <see cref="IAlvoTenantCatalog"/>, or the self-service registry under a descriptor that
+/// declares <c>tenancy.selfService</c>. The catalog-free pass judges as if the descriptor could declare it, so it refuses only
+/// what no descriptor can cure — no catalog and no registry; each catalog's own pass refuses the rest, the boot's strictly.
+/// </remarks>
 internal static class ScheduleChecks
 {
     internal const string Kind = "schedule";
 
-    internal static IEnumerable<ExtensionProblem> Check(ExtensionRegistry registry, IServiceProviderIsService services, DateTimeOffset now) =>
-        registry.Handlers.Where(handler => handler.Job is { IsSchedule: true }).SelectMany(handler => Problems(handler, handler.Job!, services, now));
+    /// <summary>Every schedule's problems under a descriptor that does or does not declare <c>tenancy.selfService</c>.</summary>
+    /// <param name="registry">The registered extensions.</param>
+    /// <param name="services">Answers which services the container can resolve.</param>
+    /// <param name="now">The instant a cron must still fire after.</param>
+    /// <param name="selfService">
+    /// Whether the descriptor judged declares <c>tenancy.selfService</c>; <see langword="true"/> on the catalog-free pass, which
+    /// refuses only what no descriptor can cure.
+    /// </param>
+    internal static IEnumerable<ExtensionProblem> Check(ExtensionRegistry registry, IServiceProviderIsService services, DateTimeOffset now, bool selfService)
+    {
+        var lists = TenantCatalogs.Lists(services, selfService);
+        return registry.Handlers.Where(handler => handler.Job is { IsSchedule: true }).SelectMany(handler => Problems(handler, handler.Job!, lists, now));
+    }
 
     /// <summary>
     /// The boot's own check of every data migration not yet started against the schema it primes: a scoped schema needs a tenant
@@ -41,12 +58,12 @@ internal static class ScheduleChecks
     internal static bool NeedsTenants(ExtensionRegistry registry, PolicyCatalog catalog, IServiceProviderIsService services) =>
         registry.Handlers.Any(handler => handler.Job is { IsMigration: true })
         && IsScoped(catalog.Schema)
-        && !services.IsService(typeof(IAlvoTenantCatalog));
+        && !TenantCatalogs.Lists(services, catalog.SelfService.Enabled);
 
     /// <summary>Whether <paramref name="schema"/> has an entity whose rows belong to a tenant.</summary>
     internal static bool IsScoped(SchemaModel schema) => schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped);
 
-    private static IEnumerable<ExtensionProblem> Problems(HandlerRegistration handler, JobSpec job, IServiceProviderIsService services, DateTimeOffset now)
+    private static IEnumerable<ExtensionProblem> Problems(HandlerRegistration handler, JobSpec job, bool listsTenants, DateTimeOffset now)
     {
         if (CronSchedule.CronProblem(job.Cron!, now) is { } cron)
         {
@@ -58,7 +75,7 @@ internal static class ScheduleChecks
             yield return Problem(handler.Id, "timeZone", zone, "Use an IANA time zone id, such as 'Europe/Bratislava', or leave the default 'UTC'.");
         }
 
-        if (job.Scope is AlvoScheduleScope.EachTenant && !services.IsService(typeof(IAlvoTenantCatalog)))
+        if (job.Scope is AlvoScheduleScope.EachTenant && !listsTenants)
         {
             yield return Problem(
                 handler.Id,
