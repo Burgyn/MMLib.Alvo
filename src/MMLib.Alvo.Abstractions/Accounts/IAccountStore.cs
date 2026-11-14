@@ -30,8 +30,9 @@ internal interface IAccountStore
     /// Signs a verified identity in, in one transaction: finds or (when <see cref="SignInRequest.MayCreate"/>) creates its
     /// account, refuses a disabled one, starts a session keyed by the subject token's id and issues its first refresh
     /// token — and, when <see cref="SignInRequest.PersonalTenant"/> is set, ensures the account's personal tenant and its
-    /// owner membership (S3 plan D6), so a first sign-in and a later one that finds none both leave exactly one. Every
-    /// refusal writes nothing.
+    /// owner membership (S3 plan D6), so a first sign-in and a later one that finds none both leave exactly one — and, when
+    /// <see cref="SignInRequest.Invitation"/> is set, accepts that invitation for the account (S4 plan D5). Every refusal,
+    /// a dead invitation's included, writes nothing.
     /// </summary>
     /// <param name="request">The identity, the sign-up decision, and the ids and instants the session starts with.</param>
     /// <param name="ct">A token to cancel the operation.</param>
@@ -89,7 +90,8 @@ internal interface IAccountStore
     /// Disables an account or enables a disabled one, and either way revokes every live session of it
     /// (<see cref="SessionRevocations.Disabled"/>) in the same transaction (spec §5.6): ending a ban is a clean slate, so
     /// no session from before it comes back, even one that reached the table after the ban's revocation. Enabling an
-    /// account that is not disabled changes nothing and revokes nothing.
+    /// account that is not disabled changes nothing and revokes nothing. Disabling also revokes every live invitation
+    /// the account created, in the same transaction (S4 D16); enabling it again revives none of them.
     /// </summary>
     /// <param name="account">The account's id.</param>
     /// <param name="disabled">Whether the account is to be disabled.</param>
@@ -134,6 +136,12 @@ internal sealed record VerifiedIdentity(
 /// <param name="Now">The instant of the sign-in.</param>
 /// <param name="SessionExpiresAt">The session's absolute expiry.</param>
 /// <param name="PersonalTenant">The personal tenant to ensure, or <see langword="null"/> when the descriptor gives none.</param>
+/// <param name="Invitation">
+/// The invitation to accept in the same transaction (S4 plan D5, D7), or <see langword="null"/> for a sign-in that carries
+/// none. A dead one refuses the whole sign-in with <see cref="SignInStatus.InvitationRefused"/> — unless the account
+/// already is a member of the invitation's tenant, which signs in with nothing accepted, however dead the code (the
+/// <c>AlreadyMember</c> ruling of <c>InvitationAcceptance</c>).
+/// </param>
 internal sealed record SignInRequest(
     VerifiedIdentity Identity,
     bool MayCreate,
@@ -142,7 +150,12 @@ internal sealed record SignInRequest(
     Guid RefreshTokenId,
     DateTimeOffset Now,
     DateTimeOffset SessionExpiresAt,
-    PersonalTenantRequest? PersonalTenant);
+    PersonalTenantRequest? PersonalTenant,
+    SignInInvitation? Invitation = null);
+
+/// <summary>The invitation a sign-in accepts — only the hash of the presented code ever reaches the store (S4 plan D2).</summary>
+/// <param name="CodeHash">The lowercase hex SHA-256 of the presented code.</param>
+internal sealed record SignInInvitation(string CodeHash);
 
 /// <summary>What a sign-in did.</summary>
 internal enum SignInStatus
@@ -161,6 +174,12 @@ internal enum SignInStatus
 
     /// <summary>The subject token already started a session; nothing was written.</summary>
     SubjectTokenReplayed,
+
+    /// <summary>
+    /// The sign-in carried an invitation that is dead (or whose account could not be locked); nothing was written — no
+    /// account, identity, session, refresh token, personal tenant or membership (S4 plan D5, D7).
+    /// </summary>
+    InvitationRefused,
 }
 
 /// <summary>A sign-in's status and, when it signed in, the account.</summary>

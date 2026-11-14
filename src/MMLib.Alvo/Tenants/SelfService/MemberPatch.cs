@@ -1,7 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
-using System.Globalization;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Tenants.SelfService;
@@ -23,7 +22,7 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <param name="IsOwner">The member's new ownership, or <see langword="null"/> to keep it.</param>
 internal sealed record MemberPatch(IReadOnlyList<string>? Roles, bool? IsOwner)
 {
-    private const string RolesMember = "roles";
+    private const string RolesMember = SelfServiceRoles.Member;
 
     private const string IsOwnerMember = "isOwner";
 
@@ -35,8 +34,7 @@ internal sealed record MemberPatch(IReadOnlyList<string>? Roles, bool? IsOwner)
     internal static Task<(MemberPatch? Value, IReadOnlyList<AlvoViolation> Violations)> ReadAsync(
         HttpRequest request, AlvoApiOptions options, SelfServicePolicy policy, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(policy);
-        var assignable = policy.AssignableRoles.Select(role => role.Name).Order(StringComparer.Ordinal).ToList();
+        var assignable = SelfServiceRoles.Assignable(policy);
         return SelfServiceBody.ReadAsync(request, options, root => Validate(root, assignable), ct);
     }
 
@@ -57,40 +55,13 @@ internal sealed record MemberPatch(IReadOnlyList<string>? Roles, bool? IsOwner)
 
     private static List<string>? ReadRoles(JsonElement roles, List<string> assignable, List<AlvoViolation> violations)
     {
-        if (roles.ValueKind != JsonValueKind.Array)
+        var names = SelfServiceRoles.Read(roles, assignable, violations);
+        if (names is null)
         {
             violations.Add(NotRoles());
-            return null;
-        }
-
-        var names = new List<string>();
-        foreach (var (role, index) in roles.EnumerateArray().Select((role, index) => (role, index)))
-        {
-            if (Judge(role, names, assignable, PayloadViolations.PointerTo(RolesMember) + "/" + index.ToString(CultureInfo.InvariantCulture)) is { } refused)
-            {
-                violations.Add(refused);
-            }
         }
 
         return names;
-    }
-
-    private static AlvoViolation? Judge(JsonElement role, List<string> names, List<string> assignable, string pointer)
-    {
-        var name = role.ValueKind == JsonValueKind.String ? SelfServiceBody.TextOf(role) : null;
-        AlvoViolation? refused = name switch
-        {
-            null => NotARole(pointer),
-            _ when names.Contains(name, StringComparer.Ordinal) => Twice(pointer),
-            _ when !assignable.Contains(name, StringComparer.Ordinal) => NotAssignable(pointer, assignable),
-            _ => null,
-        };
-        if (refused is null)
-        {
-            names.Add(name!);
-        }
-
-        return refused;
     }
 
     private static bool? ReadOwner(JsonElement owner, List<AlvoViolation> violations)
@@ -119,24 +90,4 @@ internal sealed record MemberPatch(IReadOnlyList<string>? Roles, bool? IsOwner)
         "invalid-value",
         "roles is a JSON array of role names.",
         "Send \"roles\": [ \"…\" ]; an empty array takes every tenant role away.");
-
-    private static AlvoViolation NotARole(string pointer) => new(
-        pointer,
-        "invalid-value",
-        "A role is a JSON string naming a tenant role.",
-        "Send each role as a quoted name, without control characters.");
-
-    private static AlvoViolation Twice(string pointer) => new(
-        pointer,
-        "invalid-value",
-        "A role is named twice.",
-        "Send each role once.");
-
-    private static AlvoViolation NotAssignable(string pointer, List<string> assignable) => new(
-        pointer,
-        "enum-value",
-        $"A role is not one a membership can carry; tenancy.selfService.assignableRoles lists {Listed(assignable)}.",
-        $"Use only roles from tenancy.selfService.assignableRoles: {Listed(assignable)}.");
-
-    private static string Listed(List<string> assignable) => assignable.Count == 0 ? "none" : string.Join(", ", assignable);
 }

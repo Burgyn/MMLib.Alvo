@@ -22,6 +22,9 @@ internal static class SelfServiceProblems
     /// <summary>The descriptor key that enables creating shared tenants.</summary>
     internal const string CreateTenantsKey = "tenancy.selfService.createTenants";
 
+    /// <summary>The descriptor key that enables invitations.</summary>
+    internal const string InvitationsKey = "tenancy.selfService.invitations";
+
     private const string NotOwner = "Only an owner of this tenant makes this change.";
 
     private const string Self = "Nobody changes their own membership; another owner can, and you can leave.";
@@ -41,12 +44,21 @@ internal static class SelfServiceProblems
     internal static IResult? CreatingOff(SelfServicePolicy policy) =>
         SelfServiceOff(policy) ?? (policy.CreatesTenants ? null : ProblemResultFactory.FeatureDisabled(CreateTenantsKey));
 
+    /// <summary>
+    /// The 404 <c>feature-disabled</c> while <paramref name="policy"/> takes no invitations — naming <c>tenancy.selfService</c>
+    /// first while self-service itself is off (S4 plan D10) — else <see langword="null"/>.
+    /// </summary>
+    /// <param name="policy">The applied self-service policy.</param>
+    internal static IResult? InvitationsOff(SelfServicePolicy policy) =>
+        SelfServiceOff(policy) ?? (policy.Invitations ? null : ProblemResultFactory.FeatureDisabled(InvitationsKey));
+
     /// <summary>The answer for a tenant or membership write the registry did not make.</summary>
     /// <param name="status">What the registry did; never <see cref="MemberChangeStatus.Changed"/>.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="status"/> is <see cref="MemberChangeStatus.Changed"/>.</exception>
     internal static IResult Refused(MemberChangeStatus status) => status switch
     {
-        MemberChangeStatus.NotFound or MemberChangeStatus.NoSuchMember => ProblemResultFactory.NotFound(),
+        MemberChangeStatus.NotFound or MemberChangeStatus.NoSuchMember or MemberChangeStatus.NoSuchInvitation =>
+            ProblemResultFactory.NotFound(),
         MemberChangeStatus.NotOwner => ProblemResultFactory.PersonForbidden(NotOwner),
         MemberChangeStatus.Self => ProblemResultFactory.PersonForbidden(Self),
         MemberChangeStatus.LastOwner => ProblemResultFactory.LastOwner(),

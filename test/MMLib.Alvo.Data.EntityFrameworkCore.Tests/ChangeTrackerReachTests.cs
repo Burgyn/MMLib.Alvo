@@ -152,9 +152,13 @@ public class ChangeTrackerReachTests
     /// <c>EfCoreAccountStore</c> reads and writes only the five end-user account tables (<c>AuthTables</c>' statements),
     /// binding every value — ids, instants, the identity's asserted fields — and never an entity table; its session and key
     /// halves build no command of their own and go through the main file's;
-    /// <c>EfCoreTenantStore</c> reads and writes only the two tenant-registry tables (<c>TenantTables</c>' statements) and takes
-    /// the creator's row lock on the accounts table with a write that changes nothing, binding every value, and never an
-    /// entity table; its member half builds no command of its own and goes through the main file's;
+    /// <c>EfCoreTenantStore</c> reads and writes only the three tenant-registry tables (<c>TenantTables</c>' and
+    /// <c>InvitationTables</c>' statements) and takes the creator's row lock on the accounts table with a write that changes
+    /// nothing, binding every value, and never an entity table; its member and invitation halves build no command of their
+    /// own and go through the main file's;
+    /// <c>InvitationAcceptance</c> is the one acceptance both the tenant and the account store run inside their own
+    /// transactions: <c>InvitationTables</c>', <c>TenantTables</c>' and <c>AuthTables</c>' statements, every value bound, and
+    /// never an entity table;
     /// <c>TimerWrites</c> is the timer table's upsert, cancel and armed-due read that store shares with a data write arming its entity's
     /// declarative timers, binding every value, and never touches an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
@@ -230,6 +234,9 @@ public class ChangeTrackerReachTests
     [InlineData("TenantTables.cs")]
     [InlineData("EfCoreTenantStore.cs")]
     [InlineData("EfCoreTenantStore.Members.cs")]
+    [InlineData("InvitationTables.cs")]
+    [InlineData("EfCoreTenantStore.Invitations.cs")]
+    [InlineData("InvitationAcceptance.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);
@@ -275,6 +282,7 @@ public class ChangeTrackerReachTests
         "HookRejectionTable.cs",
         "IdempotencyTable.cs",
         "InboundWebhookTable.cs",
+        "InvitationAcceptance.cs",
         "MigrationFramingScope.cs",
         "OutboxTable.cs",
         "PostgreSqlSqlDialect.cs",

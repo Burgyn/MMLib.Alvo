@@ -13,7 +13,8 @@ namespace MMLib.Alvo.Tests.Accounts;
 /// The world's tenants as a person sees them over HTTP, and a member seeded beside them — on both engines.
 /// </summary>
 /// <remarks>
-/// <b>A member is seeded with the registry's own column list</b> (S3 plan D15: members arrive through invitations, in S4).
+/// <b>A member is seeded with the registry's own column list</b> (S3 plan D15), for the facts that are about a member
+/// and not about how they joined — joining by invitation is <see cref="InvitationEngineFacts"/>' subject.
 /// <c>TenantSeed</c> runs <c>TenantTables</c>' statement, but that type is internal to the EF adapter, which grants neither
 /// suite that links this file — and no new grant is opened for a seed. The table is named by its suffix as the framework
 /// reserves it (<c>AlvoFrameworkTables.TenantMembersSuffix</c>, internal to Abstractions, which the PostgreSQL suite is not
@@ -22,6 +23,8 @@ namespace MMLib.Alvo.Tests.Accounts;
 internal sealed partial class AccountsWorld
 {
     private const string TenantMembersSuffix = "_tenant_members";
+
+    private const string TenantInvitationsSuffix = "_tenant_invitations";
 
     /// <summary>Adds <paramref name="user"/> to <paramref name="tenant"/> with <paramref name="roles"/>.</summary>
     /// <param name="tenant">The tenant.</param>
@@ -43,6 +46,35 @@ internal sealed partial class AccountsWorld
         Add(command, "@roles", JsonSerializer.Serialize(roles));
         Add(command, "@is_owner", isOwner ? 1 : 0);
         Add(command, "@now", Clock.GetUtcNow().ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts a live, single-use invitation into <paramref name="tenant"/> with the registry's own column list, bypassing
+    /// every check the creation route makes — e.g. into a personal tenant (S4 plan D4: the acceptance must refuse it on its
+    /// own). The table exists once any invitation route or store call has run; the world's boot creates it too.
+    /// </summary>
+    /// <param name="tenant">The tenant it invites into.</param>
+    /// <param name="createdBy">Its creator.</param>
+    /// <param name="codeHash">The SHA-256 of its code, lowercase hex.</param>
+    internal async Task AddInvitationAsync(TenantId tenant, UserId createdBy, string codeHash)
+    {
+        var prefix = Api.Services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix;
+        await using var connection = Api.Database.Connect();
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO {prefix}{TenantInvitationsSuffix} (id, tenant_id, code_hash, roles, grants_owner, email, max_uses, uses, expires_at, created_by, created_at, revoked_at)
+            VALUES (@id, @tenant_id, @code_hash, @roles, 0, NULL, 1, 0, @expires_at, @created_by, @now, NULL)
+            """;
+        var now = Clock.GetUtcNow().ToUniversalTime();
+        Add(command, "@id", Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture));
+        Add(command, "@tenant_id", tenant.Value.ToString("D", CultureInfo.InvariantCulture));
+        Add(command, "@code_hash", codeHash);
+        Add(command, "@roles", "[]");
+        Add(command, "@expires_at", now.AddDays(7).ToString("O", CultureInfo.InvariantCulture));
+        Add(command, "@created_by", createdBy.Value.ToString("D", CultureInfo.InvariantCulture));
+        Add(command, "@now", now.ToString("O", CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 

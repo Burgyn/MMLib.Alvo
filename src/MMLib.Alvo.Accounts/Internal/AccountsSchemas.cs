@@ -13,7 +13,7 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// Every id starts with <c>auth</c> and carries an upper-case letter, so it can collide with no component the Data API
 /// derives from an entity name (the descriptor's grammar admits only lower case).
 /// </remarks>
-internal static class AccountsSchemas
+internal static partial class AccountsSchemas
 {
     /// <summary>The token request's form.</summary>
     internal const string TokenRequestId = "authTokenRequest";
@@ -69,6 +69,7 @@ internal static class AccountsSchemas
         document.AddComponent(MetadataId, Metadata());
         document.AddComponent(KeyId, Key());
         document.AddComponent(KeySetId, KeySet(document));
+        AddInvitationComponents(document);
     }
 
     private static OpenApiSchema TokenRequest() => Object(
@@ -79,6 +80,9 @@ internal static class AccountsSchemas
         ("subject_token", Text("Exchange only: the identity provider's ID token (a JWT, e.g. from Google Identity Services).")),
         ("subject_token_type", Enumerated("Exchange only: the type of `subject_token`.", ExchangeGrant.IdTokenType)),
         ("requested_token_type", Enumerated("Exchange only, optional: the token wanted back.", TokenIssuance.AccessTokenType)),
+        ("invitation_code", Text(
+            "Exchange only, optional: an invitation code to accept in the same transaction (RFC 8693 extension parameter). "
+            + "Under `signUp.mode: invitationOnly` it is the only way a new account is created.")),
         ("refresh_token", Text("Refresh only: the refresh token the previous answer carried. It is rotated on use.")));
 
     private static OpenApiSchema Token() => Object(

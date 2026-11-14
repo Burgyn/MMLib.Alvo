@@ -1090,8 +1090,9 @@ by a filter on the route (the `AlvoAdminCredentialLimit` precedent): fixed one-m
 `Connection.RemoteIpAddress` — IPv4-mapped as IPv4, IPv6 by its `/64`, no address as one shared partition. Over budget is
 429 `rate-limited` with `Retry-After` in whole seconds (60 when the limiter does not say). S2 charges the token endpoint
 (`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3 charges
-`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 adds `Invitations` (20) and S5 charges
-token minting to `Create`. A host behind a proxy configures forwarded headers so the address is the client's.
+`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 charges
+`Invitations` (default 20/min) on the five invitation routes, in the same order — the exchange keeps `Token` even with
+an `invitation_code`; S5 charges token minting to `Create`. A host behind a proxy configures forwarded headers so the address is the client's.
 
 ## The status and `type`-slug catalogue
 

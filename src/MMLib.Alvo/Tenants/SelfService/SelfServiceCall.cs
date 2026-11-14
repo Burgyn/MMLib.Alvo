@@ -49,11 +49,21 @@ internal sealed record SelfServiceCall(UserId Person, SelfServicePolicy Policy, 
             return (null, refusal);
         }
 
-        var services = http.RequestServices;
-        var policy = services.GetRequiredService<IPolicyCatalogProvider>().Current?.SelfService ?? SelfServicePolicy.None;
+        var policy = PolicyOf(http);
         return feature(policy) is { } disabled
             ? (null, disabled)
-            : (new SelfServiceCall(person!.Value, policy, services.GetRequiredService<ITenantStore>(), http), null);
+            : (new SelfServiceCall(person!.Value, policy, http.RequestServices.GetRequiredService<ITenantStore>(), http), null);
+    }
+
+    /// <summary>
+    /// The self-service policy of the descriptor applied when <paramref name="http"/> arrived — read with no credential, for
+    /// the one route anyone may call (<c>POST {prefix}/invitations/preview</c>, S4 plan D8).
+    /// </summary>
+    /// <param name="http">The request.</param>
+    internal static SelfServicePolicy PolicyOf(HttpContext http)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        return http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current?.SelfService ?? SelfServicePolicy.None;
     }
 
     /// <summary>
@@ -72,18 +82,29 @@ internal sealed record SelfServiceCall(UserId Person, SelfServicePolicy Policy, 
     /// <summary>Reads the request's JSON body with <paramref name="reader"/>, or answers 415 or 422 instead.</summary>
     /// <typeparam name="T">What the body holds.</typeparam>
     /// <param name="reader">Reads the body under the Data API's bounds.</param>
-    internal async Task<(T? Value, IResult? Refusal)> ReadAsync<T>(
+    internal Task<(T? Value, IResult? Refusal)> ReadAsync<T>(
+        Func<HttpRequest, AlvoApiOptions, CancellationToken, Task<(T? Value, IReadOnlyList<AlvoViolation> Violations)>> reader)
+        where T : class =>
+        ReadAsync(Http, reader);
+
+    /// <summary>Reads <paramref name="http"/>'s JSON body with <paramref name="reader"/>, or answers 415 or 422 instead.</summary>
+    /// <typeparam name="T">What the body holds.</typeparam>
+    /// <param name="http">The request, admitted or — on the anonymous preview — not.</param>
+    /// <param name="reader">Reads the body under the Data API's bounds.</param>
+    internal static async Task<(T? Value, IResult? Refusal)> ReadAsync<T>(
+        HttpContext http,
         Func<HttpRequest, AlvoApiOptions, CancellationToken, Task<(T? Value, IReadOnlyList<AlvoViolation> Violations)>> reader)
         where T : class
     {
+        ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(reader);
-        if (JsonContentType.Refuse(Http.Request) is { } unsupported)
+        if (JsonContentType.Refuse(http.Request) is { } unsupported)
         {
             return (null, unsupported);
         }
 
-        var options = Http.RequestServices.GetRequiredService<IOptions<AlvoApiOptions>>().Value;
-        var (value, violations) = await reader(Http.Request, options, Ct).ConfigureAwait(false);
+        var options = http.RequestServices.GetRequiredService<IOptions<AlvoApiOptions>>().Value;
+        var (value, violations) = await reader(http.Request, options, http.RequestAborted).ConfigureAwait(false);
         return value is null ? (null, ProblemResultFactory.Validation(violations)) : (value, null);
     }
 

@@ -53,8 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     owner. `GET /auth/v1/tenants/{id}/members`, `PATCH …/members/{userId}` and `DELETE …/members/{userId}` let owners
     give roles from `selfService.assignableRoles` and ownership, remove members, and let anyone leave. Nobody changes
     their own membership, a tenant never loses its last owner (also when two owners act at once), and a personal tenant
-    has exactly one member. A second member joins through invitations, which arrive in S4 (`invitations` is accepted
-    and warned as unhonoured until then).
+    has exactly one member. A second member joins through an invitation (S4, the next entry).
   - **The tenant header selects among a person's memberships.** It is checked on every request in the same one store
     read as the session; a tenant the person is not a member of refuses the whole request with 401, never a request
     without a tenant. Tenant roles are recomputed from the applied descriptor on every request and count only on that
@@ -77,6 +76,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     membership they still hold.
   - **Tests.** Levels 2 and 3, and every wall between tenants, are proven end to end on SQLite and PostgreSQL
     (`TenancyEngineFacts`). **Docs:** `docs/architecture/accounts.md`, *Tenants a person creates (S3)*.
+- **Invitations, and sign-up by invitation: `tenancy.selfService.invitations`** (accounts initiative, slice S4; how a
+  second person joins a level-3 tenant). On a host with sign-in and `createTenants`:
+  - **Owners invite.** `POST /auth/v1/tenants/{id}/invitations` creates an invitation with roles from
+    `assignableRoles`, optionally the owner flag, an email it is bound to, a use count (default 1, at most 100) and an
+    expiry (default 7 days, at most 30). An owner-granting invitation must be single-use and expire within 7 days; it is
+    refused otherwise, never clamped. The answer carries the secret code — `alvo_inv_` + 128 random bits — **once**;
+    only its hash is stored. `GET …/invitations` lists them newest first with their status, never a code;
+    `DELETE …/invitations/{invitationId}` revokes one. **Alvo sends no email:** the app shares the code.
+  - **Anyone holding a code previews it** with `POST /auth/v1/invitations/preview` — tenant, inviter, roles, expiry and
+    whether an email is bound, never the address — without signing in. **A person accepts it** with
+    `POST /auth/v1/invitations/accept` and acts in the tenant with its roles on their next request. Accepting again
+    answers the same membership and consumes nothing. Codes travel only in request bodies, never in a URL.
+  - **One answer for every dead code.** Unknown, expired, revoked, used up, bound to another or an untrusted email, into
+    a personal tenant, or created by someone no longer an owner or disabled: the same 404 as an unknown tenant, byte for byte.
+  - **An owner's invitations die with their ownership or their account.** Demoting or removing an owner, or an owner
+    leaving, revokes their live invitations in the same transaction; so does disabling the owner's account, and enabling
+    it again revives none. Two people racing for a single-use code make exactly one member.
+  - **`signUp.mode: invitationOnly` admits people.** The token exchange accepts `invitation_code` (an RFC 8693
+    extension parameter) in any mode. The new account, its identity, its session and the membership commit together,
+    or nothing does: a dead code is one `400 invalid_grant`, also for an existing account. `allowedEmailDomains` now
+    apply under `invitationOnly` too. A code sent while `invitations` is off is `400 invalid_request`.
+  - **`invitations` is honoured.** It no longer appears in `capabilities.warned`, in the apply warning, or on the
+    dashboard's Overview.
+  - **New public API:** `AlvoRateLimitOptions.Invitations` (`Alvo:Api:RateLimits:Invitations`, default 20 requests per
+    client per minute, shared by the five invitation routes). No new problem type.
+  - **Storage.** One framework table, `{prefix}_tenant_invitations`, created on every relational host and empty until
+    `invitations` is used.
+  - **Tests.** Invitations end to end, both races and the ownership sweep are proven on SQLite and PostgreSQL
+    (`InvitationEngineFacts`, `InvitationStoreFacts`). A log scan at Trace finds no invitation code, no part of one and
+    no hash of one. **Docs:** `docs/architecture/accounts.md`, *Invitations and `invitationOnly` sign-up (S4)*.
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

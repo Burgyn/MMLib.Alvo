@@ -1,12 +1,14 @@
-# End-user accounts: sign-in, sessions, the person resolver (S2) and self-service tenants (S3)
+# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3) and invitations (S4)
 
 > The contributor's view of `MMLib.Alvo.Accounts` and the parts of the core and the EF adapter it uses: the tables, the
 > path a request takes, the invariants and the tests that hold them, and where Alvo deviates from the standards it
 > adopts. The design is `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
 > (§3–§7, §14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
-> tenants' D1–D15 in `docs/superpowers/plans/2026-11-13-accounts-s3-tenants.md`. The first half of this page is sign-in
-> (level 1); [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3. Users' guides arrive in
-> S6.
+> tenants' D1–D15 in `docs/superpowers/plans/2026-11-13-accounts-s3-tenants.md`; the invitations' D1–D15 in
+> `docs/superpowers/plans/2026-11-13-accounts-s4-invitations.md`. The first half of this page is sign-in (level 1);
+> [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3, and
+> [*Invitations and `invitationOnly` sign-up (S4)*](#invitations-and-invitationonly-sign-up-s4) is how a second person
+> joins them. Users' guides arrive in S6.
 
 ## What you can build with it
 
@@ -315,8 +317,8 @@ PATCH /auth/v1/tenants/3c…/members/{userId}        { "roles": ["technician"] }
 DELETE /auth/v1/tenants/3c…/members/{userId}                             → 204, their next request in Acme is 401
 ```
 
-Members arrive through invitations, which are S4; until then a shared tenant's only member is its creator, and the
-tests seed a second one directly in the table (plan D15). `TenancyEngineFacts.Level_two_end_to_end` and
+A second member joins through an invitation (S4, [below](#invitations-and-invitationonly-sign-up-s4)). The S3 tests
+predate that and seed the second member directly in the table (plan D15). `TenancyEngineFacts.Level_two_end_to_end` and
 `…Level_three_end_to_end` are these two sections as tests, on SQLite and on PostgreSQL.
 
 ### Why it is shaped this way
@@ -448,7 +450,7 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
 - **D10** — an event actor keeps a recorded tenant role only while it is assignable, and a person actor's roles are
   narrowed at delivery to their current membership — never widened. A removed member's queued delivery still runs in
   the tenant, with project roles only (`events.md`).
-- **D11** — `invitations` is accepted by the schema and warned as unhonoured until S4.
+- **D11** — `invitations` was accepted by the schema and warned as unhonoured in S3. S4 honours it (S4 D14).
 - **D12** — the global-write warning lists each `create`/`update`/`delete` rule of a global entity whose role literals
   include `authenticated`; a rule that admits without naming a role is not listed.
 - **D13** — the default tenant catalog is resolved per descriptor, not registered. On a host with a registry and no
@@ -462,7 +464,7 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   token rate limit). It is a cost, not a wall breach: each run is the system in its own tenant. A host that wants it
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
 - **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only.
-- **D15** — members arrive only through invitations (S4); tests seed them.
+- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
 
 And where the implementation answered differently from the plan's first wording:
 
@@ -477,6 +479,236 @@ And where the implementation answered differently from the plan's first wording:
 
 ### Not in S3
 
-- Invitations — the only way a second member joins a shared tenant (S4).
+- Invitations — the only way a second member joins a shared tenant (S4, below).
 - Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person (S5).
+- Deleting a tenant, and transferring a personal one.
+
+## Invitations and `invitationOnly` sign-up (S4)
+
+### What you can build with it
+
+**Invite people into a team.** Add `"invitations": true` to a level-3 descriptor's `selfService` block (it needs
+`createTenants`). An owner of a shared tenant creates an invitation; Alvo answers the secret code **once**; the app hands
+it to the invitee however it likes — a link, a QR code, a chat message. **Alvo never sends an email.** The invitee
+previews the code without signing in, signs in, and accepts it. On their very next request they act in the tenant with
+the invitation's roles:
+
+```json
+"tenancy": {
+  "enabled": true,
+  "selfService": {
+    "personalTenant": { "roles": [] },
+    "createTenants": { "creatorRoles": ["dispatcher"], "maxPerAccount": 2 },
+    "assignableRoles": ["dispatcher", "technician"],
+    "invitations": true
+  }
+}
+```
+
+```http
+POST /auth/v1/tenants/3c…/invitations      Authorization: Bearer <Ada>   { "roles": ["technician"] }
+→ 201 { "id": "b1…", "code": "alvo_inv_Qm9…", "roles": ["technician"], "isOwner": false, "email": null,
+        "maxUses": 1, "uses": 0, "expiresAt": "…+7 days", "createdBy": "…", "createdAt": "…", "status": "active",
+        "revokedAt": null }
+
+POST /auth/v1/invitations/preview           (no credential)              { "code": "alvo_inv_Qm9…" }
+→ 200 { "tenantName": "Acme", "inviterName": "Ada Lovelace", "roles": ["technician"], "isOwner": false,
+        "expiresAt": "…", "emailBound": false }
+
+POST /auth/v1/invitations/accept            Authorization: Bearer <Carol> { "code": "alvo_inv_Qm9…" }
+→ 200 { "tenantId": "3c…", "name": "Acme", "kind": "shared", "roles": ["technician"], "isOwner": false }
+
+GET  /api/jobs        X-Alvo-Tenant: 3c…    Authorization: Bearer <Carol>                → 200, Acme's jobs
+```
+
+**An app nobody joins uninvited.** Set `"signUp": { "mode": "invitationOnly" }`. A person without an account can then
+sign up only by sending the code with the token exchange, as the RFC 8693 extension parameter `invitation_code`. The
+account, its identity, its session and the membership are written in one transaction, or nothing is:
+
+```http
+POST /auth/v1/token   application/x-www-form-urlencoded
+  grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+  &subject_token=<Google ID token>&subject_token_type=urn:ietf:params:oauth:token-type:id_token
+  &invitation_code=alvo_inv_Qm9…
+→ 200 { "access_token": …, "refresh_token": … }       a member of Acme at once
+→ 400 { "error": "invalid_grant", "error_description": "The invitation is not valid. Sign in without it, or ask for a new one." }
+→ 403 { "error": "access_denied", "policy": "invitationOnly" }                         no code at all
+```
+
+The first owner has to come from somewhere: sign them in under `open`, or let the operator seed them, then re-apply
+with `invitationOnly`. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
+there as well. `InvitationEngineFacts.Level_three_with_invitations_end_to_end` and `…Invitation_only_end_to_end` are
+these two sections as tests, on SQLite and on PostgreSQL.
+
+### Why it is shaped this way
+
+- **A code is a bearer secret, so it is handled like one.** It is `alvo_inv_` + 128 random bits (31 characters; the
+  prefix is GitHub's secret-scanning precedent). Only its SHA-256 is stored. It is shown once, in the create answer,
+  and travels only in request bodies — never in a URL, which access logs, browser history and `Referer` would keep.
+- **Every dead code gets the same answer.** Unknown, malformed, expired, revoked, used up, bound to another (or an
+  untrusted) email, into a personal tenant, or created by someone who is no longer an owner or is disabled: `preview` and `accept`
+  answer the S3 routes' `not-found` 404, byte for byte, and the exchange answers one `invalid_grant`. A caller holding a
+  code learns whether it works, and nothing about why it does not (the OWASP rule for failed secret lookups).
+- **The use count is decided by one conditional `UPDATE`, never a read followed by a write.** Two people racing for a
+  single-use code make exactly one member; the loser's `UPDATE` finds no row and answers dead.
+- **An invitation is only as good as its creator's ownership — and their account.** Demoting, removing or losing an
+  owner revokes their live invitations in the same transaction, and creating an invitation is serialised against that
+  change. Disabling an account revokes every live invitation it created, in every tenant, in the ban's own transaction
+  (D16); enabling it again revives none.
+- **A preview needs no account.** Under `invitationOnly` the invitee has none yet, and the app wants to show "Ada
+  invites you to Acme" before sign-in. So preview reads no credential; it cannot judge an email binding, so it says only
+  whether one exists.
+- **Signing up by invitation is all or nothing.** A dead code refuses the whole exchange — even for an existing account
+  that would sign in without it, unless that account already is a member of the code's tenant, which signs in whatever
+  the code's state (step 3 below). The client asked for both at once, and it can always sign in again without the code.
+
+### The table
+
+`{prefix}_tenant_invitations`, named through `AlvoFrameworkTables.TenantInvitationsSuffix`, one DDL text for both
+engines, no foreign keys. The SQL is in `Internal/InvitationTables.cs`; the store members are on `ITenantStore`
+(`EfCoreTenantStore.Invitations.cs`). Contract facts: `test/_shared/ef/InvitationStoreFacts.cs`, both engines.
+
+| Column | Holds |
+|---|---|
+| `id`, `tenant_id` | the invitation and the shared tenant it invites into |
+| `code_hash` | lowercase hex SHA-256 of the code, `UNIQUE` |
+| `roles`, `grants_owner` | what accepting gives: role names (a JSON array, each in `assignableRoles` at create) and the owner flag |
+| `email` | optional; lower-cased, matched only against a **trusted** email (spec §5.3) |
+| `max_uses`, `uses` | default 1, at most 100; `uses` only ever grows through the conditional `UPDATE` |
+| `expires_at`, `created_by`, `created_at`, `revoked_at` | default 7 days, at most 30; the creating owner; for the newest-first list; set by a revocation or by the ownership sweep |
+
+An accepted membership records the invitation in `_tenant_members.invitation_id`; a creator's or a personal owner's is
+`NULL`.
+
+### The acceptance routine
+
+One routine, `Internal/InvitationAcceptance.cs`, runs inside two transactions: the `accept` route's, and the sign-in's
+when the exchange carries `invitation_code`. In order:
+
+1. **Lock the account** (the S3 version-bump idiom). Concurrent accepts by one person queue here. No account →
+   `NoAccount`.
+2. **Find the invitation's tenant** by `code_hash`, in any state. No row → `Dead`.
+3. **Already a member of that tenant?** → `AlreadyMember`, with roles unchanged and no use consumed, however dead the
+   code is. A double-submitted accept therefore answers 200 twice.
+4. **Read the invitation live**: not revoked, not expired, uses left, the tenant `shared`, its creator still an owner
+   and not disabled.
+   Otherwise → `Dead`.
+5. **Check the email binding** against the account's email, only if trusted, ignoring case. Otherwise → `Dead`.
+6. **Consume one use** with `UPDATE … SET uses = uses + 1 WHERE id = @id AND uses < max_uses AND revoked_at IS NULL AND
+   expires_at > @now`. Zero rows → `Dead`, unless a re-read finds the person already a member (`AlreadyMember`) — defence
+   in depth, since step 1's lock already serialises one person's accepts. Otherwise insert the membership with the invitation's roles, owner flag and
+   id → `Joined`.
+
+On PostgreSQL the loser of a race waits on the row lock of step 6 and re-evaluates the predicate after the winner
+commits. On SQLite the write gate serialises the two outright. Steps 2 and 3 run before the liveness read so that a
+member is never told their own tenant's invitation is dead. This makes an existing-but-dead code cost two more indexed
+reads than an unknown one. Only a holder of the 128-bit code can observe that, so it is a timing difference, not an
+oracle. Do not "optimise" the reads into a different answer.
+
+### The routes
+
+All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), `Cache-Control: no-store`, CORS like the other auth
+routes. All five are charged the `Invitations` budget (`Alvo:Api:RateLimits:Invitations`, 20 per client per minute),
+after CORS and no-store and before any other gate. While `tenancy.selfService.invitations` is off, every one answers 404
+`feature-disabled` naming that key (or `tenancy.selfService`, when the whole block is off).
+
+| Route | Who | Answers |
+|---|---|---|
+| `POST /tenants/{id}/invitations` `{roles, isOwner?, email?, maxUses?, expiresAt?}` | an owner | 201 with `code`, the only answer that ever carries it, and no `Location`; 422 at the offending pointer; 409 `conflict` on a personal tenant |
+| `GET /tenants/{id}/invitations` | an owner | 200, newest first, never a `code`; `status` is `revoked` > `usedUp` > `expired` > `active` |
+| `DELETE /tenants/{id}/invitations/{invitationId}` | any owner of the tenant | 204, also the second time (the first `revoked_at` is kept); 404 for another tenant's id |
+| `POST /invitations/preview` `{code}` | anyone, no credential read | 200 `{tenantName, inviterName, roles, isOwner, expiresAt, emailBound}`; the dead 404 |
+| `POST /invitations/accept` `{code}` | a person (an API key → 403; none → 401 `Bearer`) | 200 the person's membership, for `Joined` and `AlreadyMember` alike; the dead 404 |
+| `POST /token` with `invitation_code` | the exchange | 200; 400 `invalid_grant` for a dead code; 400 `invalid_request` while invitations are off |
+
+For the owner routes, a member who is not an owner gets 403, and a non-member or an unknown tenant gets the same 404.
+**Create refuses rather than clamps.** `roles` is required, unique and within `assignableRoles` (`admin` never is). An
+owner-granting invitation must be single-use and live at most 7 days, or it is refused at `/maxUses` or `/expiresAt`.
+`expiresAt` is RFC 3339 with an offset, later than now and at most 30 days ahead. `email` is trimmed, at most 254
+characters, and has exactly one `@`. No refusal sentence repeats what was sent.
+
+**In the exchange, the order is the point.** The form is parsed first: `invitation_code` sent twice is the S2 malformed
+form. Next the subject token is verified, so nobody can probe codes anonymously, and a refused ID token never consumes
+one. A code sent while invitations are off is refused, not silently dropped. Only then does the sign-up decision run,
+knowing a code was sent (`SignUpDecision.Decide(policy, identity, hasInvitation)`): `invitationOnly` with a code is
+judged as `open` would be, `allowedEmailDomains` included; without one it refuses as in S2. The store receives only
+the code's hash.
+
+### Invariants, and the tests that hold them
+
+| Invariant | Held by |
+|---|---|
+| Level 3 with invitations, and an `invitationOnly` app, end to end on both engines | `InvitationEngineFacts.Level_three_with_invitations_end_to_end`, `…Invitation_only_end_to_end` (`SqliteInvitationEngineTests`, `PostgresInvitationEngineTests`) |
+| Two people accepting one single-use code at once make one member; two strangers signing up with it make one account (Review Focus 1) | `InvitationStoreFacts.Two_people_accepting_a_single_use_invitation_at_once_make_one_member`, `…Five_people_accepting_a_three_use_invitation_at_once_make_three_members`; `AccountStoreFacts.Two_new_identities_racing_for_one_single_use_invitation_create_one_account` (20 iterations, both engines); `InvitationEngineFacts.Two_people_accepting_…`, `…Two_strangers_signing_up_with_one_single_use_code_at_once_make_one_account` (over HTTP, 10 iterations, both engines) |
+| An owner's invitations die with their ownership, in the same transaction, and a create racing the demotion never outlives it (Review Focus 2) | `InvitationStoreFacts.Demoting_an_owner_revokes_…`, `…Removing_an_owner_or_an_owner_leaving_revokes_their_invitations`, `…An_invitation_created_while_its_creator_is_demoted_never_outlives_the_demotion`, `…An_accept_racing_its_creator_s_demotion_never_joins_after_the_sweep`, `…An_accept_that_waited_on_a_revocation_finds_the_invitation_revoked`; `InvitationEngineFacts.A_demoted_owner_s_invitations_are_dead_on_the_next_request` |
+| A disabled owner's invitations are dead and stay dead after enabling (D16) | `InvitationStoreFacts.Disabling_an_owner_revokes_their_invitations_and_enabling_revives_none`, `…Every_dead_invitation_previews_and_accepts_as_dead` (`creator disabled`), both engines |
+| One person double-submitting accept: one membership, both 200, one use (Review Focus 3) | `InvitationStoreFacts.One_person_accepting_twice_at_once_joins_once` (`maxUses` 1 and 3), `…Accepting_a_single_use_invitation_again_is_already_a_member`; `InvitationAcceptTests.Accepting_again_is_200_with_the_roles_unchanged` |
+| A dead code on a sign-up writes nothing — no account, identity, session, refresh token, personal tenant or membership (Review Focus 4) | `AccountStoreFacts.A_dead_invitation_creates_nothing` (six table counts); `InvitationSignUpTests.A_dead_code_refuses_and_creates_nothing` |
+| Every dead reason, one answer: a byte-identical 404 on preview and accept, one `invalid_grant` on the exchange (Review Focus 5) | `InvitationStoreFacts.Every_dead_invitation_previews_and_accepts_as_dead`; `InvitationAcceptTests.Every_dead_reason_answers_one_byte_identical_404`; `InvitationSignUpTests.A_dead_code_refuses_and_creates_nothing` |
+| A personal tenant is never invited into, also when a row says so | `InvitationStoreFacts.A_personal_tenant_takes_no_invitation`, `…An_invitation_into_a_personal_tenant_is_dead_even_when_its_row_exists`; `InvitationRoutesTests.A_personal_tenant_takes_no_invitation` |
+| An email-bound invitation admits only that address, only when trusted, in any case | `InvitationStoreFacts.An_email_bound_invitation_admits_only_that_trusted_email`; `InvitationAcceptTests.An_email_bound_invitation_admits_its_trusted_address_in_any_case`; `InvitationSignUpTests.An_email_bound_invitation_signs_up_only_its_trusted_address` |
+| An invitation grants only assignable roles, never `admin`; a role dropped from `assignableRoles` is gone on the next request (AC4) | `InvitationRoutesTests.A_role_outside_assignable_roles_is_refused_and_nothing_is_created`; `InvitationRequestTests`; `InvitationEngineFacts.An_invitation_grants_only_assignable_roles_and_never_admin` |
+| An invited tenant role never reaches a global entity or management | `InvitationEngineFacts.An_invited_tenant_role_never_reaches_a_global_entity_or_management` |
+| Only owners invite, list and revoke; a non-member's 404 equals an unknown tenant's; accept needs a person | `InvitationRoutesTests.A_member_who_is_not_an_owner_cannot_invite_list_or_revoke`, `…A_non_member_and_an_unknown_tenant_get_the_same_404`, `…An_api_key_is_403_and_no_credential_is_a_bearer_challenge`; `InvitationAcceptTests.Accept_needs_a_person` |
+| `invitationOnly` creates an account only with a live code, verified after the subject token; domains still apply | `SignUpDecisionTests`; `InvitationSignUpTests.Without_a_code_a_new_person_is_refused_as_before`, `…A_code_from_a_refused_subject_token_is_never_consumed`, `…Allowed_email_domains_refuse_an_invited_outsider`, `…An_existing_person_with_a_dead_code_is_refused` |
+| The code is 128 bits, stored as its hash, shown once, never in a URL, a log, a `ToString` or a refusal (AC6) | `InvitationCodeTests`; `InvitationRoutesTests.An_owner_invites_and_the_code_is_answered_once`; `AccountsOpenApiTests.No_invitation_route_takes_the_code_in_its_url`; `SecretsNeverLoggedTests.No_invitation_code_appears_in_any_log` (the code whole, its random part and its hash, at Trace), `…No_error_body_echoes_a_presented_token` |
+| `feature-disabled` names `tenancy.selfService.invitations` on all five routes; a code on the exchange while off is `invalid_request`; all five are rate-limited | `InvitationRoutesTests.Without_invitations_every_route_is_404_naming_its_key`, `…Invitation_routes_answer_429_after_their_limit`; `InvitationAcceptTests.Without_invitations_preview_and_accept_are_404_naming_its_key`, `…Preview_and_accept_are_charged_the_invitations_budget`; `InvitationSignUpTests.A_code_while_invitations_are_off_is_invalid_request` |
+
+### Recorded decisions and deviations
+
+From the plan (`2026-11-13-accounts-s4-invitations.md`, D1–D15), one line each:
+
+- **D1** — the routes live under the sign-in prefix (`/auth/v1/tenants/{id}/invitations`, `/auth/v1/invitations/…`),
+  not §6.3's `{prefix}`, as in S3. No TeaPie path pin moves.
+- **D2** — the code is `alvo_inv_` + 128 bits of base64url, stored as unsalted SHA-256. A salt adds nothing to a
+  secret with 128 bits of entropy. Any presented string is hashed and looked up, so a malformed code is just not found.
+- **D3** — one dead answer: the S3 `not-found` 404 on preview and accept, one `invalid_grant` with a fixed sentence on
+  the exchange. No new problem slug.
+- **D4** — one acceptance routine shared by the accept route and the sign-in transaction. The use count is decided by
+  the conditional `UPDATE`. **Deviation from the plan's order:** the "already a member" check runs before the
+  liveness read (steps 2–3 above), so a member presenting any code of their own tenant — dead or alive — is answered
+  their membership and nothing is consumed. Without it, a double-submitted single-use accept answered 200 then 404,
+  against Review Focus 3. A non-member still gets the one dead answer.
+- **D5** — the exchange accepts `invitation_code` in any mode, in the order above. `allowedEmailDomains` now also
+  applies under `invitationOnly`. §3.1 says who "may sign up" without naming a mode, and nobody was admitted under
+  `invitationOnly` before, so nothing regresses.
+- **D6** — an owner's invitations are revoked in the demotion's or removal's own transaction, and create and revoke go
+  through S3's version bump, so a create racing its creator's demotion is serialised. The liveness read also requires the
+  creator to still be an owner.
+- **D7** — a dead code refuses the whole exchange, even for an account that would sign in without it — except an
+  account already a member of the code's tenant, which signs in whatever the code's state.
+- **D8** — preview is anonymous and says only `emailBound`. **Deviation from spec §6.4:** "email-bound to someone else
+  → the same 404" holds for accept and the exchange, not for an anonymous preview, which has no "someone" to compare.
+- **D9** — owner rules on create, refused never clamped: `maxUses` 1–100 (the spec gives only the default), `expiresAt`
+  at most 30 days, and an owner-granting invitation single-use and at most 7 days.
+- **D10** — who may call: owners create, list and revoke; any person accepts; anyone previews.
+- **D11** — create answers 201 with the code and no `Location` (there is no single-invitation `GET`). **Deviation:** the
+  201 also carries `revokedAt: null`, so a client parses one shape for created and listed invitations.
+- **D12** — `created_at` is a column the spec's model does not list. It orders the list.
+- **D13** — `Alvo:Api:RateLimits:Invitations`, 20 per client per minute, on all five routes. The exchange with a code
+  stays on the `Token` budget.
+- **D14** — `tenancy.selfService.invitations` is honoured. It left the unhonoured list, the dashboard's warned-slot
+  mirror and the `alvo-descriptor-capabilities-and-limits` skill's generated region.
+- **D15** — an accepted membership records `invitation_id`. No membership event is emitted (spec D9 defers them).
+- **D16** — a disabled owner's invitations are dead. **Beyond spec §6.4**, which ties invitations to ownership only: a
+  ban (spec §5.6) that left the banned owner's codes live would keep admitting people — under `invitationOnly`, creating
+  accounts — for up to 30 days. Disabling an account revokes every live invitation it created, in every tenant, in the
+  ban's transaction, so the consume's `revoked_at IS NULL` refuses an accept that read the code live before the ban
+  committed; the liveness read also requires the creator's account not to be disabled (the second line, as in D6).
+  Enabling the account revives none — the revocation is a fact, like D6's sweep, and the owner issues new codes.
+
+And where the implementation answered differently from the plan's first wording, or a test had to look further:
+
+- **An unknown member of a code body is refused at its own pointer** (`{"code":"…","y":1}` → 422 at `/y`), as on every
+  other body.
+- **Create, list and revoke read the caller's honoured membership before the store** (S3's precedent), so an unhonoured
+  personal membership gets 404, not the store's 409.
+- **Dropping the ownership sweep alone leaves preview and accept dead** — the liveness read's owner check is the second
+  line — so the demotion fact also checks that the invitation is listed as `revoked`.
+
+### Not in S4
+
+- Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person (S5).
+- Membership events — spec D9 defers them.
+- Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.

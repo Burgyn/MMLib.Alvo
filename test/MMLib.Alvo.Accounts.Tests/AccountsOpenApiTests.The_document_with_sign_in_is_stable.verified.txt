@@ -1319,6 +1319,808 @@
         ]
       }
     },
+    "/auth/v1/tenants/{tenantId}/invitations": {
+      "post": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Invite someone into a tenant",
+        "description": "An owner of a shared tenant creates an invitation: the tenant roles it grants (each from `tenancy.selfService.assignableRoles`), whether it makes an owner, an optional email it is bound to, how many people may accept it and when it expires. The answer carries its `code` — shown this once, never again.",
+        "operationId": "tenants.createInvitation",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The invitation.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authInvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The invitation was created; the body carries its code, which no later answer repeats.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authNewInvitation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: the person is a member but not an owner; or the caller is not a signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, or the person is no member of it — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict`: the tenant is a personal one, which nobody is invited into.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: `roles` is missing or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` or is named twice; `maxUses` is not 1–100; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most 30 days away; `email` is not one address; an owner-making invitation admits more than one person or lives longer than 7 days; or the body carries another property.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "List a tenant's invitations",
+        "description": "Every invitation of a tenant the person owns, newest first, with its status. Never a code.",
+        "operationId": "tenants.listInvitations",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tenant's invitations, newest first.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/authInvitation"
+                  },
+                  "description": "The invitations, newest first."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: the person is a member but not an owner; or the caller is not a signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, or the person is no member of it — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`conflict`: the tenant is a personal one, which nobody is invited into.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/auth/v1/tenants/{tenantId}/invitations/{invitationId}": {
+      "delete": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Revoke an invitation",
+        "description": "An owner revokes any invitation of the tenant; nobody joins through it afterwards. Revoking one already revoked is a 204 too.",
+        "operationId": "tenants.revokeInvitation",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "The invitation's id, as the invitations list shows it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The invitation is revoked.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: the person is a member but not an owner; or the caller is not a signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, or the person is no member of it, or the invitation is not one of this tenant's — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/auth/v1/invitations/preview": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Preview an invitation",
+        "description": "What a live invitation offers, to anyone holding its code — no credential is needed, so an invitee can see it before signing up: the tenant, who invited, the tenant roles and ownership it grants, until when, and whether it is bound to an email (never which).",
+        "operationId": "invitations.preview",
+        "requestBody": {
+          "description": "The invitation's code.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authInvitationCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "What the invitation offers.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authInvitationPreview"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: the code admits nobody — unknown, expired, revoked, used up, its creator no longer an owner, or (on accept) bound to an email the person's provider does not vouch for — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: `code` is missing, empty or not a string, or the body carries another property.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/invitations/accept": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Accept an invitation",
+        "description": "The signed-in person joins the invitation's tenant with its roles, and the next request naming the tenant in `X-Alvo-Tenant` acts there. Accepting again — or as someone who already is a member — answers the membership as it is, consuming nothing.",
+        "operationId": "invitations.accept",
+        "requestBody": {
+          "description": "The invitation's code.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authInvitationCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The person's membership in the invitation's tenant: new, or as it already was.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authMembership"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: an API key or an integration's token was presented; only a signed-in person manages tenants.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: the code admits nobody — unknown, expired, revoked, used up, its creator no longer an owner, or (on accept) bound to an email the person's provider does not vouch for — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: `code` is missing, empty or not a string, or the body carries another property.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
     "/auth/v1/.well-known/oauth-authorization-server": {
       "get": {
         "tags": [
@@ -2169,6 +2971,191 @@
   },
   "components": {
     "schemas": {
+      "authInvitation": {
+        "required": [
+          "id",
+          "roles",
+          "isOwner",
+          "email",
+          "maxUses",
+          "uses",
+          "expiresAt",
+          "createdBy",
+          "createdAt",
+          "revokedAt",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The invitation's id; revoking it takes this.",
+            "format": "uuid"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles accepting it grants under the applied descriptor."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether accepting it makes an owner."
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The address it is bound to, lower-case, or null for anyone."
+          },
+          "maxUses": {
+            "type": "integer",
+            "description": "How many people may accept it.",
+            "format": "int32"
+          },
+          "uses": {
+            "type": "integer",
+            "description": "How many have.",
+            "format": "int32"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When it stops admitting anyone.",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "The owner who created it.",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When it was created.",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When it was first revoked, or null.",
+            "format": "date-time"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "expired",
+              "usedUp",
+              "revoked"
+            ],
+            "type": "string",
+            "description": "`revoked`, else `usedUp`, else `expired`, else `active` — the first that holds, judged when the answer was made."
+          }
+        },
+        "description": "One invitation of a tenant, as its owners see it. Never its code."
+      },
+      "authInvitationCode": {
+        "required": [
+          "code"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "type": "string",
+            "description": "The code exactly as the invitation's creator received it (`alvo_inv_…`)."
+          }
+        },
+        "additionalProperties": false,
+        "description": "An invitation's code, in the body — never in a URL. No other member is accepted."
+      },
+      "authInvitationPreview": {
+        "required": [
+          "tenantName",
+          "inviterName",
+          "roles",
+          "isOwner",
+          "expiresAt",
+          "emailBound"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantName": {
+            "type": "string",
+            "description": "The tenant's name."
+          },
+          "inviterName": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The display name of the owner who invited, or null."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles accepting it grants under the applied descriptor."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether accepting it makes an owner."
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When it stops admitting anyone.",
+            "format": "date-time"
+          },
+          "emailBound": {
+            "type": "boolean",
+            "description": "Whether only the person whose provider vouches for one particular email may accept it."
+          }
+        },
+        "description": "What a live invitation offers. Never the email it may be bound to."
+      },
+      "authInvitationRequest": {
+        "required": [
+          "roles"
+        ],
+        "type": "object",
+        "properties": {
+          "roles": {
+            "uniqueItems": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles accepting it grants, each from `tenancy.selfService.assignableRoles`; `[]` grants none."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether accepting it makes an owner; default false. Such an invitation admits one person and lives at most 7 days."
+          },
+          "email": {
+            "maxLength": 254,
+            "type": "string",
+            "description": "Binds the invitation to the person whose provider vouches for this address (any case); default: anyone.",
+            "format": "email"
+          },
+          "maxUses": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer",
+            "description": "How many people may accept it; default 1.",
+            "format": "int32"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When it stops admitting anyone: RFC 3339 with an offset, in the future, at most 30 days away; default 7 days from now.",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false,
+        "description": "An owner's new invitation. Only `roles` is required; no other property is accepted."
+      },
       "authJsonWebKey": {
         "required": [
           "kty",
@@ -2344,6 +3331,96 @@
         "additionalProperties": false,
         "description": "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other property is accepted."
       },
+      "authNewInvitation": {
+        "required": [
+          "id",
+          "roles",
+          "isOwner",
+          "email",
+          "maxUses",
+          "uses",
+          "expiresAt",
+          "createdBy",
+          "createdAt",
+          "revokedAt",
+          "status",
+          "code"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The invitation's id; revoking it takes this.",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "description": "The invitation's secret code (`alvo_inv_…`). Shown this once; hand it to the invitee."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles accepting it grants under the applied descriptor."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether accepting it makes an owner."
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The address it is bound to, lower-case, or null for anyone."
+          },
+          "maxUses": {
+            "type": "integer",
+            "description": "How many people may accept it.",
+            "format": "int32"
+          },
+          "uses": {
+            "type": "integer",
+            "description": "How many have.",
+            "format": "int32"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When it stops admitting anyone.",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string",
+            "description": "The owner who created it.",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When it was created.",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When it was first revoked, or null.",
+            "format": "date-time"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "expired",
+              "usedUp",
+              "revoked"
+            ],
+            "type": "string",
+            "description": "`revoked`, else `usedUp`, else `expired`, else `active` — the first that holds, judged when the answer was made."
+          }
+        },
+        "description": "A just-created invitation, with its code."
+      },
       "authServerMetadata": {
         "required": [
           "issuer",
@@ -2477,6 +3554,10 @@
             ],
             "type": "string",
             "description": "Exchange only, optional: the token wanted back."
+          },
+          "invitation_code": {
+            "type": "string",
+            "description": "Exchange only, optional: an invitation code to accept in the same transaction (RFC 8693 extension parameter). Under `signUp.mode: invitationOnly` it is the only way a new account is created."
           },
           "refresh_token": {
             "type": "string",
@@ -3362,7 +4443,11 @@
     },
     {
       "name": "tenants",
-      "description": "Self-service tenants: a signed-in person lists their tenants, creates shared ones, renames and manages the members of those they own. Each route answers 404 `feature-disabled` naming the descriptor key that enables it while the descriptor leaves it off."
+      "description": "Self-service tenants: a signed-in person lists their tenants, creates shared ones, renames and manages the members of those they own, and invites people into them. Each route answers 404 `feature-disabled` naming the descriptor key that enables it while the descriptor leaves it off."
+    },
+    {
+      "name": "invitations",
+      "description": "Invitations by code: anyone holding a code previews what it offers, and a signed-in person accepts it to join the tenant. The code travels only in request bodies. Every code that admits nobody answers the same 404."
     },
     {
       "name": "time_entries"

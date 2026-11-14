@@ -39,7 +39,10 @@
       "!Internal/AuthTables.cs",
       "!EfCoreTenantStore.cs",
       "!EfCoreTenantStore.Members.cs",
-      "!Internal/TenantTables.cs"
+      "!Internal/TenantTables.cs",
+      "!EfCoreTenantStore.Invitations.cs",
+      "!Internal/InvitationTables.cs",
+      "!Internal/InvitationAcceptance.cs"
     ],
     "thresholds": {
       "high": 90,

@@ -4,8 +4,7 @@ namespace MMLib.Alvo.Admin.Components.Home;
 
 /// <summary>
 /// Which of the build's warned slots one descriptor really declares — a top-level block, or one of the qualified
-/// keys inside an honoured block (<c>auth.providers</c>, <c>entity.storage</c>, <c>entity.realtime</c>,
-/// <c>tenancy.selfService.invitations</c>).
+/// keys inside an honoured block (<c>auth.providers</c>, <c>entity.storage</c>, <c>entity.realtime</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -37,11 +36,8 @@ internal static class DeclaredSlots
     /// </summary>
     public const string EntityRealtime = "entity.realtime";
 
-    /// <summary><c>tenancy.selfService</c> declares <c>invitations: true</c>, which this build does not honour until S4.</summary>
-    public const string SelfServiceInvitations = "tenancy.selfService.invitations";
-
     /// <summary>Every qualified slot this file can detect.</summary>
-    public static IReadOnlyList<string> Qualified { get; } = [AuthProviders, EntityStorage, EntityRealtime, SelfServiceInvitations];
+    public static IReadOnlyList<string> Qualified { get; } = [AuthProviders, EntityStorage, EntityRealtime];
 
     /// <summary>Whether <paramref name="descriptor"/> declares <paramref name="slot"/>, declined values excluded.</summary>
     /// <param name="descriptor">The descriptor's root object.</param>
@@ -55,9 +51,6 @@ internal static class DeclaredSlots
         EntityStorage => Entities(descriptor).Any(entity => Text(entity, "storage") == "dynamic"),
         EntityRealtime => Entities(descriptor).Any(entity =>
             Member(entity, "realtime") is { ValueKind: JsonValueKind.True }),
-        SelfServiceInvitations => Member(descriptor, "tenancy") is { } tenancy
-            && Member(tenancy, "selfService") is { } selfService
-            && Member(selfService, "invitations") is { ValueKind: JsonValueKind.True },
         "dynamicEntities" => Member(descriptor, slot) is { } block
             && Member(block, "enabled") is { ValueKind: JsonValueKind.True },
         "webhooks" => Member(descriptor, slot) is { } webhooks && NotEmpty(Member(webhooks, "endpoints")),

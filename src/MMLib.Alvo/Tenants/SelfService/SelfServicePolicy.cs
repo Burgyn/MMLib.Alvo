@@ -18,18 +18,23 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <param name="PersonalTenantRoles">The roles a person holds in their personal tenant, or <see langword="null"/> without <c>personalTenant</c>.</param>
 /// <param name="CreatorRoles">The roles a shared tenant's creator receives, or <see langword="null"/> without <c>createTenants</c>.</param>
 /// <param name="MaxPerAccount">How many shared tenants one account may create.</param>
+/// <param name="Invitations">
+/// Whether owners may invite people into their shared tenants: <c>invitations: true</c> with <c>createTenants</c> (S4 plan
+/// D14) — without a shared tenant there is nothing to invite into.
+/// </param>
 internal sealed record SelfServicePolicy(
     bool Enabled,
     IReadOnlySet<Role> AssignableRoles,
     IReadOnlySet<Role>? PersonalTenantRoles,
     IReadOnlySet<Role>? CreatorRoles,
-    int MaxPerAccount)
+    int MaxPerAccount,
+    bool Invitations)
 {
     /// <summary>The cap on shared tenants per account when <c>createTenants.maxPerAccount</c> is not declared.</summary>
     internal const int DefaultMaxPerAccount = 5;
 
     /// <summary>The policy of no self-service: no membership is honoured.</summary>
-    internal static SelfServicePolicy None { get; } = new(false, new HashSet<Role>(), null, null, DefaultMaxPerAccount);
+    internal static SelfServicePolicy None { get; } = new(false, new HashSet<Role>(), null, null, DefaultMaxPerAccount, false);
 
     /// <summary>Whether every person gets a tenant of their own.</summary>
     internal bool HasPersonalTenant => PersonalTenantRoles is not null;
@@ -65,7 +70,8 @@ internal sealed record SelfServicePolicy(
             assignable,
             selfService.PersonalTenant is { } personal ? Within(Resolve(personal.Roles, roles), assignable) : null,
             selfService.CreateTenants is { } create ? Within(Resolve(create.CreatorRoles, roles), assignable) : null,
-            selfService.CreateTenants?.MaxPerAccount ?? DefaultMaxPerAccount);
+            selfService.CreateTenants?.MaxPerAccount ?? DefaultMaxPerAccount,
+            selfService.Invitations == true && selfService.CreateTenants is not null);
     }
 
     private static HashSet<Role> Resolve(IReadOnlyList<string>? names, RoleCatalog roles) =>

@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "team-tracker",
-  "description": "Spec 2026-11-13 §3's level 3 without invitations: people create shared tenants and hold tenant roles in them. jobs and notes are scoped; regions is global reference data a tenant role must never write, directly or through the jobs relation; owner is a project role no membership can carry.",
+  "description": "Spec 2026-11-13 §3's level 3: people create shared tenants, invite others into them and hold tenant roles there. jobs and notes are scoped; regions is global reference data a tenant role must never write, directly or through the jobs relation; owner is a project role no membership can carry.",
   "auth": {
     "providers": [
       "google"
@@ -31,7 +31,8 @@
       "assignableRoles": [
         "dispatcher",
         "technician"
-      ]
+      ],
+      "invitations": true
     }
   },
   "access": {
