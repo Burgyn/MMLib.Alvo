@@ -250,6 +250,20 @@ public sealed class QueryBodyReaderTests
     }
 
     /// <summary>
+    /// The same boundary when the innermost container is empty: one past the bound is refused by the scan, by name,
+    /// rather than admitted and thrown by the parse.
+    /// </summary>
+    [Fact]
+    public async Task An_empty_innermost_container_is_held_to_the_same_depth_bound()
+    {
+        var atBound = await ReadAsync(EmptyNested(_options.MaxPayloadDepth));
+        var pastBound = await ReadAsync(EmptyNested(_options.MaxPayloadDepth + 1));
+
+        atBound.Violations.ShouldAllBe(violation => violation.Code != "body-too-deep");
+        pastBound.Violations.ShouldHaveSingleItem().Code.ShouldBe("body-too-deep");
+    }
+
+    /// <summary>
     /// A body carrying exactly <paramref name="containers"/> nested containers — the root object plus
     /// <paramref name="containers"/> minus one arrays, which is the number both the scan's
     /// <c>CurrentDepth</c> and <c>JsonDocumentOptions.MaxDepth</c> count.
@@ -259,6 +273,14 @@ public sealed class QueryBodyReaderTests
     {
         var arrays = containers - 1;
         return "{\"year\":" + new string('[', arrays) + "\"x\"" + new string(']', arrays) + "}";
+    }
+
+    /// <summary>Like <see cref="Nested"/>, but the innermost container is an empty array.</summary>
+    /// <param name="containers">How many containers deep the innermost one sits.</param>
+    private static string EmptyNested(int containers)
+    {
+        var arrays = containers - 1;
+        return "{\"year\":" + new string('[', arrays) + new string(']', arrays) + "}";
     }
 
     private static Task<QueryBodyReader.Result> ReadAsync(string body)

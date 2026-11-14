@@ -98,6 +98,30 @@ public sealed class UserEndpointsTests
         violation["code"]!.GetValue<string>().ShouldBe(code);
     }
 
+    /// <summary>
+    /// A body nested to the bound is answered about its members; one level deeper — even when the innermost container is
+    /// empty — is the named depth refusal, never a 500 from the parse.
+    /// </summary>
+    [Theory]
+    [InlineData(31, false)]
+    [InlineData(32, true)]
+    public async Task An_empty_innermost_container_past_the_depth_bound_is_refused_by_name(int arrays, bool tooDeep)
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine);
+        var (access, _) = await world.SignInAsync("sub-1");
+        var json = "{\"name\":\"Ada\",\"x\":" + new string('[', arrays) + new string(']', arrays) + "}";
+
+        using var response = await world.Api.SendRawAsync(
+            HttpMethod.Patch,
+            User,
+            content: new StringContent(json, Encoding.UTF8, "application/json"),
+            headers: [new KeyValuePair<string, string>("Authorization", $"Bearer {access}")]);
+
+        var text = await response.ReadTextAsync();
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, text);
+        text.Contains("nests deeper than 32", StringComparison.Ordinal).ShouldBe(tooDeep, text);
+    }
+
     [Fact]
     public async Task A_patch_that_is_not_json_is_unsupported()
     {
