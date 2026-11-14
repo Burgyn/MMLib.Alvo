@@ -170,7 +170,7 @@ public abstract class TenantStoreFacts : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Tenant_ids_list_every_tenant_once()
+    public async Task Tenants_list_every_tenant_once_with_its_kind()
     {
         var (store, services) = await StoreAsync();
         var person = await SignedUpAsync(services);
@@ -182,7 +182,8 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         await TenantSeed.AddMemberAsync(services, first, person, [], isOwner: false, _now.AddMinutes(5));
         await TenantSeed.AddPersonalTenantAsync(services, personal, person, "Ada", _now.AddMinutes(3));
 
-        (await store.ListTenantIdsAsync(Ct)).ShouldBe([first, tiedLow, tiedHigh, personal]);
+        (await store.ListTenantsAsync(Ct)).ShouldBe(
+            [new(first, TenantKind.Shared), new(tiedLow, TenantKind.Shared), new(tiedHigh, TenantKind.Shared), new(personal, TenantKind.Personal)]);
     }
 
     [Fact]

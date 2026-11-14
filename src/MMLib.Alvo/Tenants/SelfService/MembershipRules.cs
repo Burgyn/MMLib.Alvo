@@ -88,12 +88,37 @@ internal static class MembershipRules
     }
 
     /// <summary>
-    /// Whether <paramref name="found"/> is a membership the policy honours for this request: the tenant named (or, with
-    /// none named, a personal one), personal only while the descriptor gives personal tenants and only its owner's.
+    /// Whether <paramref name="policy"/> honours a registry tenant of <paramref name="kind"/> at all: a shared one whenever
+    /// <c>selfService</c> is on, a personal one only while the descriptor gives personal tenants. The one test a membership
+    /// (<see cref="Honours(StoredMembership, SelfServicePolicy)"/>) and the default tenant list
+    /// (<see cref="RegistryTenantCatalog"/>) both pass through, so a tenant nobody can act in gets no run either.
+    /// </summary>
+    /// <param name="kind">The tenant's kind.</param>
+    /// <param name="policy">The applied self-service policy.</param>
+    internal static bool Honours(TenantKind kind, SelfServicePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        return policy.Enabled && (kind == TenantKind.Shared || policy.HasPersonalTenant);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="policy"/> honours <paramref name="membership"/> — its tenant's kind, and a personal one only
+    /// as its owner's (the remarks' defence in depth). Every membership a request, a route or a listing counts passes it.
+    /// </summary>
+    /// <param name="membership">The stored membership.</param>
+    /// <param name="policy">The applied self-service policy.</param>
+    internal static bool Honours(StoredMembership membership, SelfServicePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(membership);
+        return Honours(membership.Kind, policy) && (membership.Kind == TenantKind.Shared || membership.IsOwner);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="found"/> is a membership the policy honours for this request: one it honours at all, of the
+    /// tenant named — or, with none named, a personal one.
     /// </summary>
     private static bool Answers(TenantId? requested, StoredMembership? found, SelfServicePolicy policy) =>
         found is not null
-        && policy.Enabled
-        && (requested is { } tenant ? found.Tenant == tenant : found.Kind == TenantKind.Personal)
-        && (found.Kind != TenantKind.Personal || (policy.HasPersonalTenant && found.IsOwner));
+        && Honours(found, policy)
+        && (requested is { } tenant ? found.Tenant == tenant : found.Kind == TenantKind.Personal);
 }

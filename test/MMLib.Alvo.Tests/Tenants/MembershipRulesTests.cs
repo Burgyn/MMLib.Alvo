@@ -148,4 +148,59 @@ public sealed class MembershipRulesTests
         MembershipRules.Decide(_named, Shared(other, "dispatcher"), _withPersonal).ShouldBeSameAs(MembershipResolution.Refusal);
         MembershipRules.Decide(null, Shared(_named, "dispatcher"), _withPersonal).ShouldBeSameAs(MembershipResolution.NoTenant);
     }
+
+    /// <summary>
+    /// One test for "does this count": a tenant's kind under the policy, and a membership's on top of it — a personal one only
+    /// as its owner's. The default tenant list and every membership listing read the same answers a request does.
+    /// </summary>
+    [Fact]
+    public void Honours_is_one_test_for_a_tenant_and_its_membership()
+    {
+        (MembershipRules.Honours(TenantKind.Shared, _off), MembershipRules.Honours(TenantKind.Personal, _off)).ShouldBe((false, false));
+        (MembershipRules.Honours(TenantKind.Shared, _shared), MembershipRules.Honours(TenantKind.Personal, _shared)).ShouldBe((true, false));
+        (MembershipRules.Honours(TenantKind.Shared, _withPersonal), MembershipRules.Honours(TenantKind.Personal, _withPersonal))
+            .ShouldBe((true, true));
+        MembershipRules.Honours(Personal(), _withPersonal).ShouldBeTrue();
+        MembershipRules.Honours(PersonalNotOwned(), _withPersonal).ShouldBeFalse("a personal row is honoured only as its owner's");
+        MembershipRules.Honours(Shared(_named) with { IsOwner = false }, _withPersonal).ShouldBeTrue("a shared member need not own it");
+        MembershipRules.Honours(Personal(), _shared).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// <c>GET /user</c>'s memberships, <c>GET /tenants</c> and every route count a membership through the request's own test
+    /// (review M2): a personal row that is not its owner's — one the registry should never hold — is listed nowhere.
+    /// </summary>
+    [Fact]
+    public async Task A_listing_drops_a_personal_row_that_is_not_its_owner_s()
+    {
+        var user = UserId.New();
+        var store = new MembershipsOnly(user, PersonalNotOwned(), Shared(_named, "dispatcher"));
+
+        var listed = await SelfServiceMemberships.ListAsync(store, _withPersonal, user, TestContext.Current.CancellationToken);
+
+        listed.ShouldHaveSingleItem().TenantId.ShouldBe(_named.Value);
+    }
+
+    /// <summary>A registry whose only answer is one person's memberships.</summary>
+    private sealed class MembershipsOnly(UserId member, params StoredMembership[] memberships) : ITenantStore
+    {
+        public Task<IReadOnlyList<StoredMembership>> ListMembershipsAsync(UserId user, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<StoredMembership>>(user == member ? memberships : []);
+
+        public Task<CreateTenantOutcome> CreateSharedAsync(CreateTenantRequest request, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<StoredMembership?> FindMembershipAsync(UserId user, TenantId? tenant, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<StoredTenant>> ListTenantsAsync(CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<MemberView>?> ListMembersAsync(TenantId tenant, UserId actor, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> UpdateMemberAsync(MemberUpdate update, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) => throw new NotSupportedException();
+    }
 }

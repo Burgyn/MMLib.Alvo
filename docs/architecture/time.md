@@ -142,7 +142,10 @@ tenant and answers the first tenant's delivery (Decision 12).
 
 **Which tenants (spec §6.6; accounts S3 plan D13).** "Each tenant" means each tenant the *tenant list* names, and there
 are two: the host's own `IAlvoTenantCatalog` when it registers one — always first — or else, when the descriptor being
-judged declares `tenancy.selfService`, the self-service registry (`RegistryTenantCatalog`, every `_tenants` id). The
+judged declares `tenancy.selfService`, the self-service registry (`RegistryTenantCatalog`: every shared `_tenants` id,
+and the personal ones only while that descriptor declares `personalTenant` — the tenants a request can act in). Under an
+open sign-up with `personalTenant` every account therefore adds a run to each tick — a cost, not a wall breach; a host
+that wants it bounded registers its own catalog (`accounts.md`, D13). The
 registry lists **self-service tenants only**: tenants that exist only as `tenant_id` values written by API-key
 workflows are not in it, so a deployment mixing the two registers its own catalog. The choice is made per descriptor by
 one internal resolver, `TenantCatalogs`, rather than by a registration, because the descriptor arrives at run time.

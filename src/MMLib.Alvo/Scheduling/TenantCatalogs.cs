@@ -10,7 +10,8 @@ namespace MMLib.Alvo.Scheduling;
 /// <summary>
 /// Which <see cref="IAlvoTenantCatalog"/> lists this host's tenants under a descriptor (spec §6.6, S3 plan D13): the host's
 /// own when it registers one; else the self-service registry's, while the descriptor declares <c>tenancy.selfService</c>
-/// and a tenant registry is registered; else none.
+/// and a tenant registry is registered — listing only the tenants that descriptor honours (<see cref="RegistryTenantCatalog"/>);
+/// else none.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -30,15 +31,18 @@ internal sealed class TenantCatalogs(IServiceProvider services, IPolicyCatalogPr
 {
     private readonly Lazy<IAlvoTenantCatalog?> _host = new(() => services.GetService<IAlvoTenantCatalog>());
 
-    private readonly Lazy<IAlvoTenantCatalog?> _registry = new(() =>
-        services.GetService<ITenantStore>() is { } store ? new RegistryTenantCatalog(store) : null);
+    private readonly Lazy<ITenantStore?> _registry = new(() => services.GetService<ITenantStore>());
 
     /// <summary>Gets the tenant list under the applied descriptor, or <see langword="null"/> when there is none.</summary>
-    internal IAlvoTenantCatalog? Current => For(catalogs.Current?.SelfService.Enabled == true);
+    internal IAlvoTenantCatalog? Current => For(catalogs.Current?.SelfService ?? SelfServicePolicy.None);
 
-    /// <summary>The tenant list under a descriptor that does or does not declare <c>tenancy.selfService</c>.</summary>
-    /// <param name="selfService">Whether the descriptor in question declares <c>tenancy.selfService</c>.</param>
-    internal IAlvoTenantCatalog? For(bool selfService) => _host.Value ?? (selfService ? _registry.Value : null);
+    /// <summary>The tenant list under a descriptor whose self-service policy is <paramref name="policy"/>.</summary>
+    /// <param name="policy">The self-service policy of the descriptor in question; <see cref="SelfServicePolicy.None"/> without <c>selfService</c>.</param>
+    internal IAlvoTenantCatalog? For(SelfServicePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        return _host.Value ?? (policy.Enabled && _registry.Value is { } store ? new RegistryTenantCatalog(store, policy) : null);
+    }
 
     /// <summary>Whether <paramref name="host"/> lists tenants under a descriptor that does or does not declare <c>selfService</c>.</summary>
     /// <param name="host">The host facts a descriptor compiles against.</param>

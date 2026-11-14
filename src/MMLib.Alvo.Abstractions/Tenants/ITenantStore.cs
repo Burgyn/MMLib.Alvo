@@ -43,9 +43,12 @@ internal interface ITenantStore
     /// <param name="ct">A token to cancel the operation.</param>
     Task<StoredMembership?> FindMembershipAsync(UserId user, TenantId? tenant, CancellationToken ct);
 
-    /// <summary>Every tenant in the registry, by creation and then id — the self-service tenants only (spec §6.6).</summary>
+    /// <summary>
+    /// Every tenant in the registry with its kind, by creation and then id — the self-service tenants only (spec §6.6). The
+    /// kind is the caller's to judge: which tenants count under the applied descriptor is the core's decision, not the store's.
+    /// </summary>
     /// <param name="ct">A token to cancel the operation.</param>
-    Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct);
+    Task<IReadOnlyList<StoredTenant>> ListTenantsAsync(CancellationToken ct);
 
     /// <summary>Renames <paramref name="tenant"/> — its owner's act, a personal tenant's owner included.</summary>
     /// <param name="tenant">The tenant.</param>
@@ -96,6 +99,11 @@ internal enum TenantKind
     /// <summary>A tenant a person created to share with others.</summary>
     Shared,
 }
+
+/// <summary>One tenant, as the registry lists it.</summary>
+/// <param name="Id">The tenant.</param>
+/// <param name="Kind">The tenant's kind.</param>
+internal sealed record StoredTenant(TenantId Id, TenantKind Kind);
 
 /// <summary>One membership, as the registry stores it.</summary>
 /// <param name="Tenant">The tenant.</param>

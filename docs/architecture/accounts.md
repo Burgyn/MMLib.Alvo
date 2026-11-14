@@ -422,6 +422,7 @@ A name is trimmed, 1–100 code points, no control character — the display nam
 | `feature-disabled` names its key on all six routes; creating is rate-limited and only creating | `TenantRoutesTests.Without_self_service_every_route_is_404_feature_disabled`, `…Without_create_tenants_creating_is_404_naming_its_key`, `…Tenant_creation_answers_429_after_its_limit` |
 | An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests` |
 | The registry is the tenant list only under `selfService` and only when the host registers none (D13) | `TenantCatalogsTests` |
+| The default tenant list honours what a request honours: shared tenants, personal ones only while `personalTenant` is on — one predicate for a tenant, a membership and every listing | `TenantCatalogsTests.Without_personal_tenant_the_registry_lists_only_shared_tenants`, `…A_migration_starts_once_per_registry_tenant_only_at_a_self_service_revision`; `MembershipRulesTests.Honours_is_one_test_for_a_tenant_and_its_membership`, `…A_listing_drops_a_personal_row_that_is_not_its_owner_s` |
 
 ### Recorded deviations
 
@@ -453,6 +454,13 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
 - **D13** — the default tenant catalog is resolved per descriptor, not registered. On a host with a registry and no
   catalog of its own, an `EachTenant` schedule is judged per descriptor rather than in the boot's catalog-free pass, so
   a relational host with no descriptor boots and a stored-descriptor boot stands down instead of exiting (spec §6.6).
+  The registry lists only the tenants the descriptor honours (`MembershipRules.Honours`, the test every membership
+  passes): after `personalTenant` is dropped, personal tenants get no runs. **The cost it leaves, recorded rather than
+  bounded:** under `signUp.mode: open` with `personalTenant`, every sign-up adds a tenant — and each account up to
+  `maxPerAccount` more, none deletable yet — so every `EachTenant` schedule tick and every data migration on a scoped
+  schema mints one more run per account, a per-tick cost any member of the public grows by signing up (bounded only by the
+  token rate limit). It is a cost, not a wall breach: each run is the system in its own tenant. A host that wants it
+  bounded registers its own `IAlvoTenantCatalog`, which always wins.
 - **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only.
 - **D15** — members arrive only through invitations (S4); tests seed them.
 

@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Events;
 using MMLib.Alvo.Extensions.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 
 using System.Globalization;
 
@@ -17,14 +18,14 @@ internal sealed class ScheduleRuns
     internal const string ManualKey = "manual";
     internal const string MigrationKey = "migration";
 
-    private readonly Func<bool?, IAlvoTenantCatalog?> _tenants;
+    private readonly Func<SelfServicePolicy?, IAlvoTenantCatalog?> _tenants;
     private readonly TimeProvider _time;
 
     /// <summary>Mints runs over the tenant list <paramref name="catalogs"/> resolves under the descriptor each run is judged by.</summary>
     /// <param name="catalogs">Resolves the tenant list; the boot refuses a per-tenant schedule wherever it resolves none.</param>
     /// <param name="time">The clock each event is stamped with.</param>
     internal ScheduleRuns(TenantCatalogs catalogs, TimeProvider time)
-        : this(selfService => selfService is { } declared ? catalogs.For(declared) : catalogs.Current, time)
+        : this(policy => policy is { } declared ? catalogs.For(declared) : catalogs.Current, time)
     {
     }
 
@@ -36,15 +37,15 @@ internal sealed class ScheduleRuns
     {
     }
 
-    private ScheduleRuns(Func<bool?, IAlvoTenantCatalog?> tenants, TimeProvider time)
+    private ScheduleRuns(Func<SelfServicePolicy?, IAlvoTenantCatalog?> tenants, TimeProvider time)
     {
         _tenants = tenants;
         _time = time;
     }
 
-    /// <summary>Whether a tenant list exists under a descriptor that does or does not declare <c>tenancy.selfService</c>.</summary>
-    /// <param name="selfService">Whether the descriptor a per-tenant run is judged by declares <c>tenancy.selfService</c>.</param>
-    internal bool ListsTenants(bool selfService) => _tenants(selfService) is not null;
+    /// <summary>Whether a tenant list exists under a descriptor whose self-service policy is <paramref name="policy"/>.</summary>
+    /// <param name="policy">The self-service policy of the descriptor a per-tenant run is judged by.</param>
+    internal bool ListsTenants(SelfServicePolicy policy) => _tenants(policy) is not null;
 
     /// <summary>The events of <paramref name="job"/>'s run for <paramref name="scheduledFor"/>, in the order the tenants are listed.</summary>
     /// <remarks>A per-tenant run lists the tenants under the applied descriptor, the one its schedule is bound to.</remarks>
@@ -67,10 +68,10 @@ internal sealed class ScheduleRuns
     /// <param name="job">A registered data migration.</param>
     /// <param name="revision">The applied revision it starts at.</param>
     /// <param name="perTenant">Whether the schema has a scoped entity, so each tenant gets a run of its own.</param>
-    /// <param name="selfService">Whether the descriptor of <paramref name="revision"/> declares <c>tenancy.selfService</c>.</param>
+    /// <param name="policy">The self-service policy of the descriptor of <paramref name="revision"/>.</param>
     /// <param name="ct">A token to cancel the tenant listing.</param>
     internal async Task<IReadOnlyList<AlvoFrameworkEnvelope>> MigrationEventsAsync(
-        HandlerRegistration job, int revision, bool perTenant, bool selfService, CancellationToken ct)
+        HandlerRegistration job, int revision, bool perTenant, SelfServicePolicy policy, CancellationToken ct)
     {
         var type = ((NamedEvent)job.Source).Type;
         var now = _time.GetUtcNow();
@@ -80,7 +81,7 @@ internal sealed class ScheduleRuns
             [JobInvocation.RevisionKey] = revision,
             [JobInvocation.ScheduledForKey] = now.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
         };
-        IReadOnlyList<TenantId?> scopes = perTenant ? await TenantsAsync(selfService, ct).ConfigureAwait(false) : [null];
+        IReadOnlyList<TenantId?> scopes = perTenant ? await TenantsAsync(policy, ct).ConfigureAwait(false) : [null];
 
         return [.. scopes.Select(tenant => Mint(type, $"migrations/{job.Id}", payload, tenant, now))];
     }
@@ -88,10 +89,10 @@ internal sealed class ScheduleRuns
     private async Task<IReadOnlyList<TenantId?>> ScopesAsync(JobSpec job, CancellationToken ct) =>
         job.Scope is AlvoScheduleScope.EachTenant ? await TenantsAsync(null, ct).ConfigureAwait(false) : [null];
 
-    /// <summary>The tenants listed under a descriptor declaring <paramref name="selfService"/> — the applied one when <see langword="null"/>.</summary>
-    private async Task<IReadOnlyList<TenantId?>> TenantsAsync(bool? selfService, CancellationToken ct)
+    /// <summary>The tenants listed under a descriptor whose self-service policy is <paramref name="policy"/> — the applied one when <see langword="null"/>.</summary>
+    private async Task<IReadOnlyList<TenantId?>> TenantsAsync(SelfServicePolicy? policy, CancellationToken ct)
     {
-        var listed = await (_tenants(selfService) ?? throw NoTenantCatalog()).ListTenantsAsync(ct).ConfigureAwait(false);
+        var listed = await (_tenants(policy) ?? throw NoTenantCatalog()).ListTenantsAsync(ct).ConfigureAwait(false);
         return [.. listed.Distinct().Select(tenant => (TenantId?)tenant)];
     }
 

@@ -37,17 +37,7 @@ internal sealed class SelfServiceMemberships(IServiceProvider services, IPolicyC
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(policy);
         var stored = await store.ListMembershipsAsync(user, ct).ConfigureAwait(false);
-        return [.. stored.Where(membership => Honoured(membership, policy)).Select(membership => Response(membership, policy))];
-    }
-
-    /// <summary>Whether <paramref name="policy"/> honours <paramref name="membership"/>: a personal one only with personal tenants.</summary>
-    /// <param name="membership">The stored membership.</param>
-    /// <param name="policy">The applied self-service policy.</param>
-    internal static bool Honoured(StoredMembership membership, SelfServicePolicy policy)
-    {
-        ArgumentNullException.ThrowIfNull(membership);
-        ArgumentNullException.ThrowIfNull(policy);
-        return policy.Enabled && (membership.Kind == TenantKind.Shared || policy.HasPersonalTenant);
+        return [.. stored.Where(membership => MembershipRules.Honours(membership, policy)).Select(membership => Response(membership, policy))];
     }
 
     /// <summary>The response for <paramref name="membership"/> with the roles <paramref name="policy"/> makes effective (D5).</summary>

@@ -180,8 +180,8 @@ internal sealed class TenantTables(string schemaPrefix)
          WHERE {AuthTables.LiveSessionWhere}
         """;
 
-    /// <summary>Gets the statement reading every tenant's id, by creation and then id.</summary>
-    internal string TenantIdsSql => $"SELECT id FROM {Tenants} ORDER BY created_at, id";
+    /// <summary>Gets the statement reading every tenant's id and kind, by creation and then id.</summary>
+    internal string TenantsSql => $"SELECT id, kind FROM {Tenants} ORDER BY created_at, id";
 
     /// <summary>
     /// Gets the statement every membership write runs first (D3): it takes the tenant's row lock, so on PostgreSQL a second
@@ -223,6 +223,10 @@ internal sealed class TenantTables(string schemaPrefix)
     /// <param name="kind">The tenant's kind.</param>
     internal static string KindText(TenantKind kind) => kind == TenantKind.Personal ? PersonalKind : SharedKind;
 
+    /// <summary>The kind whose stored text is <paramref name="text"/>.</summary>
+    /// <param name="text">The stored <c>kind</c>.</param>
+    internal static TenantKind KindOf(string text) => text == PersonalKind ? TenantKind.Personal : TenantKind.Shared;
+
     /// <summary>The stored text of a role list: a JSON array of names, verbatim.</summary>
     /// <param name="roles">The role names.</param>
     internal static string RolesText(IReadOnlyList<string> roles) => JsonSerializer.Serialize(roles);
@@ -235,7 +239,7 @@ internal sealed class TenantTables(string schemaPrefix)
     /// <param name="first">The ordinal of the tenant id.</param>
     internal static StoredMembership ReadMembership(DbDataReader reader, int first = 0) => new(
         new TenantId(Guid.Parse(reader.GetString(first), CultureInfo.InvariantCulture)),
-        reader.GetString(first + 1) == PersonalKind ? TenantKind.Personal : TenantKind.Shared,
+        KindOf(reader.GetString(first + 1)),
         reader.GetString(first + 2),
         RolesOf(reader.GetString(first + 3)),
         Convert.ToInt64(reader.GetValue(first + 4), CultureInfo.InvariantCulture) != 0,

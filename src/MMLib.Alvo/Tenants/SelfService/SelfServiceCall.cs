@@ -65,7 +65,7 @@ internal sealed record SelfServiceCall(UserId Person, SelfServicePolicy Policy, 
     /// <param name="tenant">The tenant the route names.</param>
     internal async Task<StoredMembership?> MembershipAsync(TenantId tenant) =>
         await Store.FindMembershipAsync(Person, tenant, Ct).ConfigureAwait(false) is { } own
-        && SelfServiceMemberships.Honoured(own, Policy)
+        && MembershipRules.Honours(own, Policy)
             ? own
             : null;
 

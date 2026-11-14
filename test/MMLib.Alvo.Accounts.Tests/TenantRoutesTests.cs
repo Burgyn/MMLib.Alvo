@@ -326,7 +326,7 @@ public sealed class TenantRoutesTests
         public Task<StoredMembership?> FindMembershipAsync(UserId user, TenantId? tenant, CancellationToken ct) =>
             inner.FindMembershipAsync(user, tenant, ct);
 
-        public Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct) => inner.ListTenantIdsAsync(ct);
+        public Task<IReadOnlyList<StoredTenant>> ListTenantsAsync(CancellationToken ct) => inner.ListTenantsAsync(ct);
 
         public Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct) =>
             inner.RenameAsync(tenant, actor, name, ct);

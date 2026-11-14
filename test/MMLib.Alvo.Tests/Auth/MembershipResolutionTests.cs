@@ -117,7 +117,7 @@ public sealed class MembershipResolutionTests
 
         public Task<IReadOnlyList<StoredMembership>> ListMembershipsAsync(UserId user, CancellationToken ct) => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct) => throw new NotSupportedException();
+        public Task<IReadOnlyList<StoredTenant>> ListTenantsAsync(CancellationToken ct) => throw new NotSupportedException();
 
         public Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct) =>
             throw new NotSupportedException();

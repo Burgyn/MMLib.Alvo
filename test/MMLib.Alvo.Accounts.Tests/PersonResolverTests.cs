@@ -405,8 +405,8 @@ public sealed class PersonResolverTests
         public Task<StoredMembership?> FindMembershipAsync(UserId user, TenantId? tenant, CancellationToken ct) =>
             Calls.Count(nameof(FindMembershipAsync), inner.FindMembershipAsync(user, tenant, ct));
 
-        public Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct) =>
-            Calls.Count(nameof(ListTenantIdsAsync), inner.ListTenantIdsAsync(ct));
+        public Task<IReadOnlyList<StoredTenant>> ListTenantsAsync(CancellationToken ct) =>
+            Calls.Count(nameof(ListTenantsAsync), inner.ListTenantsAsync(ct));
 
         public Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct) =>
             Calls.Count(nameof(RenameAsync), inner.RenameAsync(tenant, actor, name, ct));

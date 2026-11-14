@@ -84,9 +84,12 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct) =>
-        await ReadAsync(_tables.TenantIdsSql, _ => { }, reader => new TenantId(GuidOf(reader.GetString(0))), ct)
-            .ConfigureAwait(false);
+    public async Task<IReadOnlyList<StoredTenant>> ListTenantsAsync(CancellationToken ct) =>
+        await ReadAsync(
+            _tables.TenantsSql,
+            _ => { },
+            reader => new StoredTenant(new TenantId(GuidOf(reader.GetString(0))), TenantTables.KindOf(reader.GetString(1))),
+            ct).ConfigureAwait(false);
 
     private async Task<CreateTenantOutcome> CreatedAsync(
         DbConnection connection, DbTransaction transaction, CreateTenantRequest request, CancellationToken ct)

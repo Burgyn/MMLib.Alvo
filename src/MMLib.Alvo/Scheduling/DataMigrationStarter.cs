@@ -3,6 +3,7 @@
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Tenants.SelfService;
 
 using System.Collections.Concurrent;
 using System.Text.Json;
@@ -30,7 +31,8 @@ internal readonly record struct MigrationRound(int Started, int Failed)
 /// <para>
 /// <b>Per tenant is decided by the revision it starts at</b>, read from the store with that revision — never by this process's
 /// catalog, which a replica that did not make the apply still holds at an older revision. So is whether the self-service
-/// registry lists the tenants (<see cref="TenantCatalogs"/>): only while that revision declares <c>tenancy.selfService</c>.
+/// registry lists the tenants (<see cref="TenantCatalogs"/>): only while that revision declares <c>tenancy.selfService</c>, and
+/// then only the tenants that revision's policy honours.
 /// </para>
 /// <para>
 /// <b>A schema scoped after the boot holds the migration.</b> The boot refuses an unstarted migration on a scoped schema without
@@ -75,7 +77,7 @@ internal sealed class DataMigrationStarter(
         }
 
         var perTenant = ScheduleChecks.IsScoped(current.Schema);
-        var selfService = perTenant && !runs.ListsTenants(selfService: false) && DeclaresSelfService(current.DescriptorJson);
+        var selfService = perTenant && !runs.ListsTenants(SelfServicePolicy.None) ? PolicyOf(current.DescriptorJson) : SelfServicePolicy.None;
         var round = MigrationRound.None;
         foreach (var migration in pending.Where(migration => current.Revision >= migration.Job!.AfterRevision))
         {
@@ -86,16 +88,17 @@ internal sealed class DataMigrationStarter(
         return round;
     }
 
-    /// <summary>Whether the applied descriptor declares <c>tenancy.selfService</c>; one that cannot be read lists nothing (fail closed).</summary>
-    private static bool DeclaresSelfService(string descriptorJson)
+    /// <summary>The applied descriptor's self-service policy; one that cannot be read has none and lists nothing (fail closed).</summary>
+    private static SelfServicePolicy PolicyOf(string descriptorJson)
     {
         try
         {
-            return AlvoDescriptor.Parse(descriptorJson).Tenancy?.SelfService is not null;
+            var descriptor = AlvoDescriptor.Parse(descriptorJson);
+            return SelfServicePolicy.From(descriptor, RoleCatalog.FromDescriptor(descriptor));
         }
-        catch (Exception unreadable) when (unreadable is JsonException or InvalidOperationException)
+        catch (Exception unreadable) when (unreadable is JsonException or InvalidOperationException or ArgumentException)
         {
-            return false;
+            return SelfServicePolicy.None;
         }
     }
 
@@ -179,6 +182,6 @@ internal sealed class DataMigrationStarter(
 
     private readonly record struct Retry(DateTimeOffset At, TimeSpan Wait);
 
-    /// <summary>One migration's start: the revision it starts at, whether each tenant gets a run, and whether that revision declares <c>selfService</c>.</summary>
-    private readonly record struct MigrationStart(int Revision, bool PerTenant, bool SelfService);
+    /// <summary>One migration's start: the revision it starts at, whether each tenant gets a run, and that revision's self-service policy.</summary>
+    private readonly record struct MigrationStart(int Revision, bool PerTenant, SelfServicePolicy SelfService);
 }
