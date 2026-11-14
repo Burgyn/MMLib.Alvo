@@ -37,8 +37,10 @@ name: Mutation
 #   - "data-postgresql"→ src/MMLib.Alvo.Data.PostgreSql (stryker-config.data-postgresql.json)
 #   - "accounts"       → src/MMLib.Alvo.Accounts, end-user sign-in (stryker-config.accounts.json),
 #                        against MMLib.Alvo.Accounts.Tests.
-#   - "accounts-store" → the EF adapter's account store — EfCoreAccountStore{,.Sessions,.Keys}.cs
-#                        and Internal/AuthTables.cs (stryker-config.accounts-store.json) — against
+#   - "accounts-store" → the EF adapter's account store and tenant registry —
+#                        EfCoreAccountStore{,.Sessions,.Keys}.cs, Internal/AuthTables.cs,
+#                        EfCoreTenantStore*.cs and Internal/TenantTables.cs
+#                        (stryker-config.accounts-store.json) — against
 #                        MMLib.Alvo.Data.Sqlite.Tests and MMLib.Alvo.Accounts.Tests. A third
 #                        partition of the EF project beside data-ef-core and data-ef-rest; see
 #                        "THE ACCOUNTS LEGS" below for why, and for how their thresholds were set
@@ -404,6 +406,11 @@ name: Mutation
 # already does for Data.Sqlite.Tests on data-ef-core. No test filter: under MTP a filtered
 # run executes the whole assembly anyway (stryker-net#3750, under WHY coverage-analysis
 # above), so a filter would only make the cost look smaller than it is.
+#
+# The tenant registry (accounts S3) joins the store leg for the same reason: its contract
+# facts (test/_shared/ef/TenantStoreFacts.cs) compile into the same two engine suites and
+# never into MMLib.Alvo.Data.EntityFrameworkCore.Tests, so data-ef-rest excludes
+# EfCoreTenantStore*.cs and Internal/TenantTables.cs and accounts-store mutates them.
 #
 # `accounts` mutates every file of the package except AssemblyInfo.cs. The registration
 # surface (AddAlvoAccounts, MapAlvoAccounts) stays IN, against the drivers' precedent,
@@ -932,9 +939,10 @@ jobs:
           - name: data-ef-rest
             config: stryker-config.data-ef-rest.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 1816  # probed 2026-10-30 (was 649). Unchanged by accounts S2 on purpose: the four
-                           # account-store files postdate that probe, so excluding them (they sit on the
-                           # accounts-store leg) removes nothing it counted. Not re-probed — no Stryker run.
+            mutants: 1816  # probed 2026-10-30 (was 649). Unchanged by accounts S2 and S3 on purpose: the
+                           # account-store and tenant-registry files postdate that probe, so excluding them
+                           # (they sit on the accounts-store leg) removes nothing it counted. Not re-probed —
+                           # no Stryker run.
             suite: 1286    # probed 2026-10-30 (was 554); one test project
             timeout: 120   # measured 2 min for 565 mutants on CI with ZERO timeouts — one fast
                            # assembly, so `additional-timeout` changes nothing here. The budget is
