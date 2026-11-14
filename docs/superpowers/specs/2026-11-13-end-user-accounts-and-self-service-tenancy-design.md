@@ -92,7 +92,7 @@ for things that cross tenants, one tenant per request. **A does not remove B** �
     "time_entries": {
       "audit": true,
       "fields": { "minutes": { "type": "integer", "required": true } },
-      "access": {
+      "rules": {
         "list":   "created_by == @user.id",
         "get":    "created_by == @user.id",
         "create": "'authenticated' in @user.roles",
@@ -116,7 +116,7 @@ descriptor change, because rows already carry `tenant_id`.
   "entities": {
     "time_entries": {
       "fields": { "minutes": { "type": "integer", "required": true } },
-      "access": { "list": "'authenticated' in @user.roles", "create": "'authenticated' in @user.roles" }
+      "rules": { "list": "'authenticated' in @user.roles", "create": "'authenticated' in @user.roles" }
     }
   }
 }
@@ -183,7 +183,12 @@ without `selfService`; an end-user provider without `auth.signUp`.
 `authenticated` for a write is listed — those rows are now writable by anyone who signs up.
 
 `auth.providers` keeps its enum. `google` stops being *unhonoured* (#36) in S2; the others keep the
-warning until their slice; `local` keeps its meaning (the operator store) until §5.7 widens it.
+warning until their slice; `local` keeps its meaning (the operator store) until §5.7 widens it. A host that
+lists `google` but registers no end-user sign-in is warned **at boot** (S2 plan D11): the warning belongs to the
+boot plan, so a runtime apply that adds `google` repeats it only at the next boot.
+
+An entity's per-operation CEL lives under its `rules` key (the schema's name); `access` is the project's
+top-level management block, which §3.1's refusals below refer to.
 
 ## 4. Prior art adopted, and where Alvo deviates
 

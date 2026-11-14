@@ -81,17 +81,22 @@ protocol (Fetch standard).
   "refresh profile fields": a refresh would silently undo the person's own edit).
 - **D9 — Accounts are on per host, by configuration.** `AddAlvoAccounts` is the switch for an embedded host; the
   standalone host calls it only when `Alvo:Accounts:Providers` has at least one provider section. So an existing
-  deployment without accounts keeps starting without a key file, its OpenAPI document gains nothing, and **no TeaPie
-  path pin moves in S2** (both stacks run without accounts; S6 turns them on in field-service). The Bearer security
-  scheme is published only when a person resolver is registered.
+  deployment without accounts keeps starting without a key file, its OpenAPI document gains no path, operation or
+  security scheme, and **no TeaPie path pin moves in S2** (both stacks run without accounts; S6 turns them on in
+  field-service). The Bearer security scheme is published only when a person resolver is registered. *(Amended in Task
+  13: the document does gain the four new problem-type values D4 adds, in the `problemDetails.type` enum, because that
+  enum is the whole `AlvoProblemTypes` catalogue — Management-only slugs were already in it. Additive, and never emitted
+  by a host without Accounts.)*
 - **D10 — The descriptor is the switch for sign-in.** The exchange admits only a provider the applied descriptor lists
   **and** the host configured. A live session whose `idp` the applied descriptor no longer lists is refused at its next
   request (401) and refresh (`invalid_grant`) — default-deny.
 - **D11 — `google` honoured.** The `auth.providers` unhonoured row (core `UnhonouredSubsystems.WithinBlocks` and the
   dashboard's mirror `DeclaredSlots`) stops naming `google`; `microsoft`, `github`, `apple`, `oidc` stay warned. The
-  host-dependent half is a separate boot/apply warning in the core: the applied descriptor lists `google` and no person
+  host-dependent half is a separate warning in the core: the applied descriptor lists `google` and no person
   resolver is registered (`CallerResolvers.HasPerson == false`). Keeps the capability report and the dashboard
-  descriptor-level.
+  descriptor-level. *(Amended in Task 13: the warning is **boot-only**. It is part of `DescriptorBootPlan.Plan`, which runs
+  only at boot — the same single emission point as the unhonoured-block warning — so a runtime apply that adds `google`
+  on a host without Accounts does not repeat it until the next boot.)*
 - **D12 — No key rotation in S2.** One row per purpose (`signing`, `refresh`), generation 1, `retires_at` null; JWKS
   publishes every unretired signing key. The table's `(purpose, generation)` uniqueness is what makes first boot on two
   replicas converge (Review Focus 5) and what a later rotation increments.
@@ -663,8 +668,9 @@ static class SessionRevocations { const string Logout = "logout"; const string R
   for every published signing key; never `d`; `Cache-Control: public, max-age=300`.
 - Core: when `CallerResolvers.HasPerson`, the document gains component `alvoBearer` (`http`, scheme `bearer`,
   `bearerFormat` `JWT`, description: Alvo access token from `{prefix}/token`), and every Data API and command
-  operation's security becomes `[ {}, {alvoApiKey}, {alvoBearer} ]`; without a person resolver the document is
-  byte-identical to today (`OpenApiDocumentTests.The_document_is_stable` does not move).
+  operation's security becomes `[ {}, {alvoApiKey}, {alvoBearer} ]`; without a person resolver the document gains no
+  path, operation or security scheme (`OpenApiDocumentTests.The_document_is_stable` moves only by D4's four problem-type
+  enum values, D9's amendment).
 - `AccountsDocumentTransformer` (registered by `AddAlvoAccounts` the way `AlvoOpenApiSetup` registers the core's):
   operations of the auth routes carry summaries, tag `auth`, operationIds as above, the form request body of
   `auth.token`, every response documenting `Cache-Control`, every error response `application/problem+json`, and

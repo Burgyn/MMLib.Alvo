@@ -986,6 +986,16 @@ today would be a contract nobody designed (S2 decision; `AlvoIdentity.ResolverKe
 consume it). Without one, every `Authorization` value, `Bearer` included, is left alone for the host's
 own `JwtBearer` or a Basic-auth proxy, exactly as before. The Management API never reads it at all.
 
+**Once `AddAlvoAccounts` is called, Bearer is real.** A Bearer value on the Data API and the commands is then an Alvo
+access token and nothing else: the person resolver validates it, reads its session once, and answers either a person or
+`401 invalid_token` — never "ignored", so a host that runs its own `JwtBearer` scheme on the same routes cannot also
+add Alvo's sign-in (it keeps its scheme by not calling `AddAlvoAccounts`; a host-federated person resolver is #210). The
+same call refuses to start beside `Alvo:Auth:HeaderName = Authorization`, because the two channels cannot both own
+one header. What happens after the token is read — the pipeline, the tables, the invariants — is
+[`accounts.md`](./accounts.md); `AccountsEngineFacts` pins it on both engines, and
+`AccountsEngineFacts.An_api_key_beside_sign_in_behaves_exactly_as_before` pins that API keys and a host's other
+`Authorization` schemes do not notice.
+
 **Why one reading.** Three places turn a request into an `AlvoContext`: the Data API filter (`AlvoContextFilter`), the
 command gate (`CallerGate`) and the Management filter (`ManagementCallerFilter`). When each reads headers for itself,
 they drift, and the drift is a security bug: a credential one of them honours and another ignores is a credential that
@@ -1534,7 +1544,10 @@ would fire on every descriptor ever applied. Recorded on **#38**. It is, however
 quiet — the one deliberate split between the capability report and the apply warning, recorded in
 `CapabilityReport`. Beside it, two keys inside honoured blocks are warned at apply as qualified slots
 (`UnhonouredSubsystems.WithinBlocks`): `entity.storage` for any `storage: dynamic` entity, which the mapper
-drops (F7, #41), and `auth.providers` for any provider other than `local` (#36).
+drops (F7, #41), and `auth.providers` for any provider other than `local` and `google` (#36). `google` is honoured
+since S2 ([`accounts.md`](./accounts.md)); whether *this host* registered sign-in is a host fact, not a descriptor
+one, so a descriptor listing `google` on a host without `AddAlvoAccounts` gets a separate boot warning instead (S2 plan
+D11, boot-only).
 
 ### Declaring a framework-managed column is refused, and it costs one capability
 

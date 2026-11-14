@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
+  per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
+  in the standalone host), a person can sign in through the app:
+  - **Signing in.** The app exchanges the person's Google ID token at `POST /auth/v1/token` (RFC 8693) and receives a
+    15-minute ES256 access token (RFC 9068) and a rotating refresh token.
+  - **Using the API.** The app calls the Data API and the commands with `Authorization: Bearer`, and the rules see the
+    person as `@user.id` with the `authenticated` role. Audited entities fill `created_by` from the person.
+  - **Refreshing.** A refresh rotates the token. Two concurrent refreshes get the same child. Reuse after a 10-second
+    grace window revokes the whole session (RFC 9700 §4.14).
+  - **Account routes.** `GET`/`PATCH /auth/v1/user` and `POST /auth/v1/logout` complete the surface. RFC 8414 metadata
+    and a JWKS are served under `/auth/v1/.well-known/`.
+  - **The descriptor is the switch.** `auth.signUp` (`open` | `invitationOnly`, optional `allowedEmailDomains`) is
+    required once `auth.providers` lists `google`, which is no longer reported as unhonoured. Only a provider the
+    descriptor lists *and* the host configures signs anyone in. Dropping it ends live sessions on their next request.
+  - **Disabling a person.** An operator disables a person with `PUT {management}/projects/{project}/accounts/{id}/disabled`
+    (the new `ManageAccounts` operation, `admin`). The person is refused from their next request.
+  - **Storage.** Five new framework tables (`{prefix}_auth_*`) hold accounts, identities, sessions, refresh tokens and
+    keys. The keys are encrypted with `Alvo:Secrets:EncryptionKeyFile`, which an accounts host must configure.
+  - **CORS and rate limits.** `Alvo:Api:Cors:Origins` and `Alvo:Api:RateLimits:Token` (default 30 per minute per client
+    IP) cover the Data API and the sign-in routes without a pipeline step.
+  - **A host that does not add accounts is unchanged.** It needs no key file, maps no `/auth` route, publishes no Bearer
+    scheme and ignores `Authorization` exactly as before. Its OpenAPI document gains only the four new problem types
+    in the shared `type` enum: `token-refused`, `sign-up-refused`, `sign-in-refused` and `rate-limited`.
+  - **Tests.** Level 1 is proven end to end on SQLite and PostgreSQL (`AccountsEngineFacts`). A log scan at Trace finds
+    no ID token, access token, refresh token or API key in any message, exception, structured value or scope.
+  - **Docs.** The contributor's view is `docs/architecture/accounts.md`.
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

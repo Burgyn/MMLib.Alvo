@@ -600,7 +600,8 @@ their own access token here is an anonymous caller and is refused `403` like one
 `AccountAdministrationTests.A_bearer_token_never_reaches_the_route`. The endpoint's name is
 `Alvo.Management.Accounts.SetDisabledAsync`, qualified because `IAlvoUserAdministration` has a member of the same name
 and endpoint names must be unique. `AccountAdministrationRouteTests` is `ManagementContractTests`' counterpart for this
-contract.
+contract. `AccountsEngineFacts.A_disabled_person_is_refused_on_the_next_request` drives the route end to end on both
+engines; the accounts side (tables, sessions, the person resolver) is [`accounts.md`](./accounts.md).
 
 ## What is deliberately absent
 
