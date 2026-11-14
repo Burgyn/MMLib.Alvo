@@ -16,8 +16,9 @@ internal sealed record PersonSession(UserId Account, Guid Session, string Provid
 /// <remarks>
 /// <para>
 /// <b>Two halves, so a caller can put work between them.</b> <see cref="IdentifyAsync"/> does no I/O on a known key; the
-/// person resolver consults membership resolution after it and before <see cref="IsLiveAsync"/>, so a refused tenant
-/// costs no read (S2 D13). <see cref="AuthenticateAsync"/> is both, for the routes that have no tenant step.
+/// person resolver plans the membership after it and before <see cref="ReadAsync"/>, so a refused tenant costs no read
+/// (S2 D13), and a membership to read is read in the same statement as the session (S3 plan D4).
+/// <see cref="AuthenticateAsync"/> is both, for the routes that have no tenant step.
 /// </para>
 /// <para>
 /// <b>The descriptor stays the switch</b> (S2 D10): a session whose provider the applied descriptor no longer lists is not
@@ -83,10 +84,24 @@ internal sealed class PersonSessions(
     /// <param name="session">A session <see cref="IdentifyAsync"/> answered.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     internal async ValueTask<bool> IsLiveAsync(PersonSession session, CancellationToken ct)
+        => (await ReadAsync(session, membership: null, ct).ConfigureAwait(false)).Live;
+
+    /// <summary>
+    /// The one read of a person's request (spec §5.7 step 2): whether <paramref name="session"/> is live — its provider still
+    /// listed, checked first with no read — and, in the same statement, the membership <paramref name="membership"/> asks for.
+    /// </summary>
+    /// <param name="session">A session <see cref="IdentifyAsync"/> answered.</param>
+    /// <param name="membership">The membership to read, or <see langword="null"/> for none.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    internal async ValueTask<CallerRead> ReadAsync(PersonSession session, MembershipQuery? membership, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(session);
-        return signIn.Admits(signIn.Policy, session.Provider)
-            && (await store.ReadCallerAsync(new CallerQuery(session.Account, session.Session, clock.GetUtcNow(), null), ct)
-                .ConfigureAwait(false)).Live;
+        if (!signIn.Admits(signIn.Policy, session.Provider))
+        {
+            return default;
+        }
+
+        return await store.ReadCallerAsync(new CallerQuery(session.Account, session.Session, clock.GetUtcNow(), membership), ct)
+            .ConfigureAwait(false);
     }
 }

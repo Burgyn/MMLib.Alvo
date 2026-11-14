@@ -1,4 +1,5 @@
 ﻿using Microsoft.OpenApi;
+using MMLib.Alvo.Tenants.SelfService;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Accounts.Internal;
@@ -86,9 +87,27 @@ internal static class AccountsSchemas
         ("memberships", new OpenApiSchema
         {
             Type = JsonSchemaType.Array,
-            Description = "The tenants this person belongs to. Always empty until this host offers tenants.",
-            Items = new OpenApiSchema { Type = JsonSchemaType.Object },
+            Description = "The tenants this person belongs to, the personal one first. Empty unless the descriptor declares "
+                + "`tenancy.selfService`.",
+            Items = Membership(),
         }));
+
+    private static OpenApiSchema Membership() => Object(
+        "One tenant the person belongs to.",
+        ["tenantId", "name", "kind", "roles", "isOwner"],
+        ("tenantId", new OpenApiSchema
+        {
+            Type = JsonSchemaType.String,
+            Format = "uuid",
+            Description = "The tenant's id: send it as `X-Alvo-Tenant` to act in this tenant.",
+        }),
+        ("name", Text("The tenant's name.")),
+        ("kind", Enumerated(
+            "`personal`: the person's own tenant, used when no tenant is named. `shared`: one others can join.",
+            MembershipResponse.PersonalKind,
+            MembershipResponse.SharedKind)),
+        ("roles", Strings("The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities.")),
+        ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the person manages this tenant. Not a role." }));
 
     private static OpenApiSchema UserUpdate()
     {

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "team-tracker",
+  "description": "Spec 2026-11-13 §3's level 3 without invitations: people create shared tenants and hold tenant roles in them. jobs and notes are scoped; regions is global reference data a tenant role must never write, directly or through the jobs relation; owner is a project role no membership can carry.",
+  "auth": {
+    "providers": [
+      "google"
+    ],
+    "roles": [
+      "dispatcher",
+      "technician",
+      "owner"
+    ],
+    "signUp": {
+      "mode": "open"
+    }
+  },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "personalTenant": {
+        "roles": []
+      },
+      "createTenants": {
+        "creatorRoles": [
+          "dispatcher"
+        ],
+        "maxPerAccount": 2
+      },
+      "assignableRoles": [
+        "dispatcher",
+        "technician"
+      ]
+    }
+  },
+  "access": {
+    "admin": "'owner' in @user.roles"
+  },
+  "entities": {
+    "regions": {
+      "tenancy": "global",
+      "fields": {
+        "code": {
+          "type": "string",
+          "maxLength": 8,
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "create": "'dispatcher' in @user.roles",
+        "update": "'dispatcher' in @user.roles || jobs.exists(j, true)"
+      }
+    },
+    "jobs": {
+      "tenancy": "scoped",
+      "fields": {
+        "title": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "region_id": {
+          "type": "ref",
+          "entity": "regions"
+        }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles || 'technician' in @user.roles",
+        "get": "'dispatcher' in @user.roles || 'technician' in @user.roles",
+        "create": "'dispatcher' in @user.roles",
+        "update": "'dispatcher' in @user.roles",
+        "delete": "'dispatcher' in @user.roles"
+      }
+    },
+    "notes": {
+      "tenancy": "scoped",
+      "fields": {
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "create": "'owner' in @user.roles"
+      }
+    }
+  }
+}

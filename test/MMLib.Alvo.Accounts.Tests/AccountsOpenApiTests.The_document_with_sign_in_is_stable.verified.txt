@@ -1522,9 +1522,47 @@
           "memberships": {
             "type": "array",
             "items": {
-              "type": "object"
+              "required": [
+                "tenantId",
+                "name",
+                "kind",
+                "roles",
+                "isOwner"
+              ],
+              "type": "object",
+              "properties": {
+                "tenantId": {
+                  "type": "string",
+                  "description": "The tenant's id: send it as `X-Alvo-Tenant` to act in this tenant.",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "The tenant's name."
+                },
+                "kind": {
+                  "enum": [
+                    "personal",
+                    "shared"
+                  ],
+                  "type": "string",
+                  "description": "`personal`: the person's own tenant, used when no tenant is named. `shared`: one others can join."
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities."
+                },
+                "isOwner": {
+                  "type": "boolean",
+                  "description": "Whether the person manages this tenant. Not a role."
+                }
+              },
+              "description": "One tenant the person belongs to."
             },
-            "description": "The tenants this person belongs to. Always empty until this host offers tenants."
+            "description": "The tenants this person belongs to, the personal one first. Empty unless the descriptor declares `tenancy.selfService`."
           }
         },
         "description": "The signed-in person: their account, the providers it signs in with, and the tenants they belong to."

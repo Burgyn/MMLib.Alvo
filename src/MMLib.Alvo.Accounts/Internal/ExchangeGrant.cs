@@ -104,7 +104,7 @@ internal sealed class ExchangeGrant(
             Guid.NewGuid(),
             now,
             now.AddDays(options.Value.SessionLifetimeDays),
-            PersonalTenant: null);
+            signIn.PersonalTenant());
     }
 
     private async Task<IResult> AnswerAsync(
