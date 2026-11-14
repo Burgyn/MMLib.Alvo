@@ -77,6 +77,11 @@ internal static class TenantRoutes
         }
 
         var tenant = new TenantId(tenantId);
+        if (await call.MembershipAsync(tenant).ConfigureAwait(false) is null)
+        {
+            return SelfServiceProblems.NoSuchTenant();
+        }
+
         var status = await call.Store.RenameAsync(tenant, call.Person, name, call.Ct).ConfigureAwait(false);
         return status == MemberChangeStatus.Changed
             ? await MembershipAsync(call, tenant).ConfigureAwait(false)

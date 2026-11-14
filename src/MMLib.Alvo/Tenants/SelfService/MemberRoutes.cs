@@ -32,10 +32,8 @@ internal static class MemberRoutes
         }
 
         var tenant = new TenantId(tenantId);
-        var own = await call.Store.FindMembershipAsync(call.Person, tenant, call.Ct).ConfigureAwait(false);
-        var members = own is not null && SelfServiceMemberships.Honoured(own, call.Policy)
-            ? await call.Store.ListMembersAsync(tenant, call.Person, call.Ct).ConfigureAwait(false)
-            : null;
+        var own = await call.MembershipAsync(tenant).ConfigureAwait(false);
+        var members = own is null ? null : await call.Store.ListMembersAsync(tenant, call.Person, call.Ct).ConfigureAwait(false);
         return members is null
             ? SelfServiceProblems.NoSuchTenant()
             : SelfServiceCall.Json(members.Select(member => Response(member, own!.Kind, call.Policy)).ToList());
@@ -61,6 +59,11 @@ internal static class MemberRoutes
         }
 
         var (tenant, member) = (new TenantId(tenantId), new UserId(userId));
+        if (await call.MembershipAsync(tenant).ConfigureAwait(false) is null)
+        {
+            return SelfServiceProblems.NoSuchTenant();
+        }
+
         var update = new MemberUpdate(tenant, call.Person, member, patch.Roles, patch.IsOwner, call.Now);
         var status = await call.Store.UpdateMemberAsync(update, call.Ct).ConfigureAwait(false);
         return status == MemberChangeStatus.Changed
@@ -80,7 +83,13 @@ internal static class MemberRoutes
             return refusal!;
         }
 
-        var removal = new MemberRemoval(new TenantId(tenantId), call.Person, new UserId(userId), call.Now);
+        var tenant = new TenantId(tenantId);
+        if (await call.MembershipAsync(tenant).ConfigureAwait(false) is null)
+        {
+            return SelfServiceProblems.NoSuchTenant();
+        }
+
+        var removal = new MemberRemoval(tenant, call.Person, new UserId(userId), call.Now);
         var status = await call.Store.RemoveMemberAsync(removal, call.Ct).ConfigureAwait(false);
         return status == MemberChangeStatus.Changed ? Results.NoContent() : SelfServiceProblems.Refused(status);
     }

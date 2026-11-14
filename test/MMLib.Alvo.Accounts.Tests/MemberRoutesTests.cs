@@ -238,6 +238,34 @@ public sealed class MemberRoutesTests
         Names((await MemberAsync(team, team.Ada, team.BobId))["roles"]).ShouldBeEmpty("nothing changed");
     }
 
+    /// <summary>
+    /// S3 plan D5 on the routes: a membership the applied descriptor does not honour — a personal one while
+    /// <c>personalTenant</c> is off — counts on no Data API request, so no route manages it either. Renaming the tenant and
+    /// every member route answer the stranger's 404, byte for byte; the shared tenant beside it is untouched.
+    /// </summary>
+    [Fact]
+    public async Task An_unhonoured_personal_membership_is_managed_by_no_route()
+    {
+        await using var team = await TeamAsync();
+        var personal = (await team.World.PersonalTenantAsync(team.Ada)).Value;
+        await team.World.ReapplyAsync(descriptor => descriptor["tenancy"]!["selfService"]!.AsObject().Remove("personalTenant"));
+
+        var bodies = new List<byte[]>();
+        foreach (var tenant in new[] { personal, Guid.NewGuid() })
+        {
+            (HttpMethod Method, string Path, JsonObject? Body) rename = (HttpMethod.Patch, $"{TenantRoutesTests.Tenants}/{tenant:D}", new JsonObject { ["name"] = "Mine" });
+            foreach (var request in Requests(tenant, team.AdaId.Value).Append(rename))
+            {
+                using var response = await team.World.AsPersonAsync(request.Method, request.Path, team.Ada, request.Body);
+                response.StatusCode.ShouldBe(HttpStatusCode.NotFound, $"{request.Method} {request.Path}: {await response.ReadTextAsync()}");
+                bodies.Add(await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken));
+            }
+        }
+
+        bodies.Select(Convert.ToBase64String).Distinct(StringComparer.Ordinal).Count().ShouldBe(1);
+        (await MembersAsync(team, team.Ada)).Count.ShouldBe(2, "the shared tenant is still Ada's to manage");
+    }
+
     private static IEnumerable<(HttpMethod Method, string Path, JsonObject? Body)> Requests(Guid tenant, Guid member) =>
     [
         (HttpMethod.Get, $"{TenantRoutesTests.Tenants}/{tenant:D}/members", null),

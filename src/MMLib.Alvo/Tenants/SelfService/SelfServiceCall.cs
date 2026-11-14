@@ -56,6 +56,19 @@ internal sealed record SelfServiceCall(UserId Person, SelfServicePolicy Policy, 
             : (new SelfServiceCall(person!.Value, policy, services.GetRequiredService<ITenantStore>(), http), null);
     }
 
+    /// <summary>
+    /// The person's own membership of <paramref name="tenant"/> when the applied descriptor honours it (S3 plan D5), else
+    /// <see langword="null"/> — which every tenant-scoped route answers as <see cref="SelfServiceProblems.NoSuchTenant"/>, so
+    /// a membership that counts on no Data API request (a personal one while <c>personalTenant</c> is off) is managed by
+    /// no route either.
+    /// </summary>
+    /// <param name="tenant">The tenant the route names.</param>
+    internal async Task<StoredMembership?> MembershipAsync(TenantId tenant) =>
+        await Store.FindMembershipAsync(Person, tenant, Ct).ConfigureAwait(false) is { } own
+        && SelfServiceMemberships.Honoured(own, Policy)
+            ? own
+            : null;
+
     /// <summary>Reads the request's JSON body with <paramref name="reader"/>, or answers 415 or 422 instead.</summary>
     /// <typeparam name="T">What the body holds.</typeparam>
     /// <param name="reader">Reads the body under the Data API's bounds.</param>
