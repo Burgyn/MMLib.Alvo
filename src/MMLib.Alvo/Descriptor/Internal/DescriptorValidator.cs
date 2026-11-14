@@ -9,7 +9,7 @@ using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets.Internal;
-using MMLib.Alvo.Tenancy.SelfService;
+using MMLib.Alvo.Tenants.SelfService;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;

@@ -36,14 +36,14 @@ RFC 6750 (the Bearer challenge on the self-service routes), RFC 9110 §15.5.10 (
   `{AlvoApiOptions.RoutePrefix}/{entity}` (default `/api`), so `/api/tenants` would collide with any entity named
   `tenants` (and S4/S5's `invitations`, `tokens`), and reserving those names would refuse descriptors that are valid
   today. And every route requires a person from a session, which exists only where Accounts is registered. So the
-  handlers, the person gate and the membership logic are core (`src/MMLib.Alvo/Tenancy/SelfService/`, internal, spec
+  handlers, the person gate and the membership logic are core (`src/MMLib.Alvo/Tenants/SelfService/`, internal, spec
   §11.1 — a host-federated identity (#210) maps the same routes later), exposed as
   `SelfServiceEndpoints.Map(RouteGroupBuilder group, AlvoCors cors, AlvoRateLimits limits)`, which
   `AccountsEndpoints.Map` calls on its group: `{AlvoAccountsOptions.Prefix}/tenants…` (default `/auth/v1/tenants`).
   "Always mapped" (§6.3) therefore means: on every host that maps sign-in, whatever the descriptor says. A host
   without Accounts is unchanged (S2 D9) — **no TeaPie path pin moves**. S4's `/invitations` and S5's `/tokens` follow
   the same rule. **Recorded deviation** from §6.3's prefix.
-- **D2 — Stores in the EF adapter behind `ITenantStore` (Abstractions, `internal`, namespace `MMLib.Alvo.Tenancy`).**
+- **D2 — Stores in the EF adapter behind `ITenantStore` (Abstractions, `internal`, namespace `MMLib.Alvo.Tenants`).**
   The S2 D2 precedent. `TenantTables` (EF `Internal/`) is shared by `EfCoreTenantStore` and `EfCoreAccountStore` (which
   writes the personal tenant inside its own transactions and reads the membership in its session read). One DDL text
   per table for both engines; no foreign keys. Roles are stored as a JSON array of names (`TEXT`, `System.Text.Json`).
@@ -160,13 +160,13 @@ RFC 6750 (the Bearer challenge on the self-service routes), RFC 9110 §15.5.10 (
 - Modify: `schema/project.schema.json` (`tenancy.selfService`)
 - Modify: `src/MMLib.Alvo.Abstractions/Descriptor/DescriptorBlocks.cs` (`Tenancy.SelfService` + three records)
 - Create: `src/MMLib.Alvo/Descriptor/Internal/SelfServiceCheck.cs`; Modify: `DescriptorValidator.cs` (`TryReadModel`, beside `SignUpCheck.Check`)
-- Create: `src/MMLib.Alvo/Tenancy/SelfService/SelfServicePolicy.cs`; Modify: `src/MMLib.Alvo/Rules/PolicyCatalog.cs`,
+- Create: `src/MMLib.Alvo/Tenants/SelfService/SelfServicePolicy.cs`; Modify: `src/MMLib.Alvo/Rules/PolicyCatalog.cs`,
   `src/MMLib.Alvo/Rules/Internal/PolicyCatalogBuilder.cs` (beside `SignIn = SignInPolicy.From(descriptor)`)
 - Modify: `src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs` (`WithinBlocks` row, D11),
   `src/MMLib.Alvo.Admin/Components/Home/DeclaredSlots.cs` (mirror)
 - Create: `examples/_negative/self-service-without-tenancy.json`, `…/self-service-admin-assignable.json`; Modify:
   `examples/_negative/expectations.json`
-- Test: `test/MMLib.Alvo.Tests/Descriptor/SelfServiceCheckTests.cs`, `test/MMLib.Alvo.Tests/Tenancy/SelfServicePolicyTests.cs`,
+- Test: `test/MMLib.Alvo.Tests/Descriptor/SelfServiceCheckTests.cs`, `test/MMLib.Alvo.Tests/Tenants/SelfServicePolicyTests.cs`,
   `test/MMLib.Alvo.Tests/Descriptor/UnhonouredKeysTests.cs`, `test/MMLib.Alvo.Admin.Tests/Home/DeclaredLimitsTests.cs`, the
   schema suite per the `alvo-schema-testing` skill
 
@@ -226,9 +226,9 @@ RFC 6750 (the Bearer challenge on the self-service routes), RFC 9110 §15.5.10 (
 
 **Files:**
 - Modify: `src/MMLib.Alvo/Rules/Internal/AccessCatalogBuilder.cs` (`HasDeclaredRoles` → also refuses assignable roles)
-- Create: `src/MMLib.Alvo/Tenancy/SelfService/GlobalWriteWarnings.cs`; Modify: `src/MMLib.Alvo/Descriptor/Internal/DescriptorValidator.cs` (`RuleWarnings`)
+- Create: `src/MMLib.Alvo/Tenants/SelfService/GlobalWriteWarnings.cs`; Modify: `src/MMLib.Alvo/Descriptor/Internal/DescriptorValidator.cs` (`RuleWarnings`)
 - Create: `examples/_negative/assignable-role-in-access.json`; Modify: `examples/_negative/expectations.json`
-- Test: `test/MMLib.Alvo.Tests/Management/AccessTenantRoleRefusalTests.cs`, `test/MMLib.Alvo.Tests/Tenancy/GlobalWriteWarningsTests.cs`
+- Test: `test/MMLib.Alvo.Tests/Management/AccessTenantRoleRefusalTests.cs`, `test/MMLib.Alvo.Tests/Tenants/GlobalWriteWarningsTests.cs`
 
 **Interfaces:**
 - Consumes: `TenancySelfService` (Task 1), `PolicyCatalogBuilder.RoleLiterals(CelNode)`.
@@ -259,7 +259,7 @@ RFC 6750 (the Bearer challenge on the self-service routes), RFC 9110 §15.5.10 (
 ### Task 3: The tenant store I — port, tables, creating a shared tenant, reading memberships
 
 **Files:**
-- Create: `src/MMLib.Alvo.Abstractions/Tenancy/ITenantStore.cs` (port + records, namespace `MMLib.Alvo.Tenancy`)
+- Create: `src/MMLib.Alvo.Abstractions/Tenants/ITenantStore.cs` (port + records, namespace `MMLib.Alvo.Tenants`)
 - Modify: `src/MMLib.Alvo.Abstractions/AlvoFrameworkTables.cs` (`TenantsSuffix = "_tenants"`, `TenantMembersSuffix =
   "_tenant_members"`; `NamesFor`)
 - Create: `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TenantTables.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreTenantStore.cs`
@@ -320,7 +320,7 @@ sealed record PersonalTenantRequest(TenantId Id);         // consumed by Task 5
 ### Task 4: The tenant store II — renaming, members, and the last owner
 
 **Files:**
-- Modify: `src/MMLib.Alvo.Abstractions/Tenancy/ITenantStore.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TenantTables.cs`,
+- Modify: `src/MMLib.Alvo.Abstractions/Tenants/ITenantStore.cs`, `src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/TenantTables.cs`,
   `src/MMLib.Alvo.Data.EntityFrameworkCore/EfCoreTenantStore.cs`
 - Test: `test/_shared/ef/TenantStoreFacts.cs`
 
@@ -410,7 +410,7 @@ readonly record struct CallerRead(bool Live, StoredMembership? Membership);
 ### Task 6: Membership resolution reads the registry; a person acts in a tenant
 
 **Files:**
-- Create: `src/MMLib.Alvo/Tenancy/SelfService/MembershipRules.cs`, `RegistryMembershipResolution.cs`, `SelfServiceMemberships.cs`,
+- Create: `src/MMLib.Alvo/Tenants/SelfService/MembershipRules.cs`, `RegistryMembershipResolution.cs`, `SelfServiceMemberships.cs`,
   `MembershipResponse.cs`
 - Modify: `src/MMLib.Alvo/Auth/Internal/MembershipResolution.cs` (remarks: S3), `src/MMLib.Alvo/Auth/Setup.cs` (the
   registration below)
@@ -418,7 +418,7 @@ readonly record struct CallerRead(bool Live, StoredMembership? Membership);
   `RefreshGrant.cs`, `UserResponse.cs`, `UserEndpoints.cs`
 - Create: `test/_shared/accounts/descriptors/personal-tracker.alvo.json` (spec §3 level 2, name `personal-tracker`),
   `test/_shared/accounts/descriptors/team-tracker.alvo.json` (below)
-- Test: `test/MMLib.Alvo.Tests/Tenancy/MembershipRulesTests.cs`, `test/MMLib.Alvo.Tests/Auth/MembershipResolutionTests.cs`,
+- Test: `test/MMLib.Alvo.Tests/Tenants/MembershipRulesTests.cs`, `test/MMLib.Alvo.Tests/Auth/MembershipResolutionTests.cs`,
   `test/MMLib.Alvo.Accounts.Tests/PersonResolverTests.cs`, `test/MMLib.Alvo.Accounts.Tests/PersonalTenantTests.cs`,
   `test/MMLib.Alvo.Accounts.Tests/UserEndpointsTests.cs`
 
@@ -500,7 +500,7 @@ internal static class MembershipRules
 ### Task 7: `/tenants` — the person gate, listing, creating, renaming
 
 **Files:**
-- Create: `src/MMLib.Alvo/Tenancy/SelfService/SelfServiceEndpoints.cs`, `SelfServicePerson.cs`, `TenantRoutes.cs`,
+- Create: `src/MMLib.Alvo/Tenants/SelfService/SelfServiceEndpoints.cs`, `SelfServicePerson.cs`, `TenantRoutes.cs`,
   `SelfServiceProblems.cs`, `TenantName.cs`
 - Modify: `src/MMLib.Alvo/Api/AlvoProblemTypes.cs` (three slugs, D8), `src/MMLib.Alvo/Api/AlvoRateLimitOptions.cs`
   (`Create = 10`), its validator (`Create >= 1`), `src/MMLib.Alvo/Api/Internal/AlvoRateLimits.cs` (`AlvoRateLimit.Create`)
@@ -553,7 +553,7 @@ internal static class MembershipRules
 ### Task 8: Members — listing, changing roles and ownership, removing and leaving
 
 **Files:**
-- Create: `src/MMLib.Alvo/Tenancy/SelfService/MemberRoutes.cs`, `MemberPatch.cs`, `MemberResponse.cs`
+- Create: `src/MMLib.Alvo/Tenants/SelfService/MemberRoutes.cs`, `MemberPatch.cs`, `MemberResponse.cs`
 - Modify: `SelfServiceEndpoints.cs`, `src/MMLib.Alvo.Accounts/Internal/AccountsDocumentTransformer.cs` (+ schemas)
 - Test: `test/MMLib.Alvo.Accounts.Tests/MemberRoutesTests.cs`, `test/MMLib.Alvo.Accounts.Tests/AccountsOpenApiTests.cs`
 
@@ -593,12 +593,12 @@ internal static class MembershipRules
 ### Task 9: The default tenant catalog, only for self-service and only when the host has none
 
 **Files:**
-- Create: `src/MMLib.Alvo/Tenancy/SelfService/RegistryTenantCatalog.cs`, `src/MMLib.Alvo/Scheduling/TenantCatalogs.cs`
+- Create: `src/MMLib.Alvo/Tenants/SelfService/RegistryTenantCatalog.cs`, `src/MMLib.Alvo/Scheduling/TenantCatalogs.cs`
 - Modify: `src/MMLib.Alvo/Scheduling/ScheduleRuns.cs`, `ScheduleChecks.cs`, `Setup.cs`, `DataMigrationStarter.cs`,
   `DataMigrationBootCheck.cs`, `src/MMLib.Alvo/Rules/Internal/DescriptorHost.cs` (`HasTenantRegistry`),
   `src/MMLib.Alvo/Events/Internal/AutomationCompiler.cs` (the `HasTenantCatalog` check)
 - Test: the existing suites of those types in `test/MMLib.Alvo.Tests/Scheduling/` (find with
-  `grep -rln "ScheduleChecks\|ScheduleRuns\|DataMigrationBootCheck" test`) plus `test/MMLib.Alvo.Tests/Tenancy/TenantCatalogsTests.cs`
+  `grep -rln "ScheduleChecks\|ScheduleRuns\|DataMigrationBootCheck" test`) plus `test/MMLib.Alvo.Tests/Tenants/TenantCatalogsTests.cs`
 
 **Interfaces:**
 - `internal sealed class RegistryTenantCatalog(ITenantStore store) : IAlvoTenantCatalog` — `ListTenantIdsAsync`; remarks

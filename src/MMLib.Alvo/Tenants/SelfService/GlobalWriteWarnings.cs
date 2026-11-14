@@ -3,7 +3,7 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 
-namespace MMLib.Alvo.Tenancy.SelfService;
+namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>
 /// The apply-time warning of spec §3.1 (plan D12): with <c>auth.signUp.mode: open</c>, every write rule of a

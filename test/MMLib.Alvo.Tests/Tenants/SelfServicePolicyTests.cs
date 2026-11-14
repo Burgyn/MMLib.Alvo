@@ -1,9 +1,9 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
-using MMLib.Alvo.Tenancy.SelfService;
+using MMLib.Alvo.Tenants.SelfService;
 
-namespace MMLib.Alvo.Tests.Tenancy;
+namespace MMLib.Alvo.Tests.Tenants;
 
 /// <summary>
 /// The self-service policy rides on the compiled catalog, so every membership read judges the descriptor that is

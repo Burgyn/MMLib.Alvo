@@ -1,6 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 
-namespace MMLib.Alvo.Tenancy.SelfService;
+namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>
 /// What the applied descriptor's <c>tenancy.selfService</c> says, compiled with the rest of the policy: which roles a

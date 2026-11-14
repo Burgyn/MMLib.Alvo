@@ -1,9 +1,9 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions.Internal;
-using MMLib.Alvo.Tenancy.SelfService;
+using MMLib.Alvo.Tenants.SelfService;
 
-namespace MMLib.Alvo.Tests.Tenancy;
+namespace MMLib.Alvo.Tests.Tenants;
 
 /// <summary>
 /// With <c>auth.signUp.mode: open</c>, every write rule of a <c>tenancy: global</c> entity that admits

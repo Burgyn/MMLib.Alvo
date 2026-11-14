@@ -6,7 +6,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Schema;
-using MMLib.Alvo.Tenancy.SelfService;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Rules.Internal;
 

@@ -7,7 +7,7 @@ using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
-using MMLib.Alvo.Tenancy.SelfService;
+using MMLib.Alvo.Tenants.SelfService;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
