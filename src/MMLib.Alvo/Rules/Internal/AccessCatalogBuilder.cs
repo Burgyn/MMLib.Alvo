@@ -13,6 +13,12 @@ namespace MMLib.Alvo.Rules.Internal;
 /// levels together, validates every role literal in both against one declared set, and publishes one
 /// catalogue — so a level and a rule can never be judged against two descriptor revisions, and a role
 /// removed from <c>auth.roles</c> is refused in both places at once.
+/// <para>
+/// <b>A tenant role never manages the project</b> (spec §3.1, §6.2): a role literal naming one of
+/// <c>tenancy.selfService.assignableRoles</c> refuses its level, because anyone who creates a tenant holds the
+/// creator's roles there. A declared role that is not assignable — <c>owner</c> in an existing descriptor — still
+/// manages, exactly as before.
+/// </para>
 /// </remarks>
 internal static class AccessCatalogBuilder
 {
@@ -32,12 +38,14 @@ internal static class AccessCatalogBuilder
     /// <param name="access">The descriptor's <c>access</c> block, or <see langword="null"/>.</param>
     /// <param name="compiler">The CEL compiler every level goes through.</param>
     /// <param name="roles">The project's declared roles, for validating role literals.</param>
+    /// <param name="tenantRoles">The tenant roles (<c>tenancy.selfService.assignableRoles</c>), none of which may manage.</param>
     /// <param name="errors">The shared accumulator every problem is appended to.</param>
     /// <returns>The compiled levels, each <see langword="null"/> when undeclared or refused.</returns>
     internal static ManagementAccessCatalog Build(
         Access? access,
         ICelCompiler compiler,
         RoleCatalog roles,
+        IReadOnlySet<Role> tenantRoles,
         List<DescriptorValidationError> errors)
     {
         if (access is null)
@@ -45,18 +53,14 @@ internal static class AccessCatalogBuilder
             return ManagementAccessCatalog.Empty;
         }
 
+        var scope = new LevelScope(compiler, roles, tenantRoles, errors);
         return new ManagementAccessCatalog(
-            CompileLevel(access.Admin, "admin", compiler, roles, errors),
-            CompileLevel(access.Developer, "developer", compiler, roles, errors),
-            CompileLevel(access.Viewer, "viewer", compiler, roles, errors));
+            CompileLevel(access.Admin, "admin", scope),
+            CompileLevel(access.Developer, "developer", scope),
+            CompileLevel(access.Viewer, "viewer", scope));
     }
 
-    private static CompiledExpression? CompileLevel(
-        string? source,
-        string level,
-        ICelCompiler compiler,
-        RoleCatalog roles,
-        List<DescriptorValidationError> errors)
+    private static CompiledExpression? CompileLevel(string? source, string level, LevelScope scope)
     {
         if (source is null)
         {
@@ -64,26 +68,54 @@ internal static class AccessCatalogBuilder
         }
 
         var path = $"/access/{level}";
-        var result = compiler.Compile(source, CelProfile.Access, ProjectScope);
+        var result = scope.Compiler.Compile(source, CelProfile.Access, ProjectScope);
         if (!result.IsSuccess)
         {
-            errors.AddRange(result.Errors.Select(
+            scope.Errors.AddRange(result.Errors.Select(
                 error => new DescriptorValidationError(
                     path, error.Message, error.FixSuggestion, DescriptorValidationSeverity.Error)));
             return null;
         }
 
-        return HasDeclaredRoles(result.Expression!, path, roles, errors) ? result.Expression : null;
+        return HasProjectRolesOnly(result.Expression!, path, scope) ? result.Expression : null;
     }
 
-    private static bool HasDeclaredRoles(
-        CompiledExpression expression, string path, RoleCatalog roles, List<DescriptorValidationError> errors)
+    /// <summary>
+    /// Whether every role literal is declared and none is a tenant role; one refusal per offending literal, the
+    /// undeclared one first, since an undeclared name is not a tenant role either.
+    /// </summary>
+    private static bool HasProjectRolesOnly(CompiledExpression expression, string path, LevelScope scope)
     {
-        var undeclared = PolicyCatalogBuilder.RoleLiterals(expression.Root)
-            .Where(role => !roles.TryGet(role, out _))
+        var refusals = PolicyCatalogBuilder.RoleLiterals(expression.Root)
+            .Select(role => RoleRefusal(role, path, scope))
+            .OfType<DescriptorValidationError>()
             .ToList();
 
-        errors.AddRange(undeclared.Select(role => PolicyCatalogBuilder.UndeclaredRoleError(path, role, roles)));
-        return undeclared.Count == 0;
+        scope.Errors.AddRange(refusals);
+        return refusals.Count == 0;
     }
+
+    private static DescriptorValidationError? RoleRefusal(string role, string path, LevelScope scope)
+    {
+        if (!scope.Roles.TryGet(role, out var declared))
+        {
+            return PolicyCatalogBuilder.UndeclaredRoleError(path, role, scope.Roles);
+        }
+
+        return scope.TenantRoles.Contains(declared) ? TenantRoleError(path, role) : null;
+    }
+
+    private static DescriptorValidationError TenantRoleError(string path, string role) => new(
+        path,
+        $"'{role}' is a tenant role (tenancy.selfService.assignableRoles), and a tenant role can never manage the project.",
+        $"Admit a project role here — one an operator or an API key grants — or remove '{role}' from assignableRoles.",
+        DescriptorValidationSeverity.Error);
+
+    /// <summary>What every level is compiled and judged against, in one apply.</summary>
+    /// <param name="Compiler">The CEL compiler every level goes through.</param>
+    /// <param name="Roles">The project's declared roles.</param>
+    /// <param name="TenantRoles">The tenant roles, none of which may manage.</param>
+    /// <param name="Errors">The shared accumulator every problem is appended to.</param>
+    private sealed record LevelScope(
+        ICelCompiler Compiler, RoleCatalog Roles, IReadOnlySet<Role> TenantRoles, List<DescriptorValidationError> Errors);
 }

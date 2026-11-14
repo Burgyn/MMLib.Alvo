@@ -549,7 +549,24 @@ truth for *people*, not a precondition for a `tenant_id` value.
 **`IAlvoTenantCatalog`:** a default over the registry is registered **only when `selfService` is on and
 the host registered none** — so the existing "an `EachTenant` schedule without a catalog refuses boot"
 check keeps firing everywhere else. Its documentation states plainly that it lists self-service tenants
-only; a deployment mixing API-key tenants with self-service ones registers its own catalog.
+only — and of those only the ones the descriptor honours (personal tenants only while `personalTenant` is on); a
+deployment mixing API-key tenants with self-service ones registers its own catalog. Under an open sign-up with
+`personalTenant` every account adds one run to each `EachTenant` tick — a cost, not a wall breach, recorded in
+`docs/architecture/accounts.md` (D13).
+
+Where the refusal fires moved, and that is a **recorded deviation** (S3 Task 9): an `EachTenant`
+schedule on a host with a registry and no catalog of its own is now judged *per descriptor*, not in the
+boot's catalog-free pass, because a `selfService` descriptor cures it — and every EF provider registers
+the registry, so the registry's presence says nothing about intent. Concretely: (a) a relational host
+with no descriptor at all now boots, the schedule unbound; (b) its first apply without `selfService`
+only warns, as for any extension that was never bound; (c) the next restart then stands down not-ready
+on that stored descriptor; (d) a host booting from a stored descriptor that cannot bind the schedule
+stands down not-ready instead of exiting — the existing treatment of every per-descriptor extension
+problem. A file (GitOps) boot still exits with the same locator and fix, an apply that drops
+`selfService` while such a schedule is bound is refused as an unbinding, and a host with no registry
+still refuses at the catalog-free pass. The reason: keeping the refusal in the catalog-free pass would
+make a dashboard-first self-service host with such a schedule unbootable — its first boot has no
+descriptor, and the descriptor that cures it can only arrive after the boot.
 
 ## 7. Tokens for integrators
 

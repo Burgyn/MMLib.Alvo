@@ -1,6 +1,9 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Rules;
+using MMLib.Alvo.Tenants;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Auth;
 
@@ -37,11 +40,20 @@ internal static class AuthSetup
         services.TryAddSingleton<IApiKeyStore, Internal.InMemoryApiKeyStore>();
         services.TryAddSingleton<IAlvoContextResolver, Internal.ApiKeyContextResolver>();
         services.TryAddSingleton<Internal.CallerResolvers>();
-        services.TryAddSingleton<Internal.IMembershipResolution, Internal.NoTenantMembershipResolution>();
+        services.TryAddSingleton(MembershipResolutionFor);
         services.TryAddSingleton<IAlvoContextAccessor, Internal.AlvoContextAccessor>();
         services.TryAddSingleton<IAlvoBootstrapAdmin, Internal.NoBootstrapAdmin>();
         services.TryAddSingleton<ScopeGate>();
         services.TryAddSingleton<TenantResolver>();
         return services;
     }
+
+    /// <summary>
+    /// The registry's membership resolution where a tenant registry is registered (a relational store), else the one that
+    /// honours no membership — so a host with no registry refuses every named tenant, as before tenants existed.
+    /// </summary>
+    private static Internal.IMembershipResolution MembershipResolutionFor(IServiceProvider provider) =>
+        provider.GetService<ITenantStore>() is { } store
+            ? new RegistryMembershipResolution(store, provider.GetRequiredService<IPolicyCatalogProvider>())
+            : new Internal.NoTenantMembershipResolution();
 }

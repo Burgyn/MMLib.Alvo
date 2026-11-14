@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
@@ -486,6 +487,7 @@ public sealed partial class OutboxDispatcherTests : IDisposable
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             new AlvoSessions(Substitute.For<IAlvoData>()),
             catalogs,
+            new NoTenantMembershipResolution(),
             new DeliveryBackoff(() => 0.5),
             Abandoned(),
             TimeProvider.System,

@@ -6,6 +6,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Rules.Internal;
 
@@ -55,7 +56,9 @@ internal static class PolicyCatalogBuilder
         CheckCompiler.RefuseDynamic(descriptor, errorList);
         RelationGraph.Check(ListReads(entities), [.. Consumers(entities), .. checkConsumers], errorList);
 
-        var managementAccess = AccessCatalogBuilder.Build(descriptor.Access, compiler, roles, errorList);
+        var selfService = SelfServicePolicy.From(descriptor, roles);
+        var managementAccess = AccessCatalogBuilder.Build(
+            descriptor.Access, compiler, roles, selfService.AssignableRoles, errorList);
         var automation = AutomationCompiler.Compile(new AutomationScope(
             descriptor, schema, compiler, references.Templates, references.Endpoints, references.Host, errorList));
 
@@ -69,6 +72,7 @@ internal static class PolicyCatalogBuilder
         catalog = new PolicyCatalog(entities, roles, schema, managementAccess, automation)
         {
             SignIn = SignInPolicy.From(descriptor),
+            SelfService = selfService,
         };
         errors = [];
         return true;

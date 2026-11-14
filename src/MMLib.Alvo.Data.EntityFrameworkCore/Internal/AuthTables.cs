@@ -184,13 +184,18 @@ internal sealed class AuthTables(string schemaPrefix)
         VALUES (@token_id, @session_id, @parent_id, @now, NULL)
         """;
 
-    /// <summary>Gets the statement counting the live sessions of one id on one account (0 or 1).</summary>
-    internal string LiveSessionSql =>
-        $"""
-        SELECT COUNT(*) FROM {Sessions} s JOIN {Accounts} a ON a.id = s.account_id
-         WHERE s.id = @session_id AND s.account_id = @account_id AND s.revoked_at IS NULL AND s.expires_at > @now
-           AND a.disabled_at IS NULL
-        """;
+    /// <summary>
+    /// The condition a live session of one id on one account meets, over <see cref="LiveSessionFrom"/>'s <c>s</c> and
+    /// <c>a</c>: not revoked, not past its absolute expiry at <c>@now</c>, and its account not disabled.
+    /// </summary>
+    internal const string LiveSessionWhere =
+        "s.id = @session_id AND s.account_id = @account_id AND s.revoked_at IS NULL AND s.expires_at > @now AND a.disabled_at IS NULL";
+
+    /// <summary>Gets the sessions joined to their accounts, as <c>s</c> and <c>a</c> — what <see cref="LiveSessionWhere"/> filters.</summary>
+    internal string LiveSessionFrom => $"{Sessions} s JOIN {Accounts} a ON a.id = s.account_id";
+
+    /// <summary>Gets the statement answering one row for a live session of one id on one account, and none otherwise.</summary>
+    internal string LiveSessionSql => $"SELECT 1 FROM {LiveSessionFrom} WHERE {LiveSessionWhere}";
 
     /// <summary>Gets the statement reading one account.</summary>
     internal string AccountSql =>

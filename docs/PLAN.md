@@ -115,9 +115,13 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   for the Data API, the commands and Management. **S2**: sign-in, level 1 — `MMLib.Alvo.Accounts` (Google ID token
   exchanged for Alvo's own access and rotating refresh tokens, `/user`, `/logout`, RFC 8414 metadata and JWKS, the
   person resolver), `auth.signUp`, CORS and rate limits, the operator's account ban; proven end to end on SQLite and
-  PostgreSQL, with no secret in any log (`docs/architecture/accounts.md`). The initiative's `← YOU ARE HERE` is
-  **S3** — the tenant registry, memberships, `tenancy.selfService`, `/tenants` and the personal tenant (levels 2–3
-  without invitations).
+  PostgreSQL, with no secret in any log (`docs/architecture/accounts.md`). **S3**: self-service tenants, levels 2–3
+  without invitations — `tenancy.selfService`, the tenant registry (`_tenants`, `_tenant_members`), the personal
+  tenant, `/auth/v1/tenants` and its members routes, the tenant header selecting among a person's memberships in the
+  session's one read, the registry as the default tenant list under `selfService`; every tenant wall proven end to end
+  on SQLite and PostgreSQL (`TenancyEngineFacts`). The initiative's `← YOU ARE HERE` is **S4** — invitations (owners
+  invite people into shared tenants; `tenancy.selfService.invitations` stops being unhonoured) and `invitationOnly`
+  sign-up.
 
 ## 3a. What closed F4
 

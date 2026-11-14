@@ -1,5 +1,8 @@
 [
   {
+    file: assignable-role-in-access.json
+  },
+  {
     file: decimal-without-scale.json,
     failures: [
       {
@@ -86,6 +89,12 @@
         Message: (schema keyword failure — validator emits no message)
       }
     ]
+  },
+  {
+    file: self-service-admin-assignable.json
+  },
+  {
+    file: self-service-without-tenancy.json
   },
   {
     file: sequence-two-numbers.json,

@@ -13,7 +13,10 @@
       "EfCoreAccountStore.cs",
       "EfCoreAccountStore.Sessions.cs",
       "EfCoreAccountStore.Keys.cs",
-      "Internal/AuthTables.cs"
+      "Internal/AuthTables.cs",
+      "EfCoreTenantStore.cs",
+      "EfCoreTenantStore.Members.cs",
+      "Internal/TenantTables.cs"
     ],
     "thresholds": {
       "high": 80,

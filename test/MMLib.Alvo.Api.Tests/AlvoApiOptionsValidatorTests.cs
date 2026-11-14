@@ -193,6 +193,10 @@ public class AlvoApiOptionsValidatorTests
     public void A_token_rate_limit_below_one_is_refused()
         => ShouldFail(api => api.RateLimits.Token = 0, "RateLimits:Token");
 
+    [Fact]
+    public void A_tenant_creation_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.Create = 0, "RateLimits:Create");
+
     private static void ShouldFail(Action<AlvoApiOptions> configure, params string[] expected)
     {
         var message = Validate(configure);

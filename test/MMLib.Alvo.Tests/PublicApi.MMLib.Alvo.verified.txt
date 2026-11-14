@@ -84,11 +84,13 @@ namespace MMLib.Alvo.Api
         public const string Conflict = "conflict";
         public const string DestructiveChange = "destructive-change";
         public const string ExpressionFailed = "expression-failed";
+        public const string FeatureDisabled = "feature-disabled";
         public const string Forbidden = "forbidden";
         public const string FunctionFailed = "function-failed";
         public const string HookFailed = "hook-failed";
         public const string IdempotencyConflict = "idempotency-conflict";
         public const string Internal = "internal";
+        public const string LastOwner = "last-owner";
         public const string MalformedQuery = "malformed-query";
         public const string NotFound = "not-found";
         public const string OutOfScope = "out-of-scope";
@@ -97,6 +99,7 @@ namespace MMLib.Alvo.Api
         public const string RateLimited = "rate-limited";
         public const string SignInRefused = "sign-in-refused";
         public const string SignUpRefused = "sign-up-refused";
+        public const string TenantLimit = "tenant-limit";
         public const string TokenRefused = "token-refused";
         public const string Unauthenticated = "unauthenticated";
         public const string UnreadableRequest = "unreadable-request";
@@ -108,6 +111,7 @@ namespace MMLib.Alvo.Api
     public sealed class AlvoRateLimitOptions
     {
         public AlvoRateLimitOptions() { }
+        public int Create { get; set; }
         public int Token { get; set; }
     }
     public sealed class AlvoViolation : System.IEquatable<MMLib.Alvo.Api.AlvoViolation>

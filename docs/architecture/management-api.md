@@ -300,7 +300,11 @@ and which count only in the rules of a `tenancy: scoped` entity; a role someone 
 must never open a level of the project's own management. Two independent locks hold that: the `access` block compiles
 with no tenancy, so its `@user.roles` has no tenant scope to fold into, and `ManagementAccessEvaluator` strips
 `TenantRoles` from the context before a host-replaceable `IPredicateEvaluator` sees it.
-`TenantRoleManagementTests` pins the outcome in process.
+`TenantRoleManagementTests` pins the outcome in process. Since self-service tenants (accounts S3) a third lock stands
+in front of both: an `access` level that names a role in `tenancy.selfService.assignableRoles` is refused at apply, so a
+role anyone can be given in their own tenant is never a management role to begin with. Over HTTP, a person's Bearer with
+a tenant header on a Management route gets exactly the anonymous answer
+(`TenancyEngineFacts.A_tenant_role_never_reaches_management`, both engines).
 
 ## D3: `If-Match` carries `revision`, not an `ETag`
 

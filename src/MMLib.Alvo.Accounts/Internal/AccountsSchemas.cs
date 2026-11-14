@@ -1,4 +1,5 @@
 ﻿using Microsoft.OpenApi;
+using MMLib.Alvo.Tenants.SelfService;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Accounts.Internal;
@@ -35,6 +36,18 @@ internal static class AccountsSchemas
     /// <summary>One key of the key set.</summary>
     internal const string KeyId = "authJsonWebKey";
 
+    /// <summary>One tenant a person belongs to.</summary>
+    internal const string MembershipId = "authMembership";
+
+    /// <summary>A tenant's name, as creating or renaming one sends it.</summary>
+    internal const string TenantNameId = "authTenantName";
+
+    /// <summary>One member of a tenant.</summary>
+    internal const string MemberId = "authMember";
+
+    /// <summary>A change to a member's roles or ownership.</summary>
+    internal const string MemberUpdateId = "authMemberUpdate";
+
     /// <summary>Registers every component, unless the document already carries them.</summary>
     /// <param name="document">The document being built.</param>
     internal static void AddTo(OpenApiDocument document)
@@ -47,7 +60,11 @@ internal static class AccountsSchemas
 
         document.AddComponent(TokenRequestId, TokenRequest());
         document.AddComponent(TokenId, Token());
-        document.AddComponent(UserId, User());
+        document.AddComponent(MembershipId, Membership());
+        document.AddComponent(UserId, User(document));
+        document.AddComponent(TenantNameId, TenantName());
+        document.AddComponent(MemberId, Member());
+        document.AddComponent(MemberUpdateId, MemberUpdate());
         document.AddComponent(UserUpdateId, UserUpdate());
         document.AddComponent(MetadataId, Metadata());
         document.AddComponent(KeyId, Key());
@@ -74,7 +91,7 @@ internal static class AccountsSchemas
         ("expires_in", new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Description = "The access token's lifetime, in seconds." }),
         ("refresh_token", Text("The refresh token for the next refresh.")));
 
-    private static OpenApiSchema User() => Object(
+    private static OpenApiSchema User(OpenApiDocument document) => Object(
         "The signed-in person: their account, the providers it signs in with, and the tenants they belong to.",
         ["id", "email", "emailTrusted", "name", "avatarUrl", "providers", "memberships"],
         ("id", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The account id: `@user.id` in rules." }),
@@ -86,9 +103,70 @@ internal static class AccountsSchemas
         ("memberships", new OpenApiSchema
         {
             Type = JsonSchemaType.Array,
-            Description = "The tenants this person belongs to. Always empty until this host offers tenants.",
-            Items = new OpenApiSchema { Type = JsonSchemaType.Object },
+            Description = "The tenants this person belongs to, the personal one first. Empty unless the descriptor declares "
+                + "`tenancy.selfService`.",
+            Items = new OpenApiSchemaReference(MembershipId, document),
         }));
+
+    private static OpenApiSchema Membership() => Object(
+        "One tenant the person belongs to.",
+        ["tenantId", "name", "kind", "roles", "isOwner"],
+        ("tenantId", new OpenApiSchema
+        {
+            Type = JsonSchemaType.String,
+            Format = "uuid",
+            Description = "The tenant's id: send it as `X-Alvo-Tenant` to act in this tenant.",
+        }),
+        ("name", Text("The tenant's name.")),
+        ("kind", Enumerated(
+            "`personal`: the person's own tenant, used when no tenant is named. `shared`: one others can join.",
+            MembershipResponse.PersonalKind,
+            MembershipResponse.SharedKind)),
+        ("roles", Strings("The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities.")),
+        ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the person manages this tenant. Not a role." }));
+
+    private static OpenApiSchema TenantName()
+    {
+        var schema = Object(
+            "A tenant's name. No other member is accepted.",
+            ["name"],
+            ("name", new OpenApiSchema
+            {
+                Type = JsonSchemaType.String,
+                MinLength = 1,
+                MaxLength = Tenants.SelfService.TenantName.MaxLength,
+                Description = "The name: trimmed, 1–100 Unicode code points, no control character.",
+            }));
+        schema.AdditionalPropertiesAllowed = false;
+        return schema;
+    }
+
+    private static OpenApiSchema Member() => Object(
+        "One member of a tenant, as the other members see them. Never an email.",
+        ["userId", "name", "avatarUrl", "roles", "isOwner"],
+        ("userId", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The member's account id." }),
+        ("name", Nullable("The member's display name, or null.")),
+        ("avatarUrl", Nullable("The member's avatar, or null.")),
+        ("roles", Strings("The tenant roles the member holds here, as `@user.roles` counts them in this tenant's scoped entities.")),
+        ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the member manages this tenant. Not a role." }));
+
+    private static OpenApiSchema MemberUpdate()
+    {
+        var schema = Object(
+            "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other property is accepted.",
+            [],
+            ("roles", new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                UniqueItems = true,
+                Description = "The member's new tenant roles, each from `tenancy.selfService.assignableRoles`; `[]` takes them all away.",
+                Items = new OpenApiSchema { Type = JsonSchemaType.String },
+            }),
+            ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the member manages the tenant." }));
+        schema.AdditionalPropertiesAllowed = false;
+        schema.MinProperties = 1;
+        return schema;
+    }
 
     private static OpenApiSchema UserUpdate()
     {

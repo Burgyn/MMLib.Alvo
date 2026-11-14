@@ -83,3 +83,7 @@
 // And to its suite, which stubs IAccountStore and builds its records to reach the token endpoint's refusals without an
 // engine; the store's own contract facts run on both engines from the driver suites granted above.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
+
+// The self-service tenant registry (spec 2026-11-13 §6.1, S3 plan D2): ITenantStore and its records ride on the grants
+// above and need none of their own — the EF driver implements it, the core and MMLib.Alvo.Accounts consume it, and its
+// contract facts (test/_shared/ef/TenantStoreFacts.cs) run on both engines from the driver suites already granted.

@@ -24,9 +24,9 @@ public class FrameworkTableReservationTests
     }
 
     [Fact]
-    public void The_reserved_set_is_the_seventeen_bookkeeping_tables_the_five_account_tables_and_the_seven_identity_ones()
+    public void The_reserved_set_is_the_seventeen_bookkeeping_tables_the_seven_account_and_tenant_tables_and_the_seven_identity_ones()
     {
-        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(29);
+        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(31);
         AlvoFrameworkTables.IdentitySuffixes.Count.ShouldBe(7);
     }
 
@@ -83,6 +83,15 @@ public class FrameworkTableReservationTests
         names.ShouldContain("alvo_auth_sessions");
         names.ShouldContain("alvo_auth_refresh_tokens");
         names.ShouldContain("alvo_auth_keys");
+    }
+
+    [Fact]
+    public void The_self_service_tenant_tables_are_reserved()
+    {
+        var names = AlvoFrameworkTables.NamesFor("alvo");
+
+        names.ShouldContain("alvo_tenants");
+        names.ShouldContain("alvo_tenant_members");
     }
 
     [Fact]

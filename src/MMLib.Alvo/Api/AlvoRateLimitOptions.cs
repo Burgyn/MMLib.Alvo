@@ -13,4 +13,10 @@ public sealed class AlvoRateLimitOptions
 {
     /// <summary>Gets or sets the token endpoint's budget (<c>POST {prefix}/token</c>), per minute. Default 30.</summary>
     public int Token { get; set; } = 30;
+
+    /// <summary>
+    /// Gets or sets the tenant-creation budget (<c>POST {prefix}/tenants</c> on a host that maps the sign-in routes), per
+    /// minute. Default 10.
+    /// </summary>
+    public int Create { get; set; } = 10;
 }

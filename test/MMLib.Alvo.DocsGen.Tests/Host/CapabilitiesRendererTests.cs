@@ -58,6 +58,7 @@ public class CapabilitiesRendererTests
     [InlineData("email.data", "entities-hooks")]
     [InlineData("trigger.event", "automation")]
     [InlineData("auth.providers", "auth")]
+    [InlineData("tenancy.selfService.invitations", "tenancy")]
     [InlineData("http.call", "entities-hooks")]
     [InlineData("entity.update", "entities-hooks")]
     [InlineData("function", "entities-hooks")]

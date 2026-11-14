@@ -9,9 +9,10 @@ namespace MMLib.Alvo.Auth.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Consulted before the session is read</b> (S2 D13): a refusal here costs the caller no store round trip, and the one
-/// read a person's request makes stays account + session (spec §14 AC2). The tenant slice (S3) folds the membership into
-/// that same read and hands it here, rather than reading it again.
+/// <b>One decision, two readers</b> (S3 plan D4). The rules are <c>MembershipRules</c>'; this port reads the membership
+/// from the registry (<c>RegistryMembershipResolution</c>) for a caller with no session read — event actors, later
+/// personal tokens. The person resolver does not call it: it folds the membership into its one session read
+/// (spec §14 AC2) and decides by the same rules, so a refused tenant still costs it no read.
 /// </para>
 /// <para>
 /// <b>A refusal refuses the whole principal</b> — never a principal without a tenant, which would turn "you may not act in
@@ -42,8 +43,9 @@ internal sealed record MembershipResolution(bool Refused, TenantId? Tenant, IRea
 }
 
 /// <summary>
-/// Membership resolution before tenants exist (S2): no requested tenant is no tenant, and any requested tenant is refused —
-/// there is no membership it could name. No I/O. The tenant slice replaces this registration.
+/// Membership resolution where no tenant registry is registered: no requested tenant is no tenant, and any requested tenant
+/// is refused — there is no membership it could name. No I/O. Where a registry is registered, <c>AddAlvo</c> registers
+/// <c>RegistryMembershipResolution</c> instead.
 /// </summary>
 internal sealed class NoTenantMembershipResolution : IMembershipResolution
 {

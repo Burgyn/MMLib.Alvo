@@ -1,0 +1,22 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "assignable-role-in-access",
+  "auth": { "providers": ["google"], "roles": ["dispatcher", "technician"], "signUp": { "mode": "open" } },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "createTenants": { "creatorRoles": ["dispatcher"] },
+      "assignableRoles": ["dispatcher", "technician"]
+    }
+  },
+  "access": {
+    "admin": "'dispatcher' in @user.roles"
+  },
+  "entities": {
+    "jobs": {
+      "fields": {
+        "title": { "type": "string", "required": true }
+      }
+    }
+  }
+}

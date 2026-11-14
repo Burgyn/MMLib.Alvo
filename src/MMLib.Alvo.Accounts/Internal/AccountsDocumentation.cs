@@ -18,11 +18,11 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// caller. The token endpoint and discovery declare none — they are how a client gets a credential.
 /// </para>
 /// </remarks>
-internal static class AccountsDocumentation
+internal static partial class AccountsDocumentation
 {
     private const string NoStoreValue = "no-store";
 
-    private static readonly Dictionary<string, Operation> _operations = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, Operation> _operations = WithTenantOperations(new(StringComparer.Ordinal)
     {
         [AccountsEndpoints.TokenOperationId] = new(
             "Sign in, or refresh a session",
@@ -63,7 +63,7 @@ internal static class AccountsDocumentation
             Bearer: false,
             _ => null,
             document => Answers(document, Cached(document, "The public signing keys.", AccountsSchemas.KeySetId))),
-    };
+    });
 
     /// <summary>Whether <paramref name="operationId"/> is a sign-in operation this catalog describes.</summary>
     /// <param name="operationId">An endpoint's name.</param>
@@ -80,12 +80,13 @@ internal static class AccountsDocumentation
         operation.OperationId = operationId;
         operation.Summary = spec.Summary;
         operation.Description = spec.Description;
-        operation.Tags = new HashSet<OpenApiTagReference> { new(AccountsEndpoints.Tag, document) };
+        operation.Tags = new HashSet<OpenApiTagReference> { new(spec.Tag, document) };
         operation.RequestBody = spec.Body(document);
         operation.Responses = spec.Responses(document);
         operation.Security = spec.Bearer
             ? [new() { [new OpenApiSecuritySchemeReference(AlvoDocumentTransformer.BearerScheme, document)] = [] }]
             : null;
+        DescribeParameters(operation);
     }
 
     private static OpenApiResponses TokenResponses(OpenApiDocument document) => Answers(
@@ -109,7 +110,7 @@ internal static class AccountsDocumentation
         Ok(document, "The person, as changed.", AccountsSchemas.UserId),
         Unauthenticated(document),
         Refusal("415", "`unsupported-media-type`: the body is not `application/json`.", document),
-        Refusal("422", "`validation`: the name is missing, too long or not text, or the body names another member.", document));
+        Refusal("422", "`validation`: the name is missing, too long or not text, or the body carries a property other than `name`.", document));
 
     private static OpenApiResponses Answers(OpenApiDocument document, params (string Status, OpenApiResponse Response)[] responses)
     {
@@ -195,5 +196,6 @@ internal static class AccountsDocumentation
         string Description,
         bool Bearer,
         Func<OpenApiDocument, OpenApiRequestBody?> Body,
-        Func<OpenApiDocument, OpenApiResponses> Responses);
+        Func<OpenApiDocument, OpenApiResponses> Responses,
+        string Tag = AccountsEndpoints.Tag);
 }

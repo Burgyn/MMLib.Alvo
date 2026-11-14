@@ -41,6 +41,10 @@ export const CAPABILITIES = {
       "consequence": "an entity declared with 'storage: dynamic' is not created: this build has no dynamic schema-registry driver (F7, #41), so the entity gets no table, no Data API route and no records, and the apply drops it without refusing it"
     },
     {
+      "block": "tenancy.selfService.invitations",
+      "consequence": "owners cannot invite anyone in this build; invitations arrive with S4 of the accounts initiative"
+    },
+    {
       "block": "entity.realtime",
       "consequence": "no change is published over a realtime channel, because this build has none (#38, F7) — whatever an entity's 'realtime' says, and its default is true, nothing is sent and nothing can subscribe"
     }

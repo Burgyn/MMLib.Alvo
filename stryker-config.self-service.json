@@ -1,0 +1,36 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Accounts.Tests/MMLib.Alvo.Accounts.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "log-to-file": true,
+    "additional-timeout": 300000,
+    "mutate": [
+      "**/Tenants/SelfService/SelfServiceEndpoints.cs",
+      "**/Tenants/SelfService/TenantRoutes.cs",
+      "**/Tenants/SelfService/MemberRoutes.cs",
+      "**/Tenants/SelfService/MemberPatch.cs",
+      "**/Tenants/SelfService/SelfServiceCall.cs",
+      "**/Tenants/SelfService/SelfServicePerson.cs",
+      "**/Tenants/SelfService/SelfServiceBody.cs",
+      "**/Tenants/SelfService/SelfServiceProblems.cs",
+      "**/Tenants/SelfService/SelfServiceMemberships.cs",
+      "**/Tenants/SelfService/MemberResponse.cs",
+      "**/Tenants/SelfService/MembershipResponse.cs",
+      "**/Tenants/SelfService/TenantName.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 40,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

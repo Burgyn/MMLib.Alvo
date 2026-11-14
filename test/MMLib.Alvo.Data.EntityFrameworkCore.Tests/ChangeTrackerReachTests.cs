@@ -152,6 +152,9 @@ public class ChangeTrackerReachTests
     /// <c>EfCoreAccountStore</c> reads and writes only the five end-user account tables (<c>AuthTables</c>' statements),
     /// binding every value — ids, instants, the identity's asserted fields — and never an entity table; its session and key
     /// halves build no command of their own and go through the main file's;
+    /// <c>EfCoreTenantStore</c> reads and writes only the two tenant-registry tables (<c>TenantTables</c>' statements) and takes
+    /// the creator's row lock on the accounts table with a write that changes nothing, binding every value, and never an
+    /// entity table; its member half builds no command of its own and goes through the main file's;
     /// <c>TimerWrites</c> is the timer table's upsert, cancel and armed-due read that store shares with a data write arming its entity's
     /// declarative timers, binding every value, and never touches an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
@@ -224,6 +227,9 @@ public class ChangeTrackerReachTests
     [InlineData("EfCoreAccountStore.cs")]
     [InlineData("EfCoreAccountStore.Sessions.cs")]
     [InlineData("EfCoreAccountStore.Keys.cs")]
+    [InlineData("TenantTables.cs")]
+    [InlineData("EfCoreTenantStore.cs")]
+    [InlineData("EfCoreTenantStore.Members.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);
@@ -262,6 +268,7 @@ public class ChangeTrackerReachTests
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
         "EfCoreSecretStore.cs",
+        "EfCoreTenantStore.cs",
         "EfCoreTimerStore.cs",
         "ExclusionLocks.cs",
         "ExclusionOverlapScan.cs",

@@ -126,6 +126,12 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding the accounts' signing and refresh-token keys, encrypted.</summary>
     internal const string AuthKeysSuffix = "_auth_keys";
 
+    /// <summary>The suffix of the table holding one row per self-service tenant (accounts spec §6.1).</summary>
+    internal const string TenantsSuffix = "_tenants";
+
+    /// <summary>The suffix of the table holding one row per (tenant, account) membership.</summary>
+    internal const string TenantMembersSuffix = "_tenant_members";
+
     /// <summary>
     /// Every table <c>MMLib.Alvo.Identity</c> owns, reserved here whether or not that package is
     /// installed.
@@ -183,6 +189,8 @@ internal static class AlvoFrameworkTables
             schemaPrefix + AuthSessionsSuffix,
             schemaPrefix + AuthRefreshTokensSuffix,
             schemaPrefix + AuthKeysSuffix,
+            schemaPrefix + TenantsSuffix,
+            schemaPrefix + TenantMembersSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

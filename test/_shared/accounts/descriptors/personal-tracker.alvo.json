@@ -1,0 +1,36 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "personal-tracker",
+  "description": "Spec 2026-11-13 §3's level 2: a personal tenant per person. Google signs people in, anyone may sign up, each sign-in ensures the person's own tenant, and the tenant wall keeps each person's rows to themselves.",
+  "auth": {
+    "providers": [
+      "google"
+    ],
+    "signUp": {
+      "mode": "open"
+    }
+  },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "personalTenant": {
+        "roles": []
+      }
+    }
+  },
+  "entities": {
+    "time_entries": {
+      "fields": {
+        "minutes": {
+          "type": "integer",
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles"
+      }
+    }
+  }
+}

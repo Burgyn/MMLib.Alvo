@@ -15,6 +15,48 @@ public sealed record Tenancy
 {
     /// <summary>Turn on row-level multi-tenancy (shared DB + shared schema, discriminator column).</summary>
     public bool? Enabled { get; init; }
+
+    /// <summary>
+    /// Self-service tenants for signed-in people (schema <c>tenancy.selfService</c>); <see langword="null"/> keeps tenants
+    /// to API keys and operator grants. Requires <see cref="Enabled"/>.
+    /// </summary>
+    public TenancySelfService? SelfService { get; init; }
+}
+
+/// <summary>Which tenants signed-in people get and manage themselves (schema <c>tenancy.selfService</c>).</summary>
+public sealed record TenancySelfService
+{
+    /// <summary>Present: every person gets one tenant of their own at sign-up.</summary>
+    public SelfServicePersonalTenant? PersonalTenant { get; init; }
+
+    /// <summary>Present: a person may create shared tenants.</summary>
+    public SelfServiceCreateTenants? CreateTenants { get; init; }
+
+    /// <summary>Whether owners may invite people by link; requires <see cref="CreateTenants"/>.</summary>
+    public bool? Invitations { get; init; }
+
+    /// <summary>
+    /// The tenant roles: the only roles a membership can ever carry, each declared in <c>auth.roles</c> and never a
+    /// built-in role.
+    /// </summary>
+    public IReadOnlyList<string>? AssignableRoles { get; init; }
+}
+
+/// <summary>The tenant every person gets of their own (schema <c>tenancy.selfService.personalTenant</c>).</summary>
+public sealed record SelfServicePersonalTenant
+{
+    /// <summary>The tenant roles a person holds in their personal tenant, each in <c>assignableRoles</c>; default none.</summary>
+    public IReadOnlyList<string>? Roles { get; init; }
+}
+
+/// <summary>Whether and how a person may create shared tenants (schema <c>tenancy.selfService.createTenants</c>).</summary>
+public sealed record SelfServiceCreateTenants
+{
+    /// <summary>The tenant roles the creator receives, each in <c>assignableRoles</c>.</summary>
+    public IReadOnlyList<string>? CreatorRoles { get; init; }
+
+    /// <summary>How many shared tenants one account may create: 1–100, default 5.</summary>
+    public int? MaxPerAccount { get; init; }
 }
 
 /// <summary>

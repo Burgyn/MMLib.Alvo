@@ -60,6 +60,62 @@
           "type": "boolean",
           "default": false,
           "description": "Turn on row-level multi-tenancy (shared DB + shared schema, discriminator column)."
+        },
+        "selfService": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional; absent = tenants come only from API keys and operator grants. Present = signed-in people get tenants of their own and, with createTenants, shared tenants they manage. Requires enabled: true.",
+          "properties": {
+            "personalTenant": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Present = every person gets one tenant of their own at sign-up.",
+              "properties": {
+                "roles": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "description": "The tenant roles a person holds in their personal tenant (each in assignableRoles; default [])."
+                }
+              }
+            },
+            "createTenants": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Present = a person may create shared tenants.",
+              "properties": {
+                "creatorRoles": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "description": "The tenant roles the creator receives (each in assignableRoles)."
+                },
+                "maxPerAccount": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100,
+                  "default": 5,
+                  "description": "How many shared tenants one account may create: 1–100, default 5."
+                }
+              }
+            },
+            "invitations": {
+              "type": "boolean",
+              "description": "Owners may invite by link. Requires createTenants."
+            },
+            "assignableRoles": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/identifier"
+              },
+              "description": "The tenant roles: the only roles a membership can ever carry. Each must be declared in auth.roles."
+            }
+          }
         }
       }
     },

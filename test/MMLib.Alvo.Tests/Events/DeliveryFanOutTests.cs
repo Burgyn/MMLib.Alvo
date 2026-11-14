@@ -12,6 +12,9 @@ using MMLib.Alvo.Tests.Extensions;
 
 using static MMLib.Alvo.Tests.Extensions.HandlerCatalog;
 
+using AlvoDescriptor = MMLib.Alvo.Descriptor.AlvoDescriptor;
+using DescriptorToSchemaMapper = MMLib.Alvo.Descriptor.DescriptorToSchemaMapper;
+
 namespace MMLib.Alvo.Tests.Events;
 
 /// <summary>Which handlers one committed event fans out to, and how each delivery starts life (spec 2026-10-14 §4.8).</summary>
@@ -236,6 +239,30 @@ public sealed class DeliveryFanOutTests : IDisposable
         _store.Rows.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// S3 plan D10a: a subscription condition of a scoped entity sees the recorded tenant roles the applied descriptor still
+    /// lets a membership carry — the set an <c>EventActor</c> run starts from — never one dropped from <c>assignableRoles</c>.
+    /// </summary>
+    [Fact]
+    public async Task Subscription_conditions_see_only_assignable_tenant_roles()
+    {
+        var catalog = SelfServiceCatalog();
+        var fanOut = FanOut(alvo => alvo.Entity("tickets", t => t
+            .OnCreated("for-dispatchers", OnCreated, when: "'dispatcher' in @user.roles")
+            .OnCreated("for-technicians", OnCreated, when: "'technician' in @user.roles")));
+        var @event = Event("entity.tickets.created", Record()) with
+        {
+            AuthType = AlvoEventAuthType.User,
+            AuthId = Guid.NewGuid().ToString(),
+            AuthClaims = """{"roles":["authenticated"],"tenantRoles":["dispatcher","technician"]}""",
+            TenantId = Guid.NewGuid().ToString(),
+        };
+
+        (await fanOut.FanOutAsync(@event, catalog, Ct)).ShouldBe(1, "technician is declared but no longer assignable");
+
+        _store.Rows.ShouldHaveSingleItem().Subscriber.ShouldBe("for-dispatchers");
+    }
+
     [Theory]
     [InlineData("entity.tickets.created", true)]
     [InlineData("entity.tickets.updated", true)]
@@ -248,6 +275,21 @@ public sealed class DeliveryFanOutTests : IDisposable
         HandlerSources.Selects(new EntityEvents(["tickets"], (HandlerVerb)99), "entity.tickets.created").Selected.ShouldBeFalse();
 
     private static string UniqueId(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
+
+    /// <summary>A scoped <c>tickets</c> in a self-service project declaring two roles, only <c>dispatcher</c> assignable.</summary>
+    private static PolicyCatalog SelfServiceCatalog()
+    {
+        var descriptor = AlvoDescriptor.Parse("""
+            {
+              "apiVersion": "alvo.dev/v1",
+              "name": "handlers",
+              "auth": { "roles": ["dispatcher", "technician"] },
+              "tenancy": { "enabled": true, "selfService": { "assignableRoles": ["dispatcher"] } },
+              "entities": { "tickets": { "tenancy": "scoped", "fields": { "status": { "type": "string", "maxLength": 20 } } } }
+            }
+            """);
+        return PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), CelFixtures.Compiler);
+    }
 
     private DeliveryFanOut FanOut(Action<IAlvoBuilder> configure) => new(
         _store,

@@ -5,10 +5,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Accounts.Internal;
 
-/// <summary>The sign-in routes, mapped under <see cref="AlvoAccountsOptions.Prefix"/> and tagged <see cref="Tag"/>.</summary>
+/// <summary>
+/// The sign-in routes, mapped under <see cref="AlvoAccountsOptions.Prefix"/> and tagged <see cref="Tag"/> — with the core's
+/// self-service routes (<c>{prefix}/tenants…</c>, S3 plan D1) beside them.
+/// </summary>
 /// <remarks>
 /// Every route carries the core's CORS filter first (spec §7.3, S2 D3), and the group answers preflights when origins are
 /// configured; the token endpoint is charged the <see cref="AlvoRateLimit.Token"/> budget after <see cref="NoStore"/>, so a
@@ -38,13 +42,15 @@ internal static class AccountsEndpoints
         var services = endpoints.ServiceProvider;
         var prefix = services.GetRequiredService<IOptions<AlvoAccountsOptions>>().Value.Prefix;
         var cors = services.GetRequiredService<AlvoCors>();
+        var limits = services.GetRequiredService<AlvoRateLimits>();
         var group = endpoints.MapGroup(prefix).WithTags(Tag);
         group.MapPost("/token", static (HttpContext http, TokenEndpoint token) => token.HandleAsync(http))
             .AddEndpointFilter(cors.Filter)
             .AddEndpointFilter(NoStore)
-            .AddEndpointFilter(services.GetRequiredService<AlvoRateLimits>().For(AlvoRateLimit.Token))
+            .AddEndpointFilter(limits.For(AlvoRateLimit.Token))
             .WithName(TokenOperationId);
         UserEndpoints.Map(group, cors);
+        SelfServiceEndpoints.Map(group, cors, limits);
         DiscoveryEndpoints.Map(endpoints, group, prefix, cors);
         cors.MapPreflight(group, string.Empty);
         return group;

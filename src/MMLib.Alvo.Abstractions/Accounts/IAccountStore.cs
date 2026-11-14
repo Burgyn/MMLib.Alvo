@@ -1,4 +1,6 @@
-﻿using System.Text;
+﻿using MMLib.Alvo.Tenants;
+
+using System.Text;
 
 namespace MMLib.Alvo.Accounts;
 
@@ -27,21 +29,27 @@ internal interface IAccountStore
     /// <summary>
     /// Signs a verified identity in, in one transaction: finds or (when <see cref="SignInRequest.MayCreate"/>) creates its
     /// account, refuses a disabled one, starts a session keyed by the subject token's id and issues its first refresh
-    /// token. Every refusal writes nothing.
+    /// token — and, when <see cref="SignInRequest.PersonalTenant"/> is set, ensures the account's personal tenant and its
+    /// owner membership (S3 plan D6), so a first sign-in and a later one that finds none both leave exactly one. Every
+    /// refusal writes nothing.
     /// </summary>
     /// <param name="request">The identity, the sign-up decision, and the ids and instants the session starts with.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     Task<SignInOutcome> SignInAsync(SignInRequest request, CancellationToken ct);
 
     /// <summary>
-    /// Whether <paramref name="session"/> belongs to <paramref name="account"/>, is not revoked, has not reached its
-    /// absolute expiry at <paramref name="now"/>, and its account is not disabled — one statement.
+    /// The one read a person's request makes (spec §5.7 step 2, §14 AC2; S3 plan D4): whether the session belongs to the
+    /// account, is not revoked, has not reached its absolute expiry and its account is not disabled — and, when
+    /// <see cref="CallerQuery.Membership"/> asks, the account's membership in that tenant (or in its personal tenant), in
+    /// the same statement.
     /// </summary>
-    /// <param name="account">The account the access token names.</param>
-    /// <param name="session">The session the access token names.</param>
-    /// <param name="now">The instant to judge expiry at.</param>
+    /// <param name="query">The account, the session, the instant to judge expiry at, and the membership asked for, if any.</param>
     /// <param name="ct">A token to cancel the operation.</param>
-    Task<bool> IsSessionLiveAsync(UserId account, Guid session, DateTimeOffset now, CancellationToken ct);
+    /// <returns>
+    /// Not live when the session is dead, whatever the membership; otherwise live, with the membership or
+    /// <see langword="null"/> when the account is no member of the tenant asked for (or none was asked for).
+    /// </returns>
+    Task<CallerRead> ReadCallerAsync(CallerQuery query, CancellationToken ct);
 
     /// <summary>The account and the providers it signs in with, or <see langword="null"/> when there is none.</summary>
     /// <param name="account">The account's id.</param>
@@ -58,7 +66,9 @@ internal interface IAccountStore
     /// Rotates a refresh token, in one transaction (spec §5.5, D6): an unrotated token gets the request's child; a token
     /// rotated within the grace window answers the child it already has, so the family never forks; one rotated longer ago
     /// is reuse, and revokes its session (<see cref="SessionRevocations.Reuse"/>) before answering. An unknown token, an
-    /// idle one, a revoked or expired session and a disabled account are each refused, identically.
+    /// idle one, a revoked or expired session and a disabled account are each refused, identically. A refresh that
+    /// answers a child ensures the account's personal tenant when <see cref="RefreshRequest.PersonalTenant"/> is set —
+    /// how a descriptor that adds <c>personalTenant</c> after people signed up reaches them (spec §6.5).
     /// </summary>
     /// <param name="request">The token presented, the child to mint, the instant, the grace window and the idle limit.</param>
     /// <param name="ct">A token to cancel the operation.</param>
@@ -123,6 +133,7 @@ internal sealed record VerifiedIdentity(
 /// <param name="RefreshTokenId">The id of the session's first refresh token.</param>
 /// <param name="Now">The instant of the sign-in.</param>
 /// <param name="SessionExpiresAt">The session's absolute expiry.</param>
+/// <param name="PersonalTenant">The personal tenant to ensure, or <see langword="null"/> when the descriptor gives none.</param>
 internal sealed record SignInRequest(
     VerifiedIdentity Identity,
     bool MayCreate,
@@ -130,7 +141,8 @@ internal sealed record SignInRequest(
     Guid SessionId,
     Guid RefreshTokenId,
     DateTimeOffset Now,
-    DateTimeOffset SessionExpiresAt);
+    DateTimeOffset SessionExpiresAt,
+    PersonalTenantRequest? PersonalTenant);
 
 /// <summary>What a sign-in did.</summary>
 internal enum SignInStatus
@@ -179,7 +191,28 @@ internal sealed record AccountView(
 /// <param name="Now">The instant of the presentation.</param>
 /// <param name="Grace">How long after its rotation a token still answers its child; zero refuses any reuse.</param>
 /// <param name="Idle">How long an unrotated token stays usable after it was issued.</param>
-internal sealed record RefreshRequest(Guid TokenId, Guid ChildId, DateTimeOffset Now, TimeSpan Grace, TimeSpan Idle);
+/// <param name="PersonalTenant">The personal tenant to ensure, or <see langword="null"/> when the descriptor gives none.</param>
+internal sealed record RefreshRequest(
+    Guid TokenId, Guid ChildId, DateTimeOffset Now, TimeSpan Grace, TimeSpan Idle, PersonalTenantRequest? PersonalTenant);
+
+/// <summary>What one caller read asks (S3 plan D4).</summary>
+/// <param name="Account">The account the access token names.</param>
+/// <param name="Session">The session the access token names.</param>
+/// <param name="Now">The instant to judge the session's expiry at.</param>
+/// <param name="Membership">The membership to read in the same statement, or <see langword="null"/> for none.</param>
+internal sealed record CallerQuery(UserId Account, Guid Session, DateTimeOffset Now, MembershipQuery? Membership);
+
+/// <summary>Which membership a caller read joins onto the session.</summary>
+/// <param name="Tenant">The tenant the request named, or <see langword="null"/> for the account's personal tenant.</param>
+internal sealed record MembershipQuery(TenantId? Tenant);
+
+/// <summary>What one caller read found.</summary>
+/// <param name="Live">Whether the session is live and its account enabled.</param>
+/// <param name="Membership">
+/// The membership asked for, or <see langword="null"/> when none was asked for, the account is no member, or the session is
+/// not live.
+/// </param>
+internal readonly record struct CallerRead(bool Live, StoredMembership? Membership);
 
 /// <summary>What presenting a refresh token did.</summary>
 internal enum RefreshStatus

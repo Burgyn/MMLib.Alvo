@@ -1033,6 +1033,17 @@ endpoints; `Management`), not three copies.
 - The tenant header is passed to the person resolver as received, as it is to the API-key resolver. Validating it is the
   resolver's job.
 
+**A person's tenant header selects among their memberships** (spec D8; `accounts.md`, *How a person acts in a tenant*).
+An API key's header can only *confirm* the one tenant the key was issued for. A person may belong to many tenants, so
+for them the header *chooses*: it names the tenant this request acts in, and the person resolver checks, in the same
+store read as the session, that the person is a member of it under the applied `tenancy.selfService`. No header means
+the person's personal tenant when the descriptor gives one, else no tenant (global entities and level 1 only). A
+header naming anything the person is not a member of — another person's tenant, an unknown or unparsable id, or any id
+at all while the descriptor has no `selfService` — refuses the **whole principal** with `401 Bearer
+error="invalid_token"`: never a principal without a tenant, which would still reach every global entity. The tenant's
+roles come from the membership, recomputed from the applied descriptor on every request, and count only on that
+tenant's scoped rows.
+
 **The three 401s.** A Bearer the resolver refuses answers `WWW-Authenticate: Bearer error="invalid_token"`. A malformed
 one answers `Bearer error="invalid_request"`. An ambiguous request answers with both challenges (API key and Bearer).
 The problem `type` stays `unauthenticated` throughout.
@@ -1078,8 +1089,9 @@ and a host without origins answers it 405 exactly as before. No origins means no
 by a filter on the route (the `AlvoAdminCredentialLimit` precedent): fixed one-minute windows, no queue, partitioned by
 `Connection.RemoteIpAddress` — IPv4-mapped as IPv4, IPv6 by its `/64`, no address as one shared partition. Over budget is
 429 `rate-limited` with `Retry-After` in whole seconds (60 when the limiter does not say). S2 charges the token endpoint
-(`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3/S4 add
-`Invitations` (20) and `Create` (10). A host behind a proxy configures forwarded headers so the address is the client's.
+(`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3 charges
+`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 adds `Invitations` (20) and S5 charges
+token minting to `Create`. A host behind a proxy configures forwarded headers so the address is the client's.
 
 ## The status and `type`-slug catalogue
 

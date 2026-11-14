@@ -8,6 +8,7 @@ using MMLib.Alvo.Accounts.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -97,6 +98,7 @@ public static class AlvoAccountsServiceCollectionExtensions
     {
         services.AddHttpContextAccessor();
         services.TryAddSingleton<PersonSessions>();
+        services.TryAddSingleton<SelfServiceMemberships>();
         services.TryAddKeyedScoped<IAlvoContextResolver, PersonResolver>(CallerResolution.PersonResolverKey);
     }
 

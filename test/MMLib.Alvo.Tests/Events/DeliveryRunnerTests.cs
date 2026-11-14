@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
@@ -680,6 +681,7 @@ public sealed class DeliveryRunnerTests : IDisposable
             (services ?? new ServiceCollection().BuildServiceProvider()).GetRequiredService<IServiceScopeFactory>(),
             new AlvoSessions(_data),
             catalogs,
+            new NoTenantMembershipResolution(),
             new DeliveryBackoff(() => 0.5),
             new AbandonedHandlers(Options.Create(new AlvoDeliveryOptions()), _loggers.CreateLogger<AbandonedHandlers>()),
             time ?? _clock,

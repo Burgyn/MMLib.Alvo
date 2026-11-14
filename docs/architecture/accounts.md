@@ -1,10 +1,12 @@
-# End-user accounts: sign-in, sessions and the person resolver (S2)
+# End-user accounts: sign-in, sessions, the person resolver (S2) and self-service tenants (S3)
 
 > The contributor's view of `MMLib.Alvo.Accounts` and the parts of the core and the EF adapter it uses: the tables, the
 > path a request takes, the invariants and the tests that hold them, and where Alvo deviates from the standards it
 > adopts. The design is `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
-> (§3–§5, §7.3, §14); the slice's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`.
-> Users' guides arrive in S6.
+> (§3–§7, §14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
+> tenants' D1–D15 in `docs/superpowers/plans/2026-11-13-accounts-s3-tenants.md`. The first half of this page is sign-in
+> (level 1); [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3. Users' guides arrive in
+> S6.
 
 ## What you can build with it
 
@@ -130,12 +132,14 @@ Authorization: Bearer <jwt>
 PersonResolver (keyed "alvo-person", registered by AddAlvoAccounts)
    1. PersonSessions.IdentifyAsync — in memory: no applied descriptor → nobody; signature by kid (ES256 only),
       typ at+jwt, iss, aud (Audience or the descriptor's name), exp/nbf ± 30 s on the injected clock
-   2. the tenant header → membership resolution (S2: none requested → no tenant; any requested → refuse the principal)
-   3. PersonSessions.IsLiveAsync — the descriptor still lists the session's idp (no I/O), then ONE store read:
-      session unrevoked, unexpired, account not disabled
+   2. the tenant header → MembershipRules.Plan, no I/O: refuse the principal, no tenant, or "read this membership"
+      (S3; see "How a person acts in a tenant" below)
+   3. PersonSessions.ReadAsync — the descriptor still lists the session's idp (no I/O), then ONE store read:
+      session unrevoked, unexpired, account not disabled — and, in the same statement, the membership the plan named
+   4. MembershipRules.Decide — the tenant and its roles under the applied descriptor, or the refusal of the principal
    ▼
-AlvoPrincipal: User = account, Roles = {authenticated}, TenantRoles = ∅, Tenant = null, ActorKind = User,
-               scopes *:read/*:write (the rules decide), KeyId = "session:<sid>"
+AlvoPrincipal: User = account, Roles = {authenticated}, Tenant and TenantRoles = the membership's (or none),
+               ActorKind = User, scopes *:read/*:write (the rules decide), KeyId = "session:<sid>"
 ```
 
 Every refusal is the same 401 `Bearer error="invalid_token"`, so a forged token and an expired session look alike. The
@@ -144,9 +148,9 @@ order is the cost model (D13): a refused tenant costs no read, and a valid reque
 
 The principal's roles are **project roles**. S1's role provenance decides where `@user.roles` can also see *tenant
 roles*: only while every entity on a decision's path is `tenancy: scoped`, and never in a Management `access` level
-(spec §6.2; `relation-rules.md`, *Binding*; `management-api.md`, *Who the Management API believes the caller is*). In
-S2 a person has no tenant, so `TenantRoles` is empty and level 1 uses only `authenticated` and `@user.id`. S3 fills
-the tenant through the same membership step, folded into the same one read.
+(spec §6.2; `relation-rules.md`, *Binding*; `management-api.md`, *Who the Management API believes the caller is*).
+Without `tenancy.selfService` a person has no tenant, so `TenantRoles` is empty and level 1 uses only `authenticated`
+and `@user.id`. With it, the membership step fills the tenant and its roles, folded into the same one read.
 
 The token endpoint follows the same pattern:
 
@@ -191,7 +195,8 @@ The token endpoint follows the same pattern:
 ## Deviations from the standards adopted (spec §4)
 
 The spec records D1–D9. The ones S2 builds on are listed here so that a reader can tell a decision from an oversight.
-D1 (a tenant registry) and D8 (no tenant header means the personal tenant) are S3's.
+D1 (a tenant registry) and D8 (no tenant header means the personal tenant) are S3's, under
+[*Tenants a person creates (S3)*](#tenants-a-person-creates-s3).
 
 - **D2 — End users live apart from the operator store.** `MMLib.Alvo.Identity` holds the people who administer a
   project. Mixing the two populations would put every app user on the dashboard's access list. The tables and the
@@ -226,7 +231,7 @@ The S2 plan adds its own recorded deviations:
 
 ## Not in S2
 
-- Tenants, memberships and every `selfService` refusal (S3).
+- Tenants, memberships and every `selfService` refusal — S3, below.
 - Invitations (S4).
 - Personal and service tokens (S5).
 - Key rotation (D12): one key per purpose, generation 1.
@@ -235,4 +240,243 @@ The S2 plan adds its own recorded deviations:
   yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
   for the ID-token acceptance window, or single use breaks. Follow-up:
   [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527).
-- §3.1's global-write warning (S3).
+- §3.1's global-write warning — S3, below.
+
+## Tenants a person creates (S3)
+
+### What you can build with it
+
+**Level 2: everyone gets a private space.** Add one block to a level-1 descriptor and every person who signs in owns a
+tenant of their own — their *personal tenant* — and every request they send acts in it. The tenant wall, not a
+`created_by` rule, keeps one person's rows from another's:
+
+```json
+{
+  "name": "personal-tracker",
+  "auth": { "providers": ["google"], "signUp": { "mode": "open" } },
+  "tenancy": { "enabled": true, "selfService": { "personalTenant": { "roles": [] } } },
+  "entities": {
+    "time_entries": {
+      "fields": { "minutes": { "type": "integer", "required": true } },
+      "rules": { "list": "'authenticated' in @user.roles", "create": "'authenticated' in @user.roles" }
+    }
+  }
+}
+```
+
+The host code is level 1's, unchanged. The client reads the personal tenant's id once from `GET /auth/v1/user` and
+sends it as the row's `tenant_id` — a scoped create always echoes its tenant (the Data API's contract); no header is
+needed, because a person who names none acts in their personal tenant (spec D8):
+
+```http
+GET  /auth/v1/user            Authorization: Bearer eyJ…
+→ 200 { …, "memberships": [ { "tenantId": "9f…", "name": "Ada Lovelace", "kind": "personal",
+                              "roles": [], "isOwner": true } ] }
+
+POST /api/time_entries        Authorization: Bearer eyJ…      { "minutes": 30, "tenant_id": "9f…" }   → 201
+```
+
+**Level 3: teams.** Let people create *shared* tenants, own them, and give the other members tenant roles. `jobs` is
+scoped (each team sees its own), `regions` is global reference data:
+
+```json
+{
+  "name": "team-tracker",
+  "auth": { "providers": ["google"], "roles": ["dispatcher", "technician", "owner"], "signUp": { "mode": "open" } },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "personalTenant": { "roles": [] },
+      "createTenants": { "creatorRoles": ["dispatcher"], "maxPerAccount": 2 },
+      "assignableRoles": ["dispatcher", "technician"]
+    }
+  },
+  "entities": {
+    "regions": { "tenancy": "global", "fields": { "code": { "type": "string", "maxLength": 8, "required": true } },
+                 "rules": { "list": "'authenticated' in @user.roles", "create": "'dispatcher' in @user.roles" } },
+    "jobs": { "tenancy": "scoped", "fields": { "title": { "type": "string", "maxLength": 80 } },
+              "rules": { "list": "'dispatcher' in @user.roles || 'technician' in @user.roles",
+                         "create": "'dispatcher' in @user.roles" } }
+  }
+}
+```
+
+A person creates a team, picks it with `X-Alvo-Tenant` (the Data API's tenant header), and manages who is in it:
+
+```http
+POST  /auth/v1/tenants                             { "name": "Acme" }
+→ 201 Location: /auth/v1/tenants/3c…   { "tenantId": "3c…", "name": "Acme", "kind": "shared",
+                                         "roles": ["dispatcher"], "isOwner": true }
+
+POST  /api/jobs        X-Alvo-Tenant: 3c…          { "title": "Boiler service", "tenant_id": "3c…" }   → 201
+
+GET   /auth/v1/tenants/3c…/members                                       → 200 [ { "userId", "name", "avatarUrl", "roles", "isOwner" } ]
+PATCH /auth/v1/tenants/3c…/members/{userId}        { "roles": ["technician"] }   → 200, counts on their next request
+DELETE /auth/v1/tenants/3c…/members/{userId}                             → 204, their next request in Acme is 401
+```
+
+Members arrive through invitations, which are S4; until then a shared tenant's only member is its creator, and the
+tests seed a second one directly in the table (plan D15). `TenancyEngineFacts.Level_two_end_to_end` and
+`…Level_three_end_to_end` are these two sections as tests, on SQLite and on PostgreSQL.
+
+### Why it is shaped this way
+
+- **A tenant is a membership, checked on every request, in the one read the session already costs** (spec §5.7, AC2).
+  The person resolver reads the session and the membership the request names in one statement; nothing about a
+  membership is cached, so a removal, a demotion or a descriptor change counts on the very next request.
+- **A named tenant you are not in refuses the whole principal** (401), never a principal without a tenant. A request
+  that silently fell back to "no tenant" would still reach every global entity; a 401 reaches nothing.
+- **Roles are recomputed from the applied descriptor, not trusted from the row** (D5). A shared membership's roles are
+  its stored names ∩ the current `assignableRoles`; a personal one's are `personalTenant.roles`, never stored. Drop a
+  role from `assignableRoles` and nobody holds it on the next request.
+- **A tenant role counts only in its tenant's scoped rows** (S1's path rule). Creating a tenant makes you its
+  `dispatcher`, which is exactly why that role must never write `regions`, nor reach a Management `access` level — apply
+  refuses an `access` rule that names an assignable role, and open sign-up warns about each global
+  write it opens to `authenticated` (§3.1).
+- **Owner is a flag, not a role.** `isOwner` decides who manages the membership list, and only the self-service routes
+  read it. It is never minted into `@user.roles`, so a rule cannot accidentally say "owners may do X".
+- **The routes live under the sign-in prefix, not the Data API's** (D1): `/api/tenants` would collide with an entity
+  called `tenants`. They exist on every host that maps sign-in; the descriptor turns them on.
+- **A stranger learns nothing.** A tenant you are not in answers 404, byte for byte the answer for an id that names
+  nothing (GitHub's rule for private organisations).
+
+### The two tables
+
+Named through `AlvoFrameworkTables` (`_tenants`, `_tenant_members`), one DDL text for both engines (ids and instants
+`TEXT`, booleans `INTEGER` 0/1), no foreign keys. The store is `ITenantStore` (internal to Abstractions, implemented by
+`EfCoreTenantStore`); the account store writes the personal tenant inside its own sign-in and refresh transactions and
+reads the membership in its caller read. Contract facts: `test/_shared/ef/TenantStoreFacts.cs`, both engines.
+
+| Table | Holds | Notable constraint |
+|---|---|---|
+| `{prefix}_tenants` | `id`, `kind` (`personal`/`shared`), `name`, `created_by`, `created_at`, `personal_owner`, `version` | `personal_owner` unique: one personal tenant per account, so concurrent first sign-ins converge on one |
+| `{prefix}_tenant_members` | `tenant_id`, `user_id`, `roles` (a JSON array of names), `is_owner`, `joined_at`, `invitation_id` (S4) | `(tenant_id, user_id)` primary key |
+
+**Serialisation without dialect code** (D3). Every membership write first runs `UPDATE … SET version = version + 1` on
+the tenant — a row lock on PostgreSQL, a no-op under SQLite's write gate — and only then reads the owners and judges, so
+two owners demoting each other at once cannot both pass a count. Creating a tenant first touches the creator's account
+row the same way, so parallel creates at the cap never pass `maxPerAccount`.
+
+**The personal tenant** (D6) is created in the sign-in transaction (and in a refresh's, for a person who signed up
+before `personalTenant` was applied), named after the account's display name at creation, else `"Personal"`.
+
+### How a person acts in a tenant
+
+```
+X-Alvo-Tenant: <id> | (none)
+   │  MembershipRules.Plan — pure, no I/O
+   │    selfService off:  none → no tenant;  named → REFUSE (no read)
+   │    selfService on:   named → read that membership;  none → read the personal one (if personalTenant) or no tenant
+   ▼
+ONE store read: session ⨝ account ⨝ (tenant_members ⨝ tenants) by the named id or by personal_owner
+   ▼
+MembershipRules.Decide
+   found and honoured → Tenant = it; TenantRoles = stored ∩ assignableRoles (shared) or personalTenant.roles (personal)
+   not found, named   → REFUSE the whole principal → 401 Bearer error="invalid_token"
+   not found, unnamed → no tenant (global entities only)
+```
+
+A personal membership is honoured only while `personalTenant` is applied, and only its owner's. The same
+`MembershipRules` serve `RegistryMembershipResolution`, which reads the registry for callers that have no session read
+(event actors here, personal tokens in S5).
+
+### The routes
+
+All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
+other auth routes. The gates run in this order, so a stranger learns nothing about the descriptor: the person
+(an API key → 403 `forbidden`; none → 401 `Bearer`; malformed or ambiguous → 401 `invalid_request`; unusable → 401
+`invalid_token`), then the feature (404 `feature-disabled` with `descriptorKey`), then the body (415, then 422
+`validation`), then the caller's own membership (404 `not-found` when it is not one the descriptor honours), then the
+registry.
+
+| Route | Who | Answers |
+|---|---|---|
+| `GET /tenants` | any person | 200 the memberships the descriptor honours, personal first |
+| `POST /tenants` `{name}` | any person, with `createTenants` | 201 + `Location`; 409 `tenant-limit` (`maxPerAccount`); 429 past `Alvo:Api:RateLimits:Create` |
+| `PATCH /tenants/{id}` `{name}` | an owner | 200; 403 for a member; 404 for anyone else |
+| `GET /tenants/{id}/members` | any member | 200 `[{userId, name, avatarUrl, roles, isOwner}]` — never an email |
+| `PATCH /tenants/{id}/members/{userId}` `{roles?, isOwner?}` | an owner, on someone else | 200; 403 on yourself; 422 for a role outside `assignableRoles`; 409 `conflict` on a personal tenant |
+| `DELETE /tenants/{id}/members/{userId}` | an owner; anyone on themself (leaving) | 204; 409 `last-owner`; 409 `conflict` on a personal tenant |
+
+A name is trimmed, 1–100 code points, no control character — the display name's rules, one helper
+(`SelfServiceName`).
+
+### Invariants, and the tests that hold them
+
+| Invariant | Held by |
+|---|---|
+| Levels 2 and 3 end to end, on both engines | `TenancyEngineFacts.Level_two_end_to_end`, `…Level_three_end_to_end` (`SqliteTenancyEngineTests`, `PostgresTenancyEngineTests`) |
+| A named tenant that is not a membership refuses the whole principal — another's shared, another's personal, an unknown id, an unparsable value | `TenancyEngineFacts.A_header_naming_a_tenant_you_are_not_in_refuses_the_whole_principal`; `PersonResolverTests.A_header_naming_a_tenant_the_person_is_not_in_refuses_the_principal`, `…Without_self_service_a_header_still_refuses_the_principal`; `MembershipRulesTests` |
+| Membership and session cost one store read; a refused tenant costs none (AC2) | `PersonResolverTests.A_request_naming_a_tenant_is_one_store_read`, `…A_refused_tenant_costs_no_read_when_self_service_is_off` |
+| A membership change counts on the next request: removed → 401, demoted → role gone, role dropped from `assignableRoles` → gone (Review Focus 1) | `TenancyEngineFacts.Level_three_end_to_end`; `PersonResolverTests.A_removed_member_is_refused_on_the_next_request`, `…A_role_dropped_from_assignable_roles_is_gone_on_the_next_request`; `MemberRoutesTests.An_owner_grants_a_role_and_the_member_s_next_request_carries_it` |
+| A tenant role from one tenant is absent in another; rows of one tenant are invisible in another | `TenancyEngineFacts.A_tenant_role_from_one_tenant_is_absent_in_another`, `…Rows_written_in_one_tenant_are_invisible_in_another` |
+| A self-made `dispatcher` cannot write a global entity, directly or through a relation term (Review Focus 5) | `TenancyEngineFacts.A_self_made_dispatcher_cannot_write_global_regions`; `AccessTenantRoleRefusalTests`; `GlobalWriteWarningsTests` |
+| A tenant role never reaches Management | `TenancyEngineFacts.A_tenant_role_never_reaches_management`; `AccessTenantRoleRefusalTests.An_assignable_role_in_any_access_level_is_refused` |
+| Owner is never a role; a stored name outside `assignableRoles` is no role either | `TenancyEngineFacts.The_owner_flag_is_never_a_role`; `MembershipRulesTests.A_stored_role_no_longer_assignable_is_dropped`; `MemberRoutesTests.Members_show_display_names_and_never_an_email` |
+| A tenant never loses its last owner, also when two owners act at once (Review Focus 2) | `TenantStoreFacts.Two_owners_demoting_each_other_at_once_leave_exactly_one_owner`, `…removing…`, `…leaving…` (20 iterations, both engines); `TenancyEngineFacts.The_last_owner_cannot_leave_be_removed_or_be_demoted` |
+| Never more than `maxPerAccount` shared tenants, also in parallel (Review Focus 3) | `TenantStoreFacts.Concurrent_creates_at_the_cap_never_exceed_it`; `TenancyEngineFacts.Creating_tenants_stops_at_the_cap` (five at once over HTTP) |
+| Two devices signing a new person in at once: one account, one personal tenant, one owner (Review Focus 4) | `AccountStoreFacts.Two_concurrent_first_sign_ins_create_one_personal_tenant` |
+| Nobody changes their own membership (AC4); a personal tenant has exactly one member | `MemberRoutesTests.Nobody_patches_their_own_membership`; `TenancyEngineFacts.A_personal_tenant_takes_no_members`; `TenantStoreFacts.A_personal_tenant_refuses_every_member_change` |
+| A non-member gets the unknown id's 404 on every route; a membership the descriptor does not honour is managed by no route | `MemberRoutesTests.A_non_member_gets_404_on_every_member_route`, `…An_unhonoured_personal_membership_is_managed_by_no_route`; `TenantRoutesTests.A_non_member_and_an_unknown_tenant_get_the_same_404` |
+| Person only: an API key is 403, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_403_and_no_credential_is_a_bearer_challenge`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
+| `feature-disabled` names its key on all six routes; creating is rate-limited and only creating | `TenantRoutesTests.Without_self_service_every_route_is_404_feature_disabled`, `…Without_create_tenants_creating_is_404_naming_its_key`, `…Tenant_creation_answers_429_after_its_limit` |
+| An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests` |
+| The registry is the tenant list only under `selfService` and only when the host registers none (D13) | `TenantCatalogsTests` |
+| The default tenant list honours what a request honours: shared tenants, personal ones only while `personalTenant` is on — one predicate for a tenant, a membership and every listing | `TenantCatalogsTests.Without_personal_tenant_the_registry_lists_only_shared_tenants`, `…A_migration_starts_once_per_registry_tenant_only_at_a_self_service_revision`; `MembershipRulesTests.Honours_is_one_test_for_a_tenant_and_its_membership`, `…A_listing_drops_a_personal_row_that_is_not_its_owner_s` |
+
+### Recorded deviations
+
+From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D15) in one line each:
+
+- **D1** — the routes live under the sign-in prefix (`/auth/v1/tenants`), not §6.3's `{prefix}`: the Data API's prefix
+  would collide with an entity named `tenants`. No TeaPie path pin moves.
+- **D2** — the registry is an internal port in Abstractions (`ITenantStore`), implemented in the EF adapter.
+- **D3** — per-tenant and per-account serialisation by a version bump and a no-op account write, not `FOR UPDATE` or
+  advisory locks, so one SQL text serves both engines.
+- **D4** — one store read for account, session and membership; `IAccountStore.IsSessionLiveAsync` became
+  `ReadCallerAsync`.
+- **D5** — effective roles recomputed from the applied descriptor on every request; a personal membership's roles are
+  never stored.
+- **D6** — the personal tenant is created in the sign-in and refresh transactions; a Bearer request in the gap after
+  `personalTenant` is applied (at most one access-token lifetime) has none.
+- **D7** — only a person calls the routes (an API key is 403); a non-member is 404 like an unknown id; nobody changes
+  their own membership.
+- **D8** — three new problem types: `feature-disabled` (404, `descriptorKey`), `last-owner` (409), `tenant-limit` (409,
+  `maxPerAccount`); a personal tenant's membership change is 409 `conflict`.
+- **D9** — `maxPerAccount` counts the shared tenants the account *created*, for its lifetime: tenants cannot be deleted
+  yet, so handing one over and leaving frees nothing.
+- **D10** — an event actor keeps a recorded tenant role only while it is assignable, and a person actor's roles are
+  narrowed at delivery to their current membership — never widened. A removed member's queued delivery still runs in
+  the tenant, with project roles only (`events.md`).
+- **D11** — `invitations` is accepted by the schema and warned as unhonoured until S4.
+- **D12** — the global-write warning lists each `create`/`update`/`delete` rule of a global entity whose role literals
+  include `authenticated`; a rule that admits without naming a role is not listed.
+- **D13** — the default tenant catalog is resolved per descriptor, not registered. On a host with a registry and no
+  catalog of its own, an `EachTenant` schedule is judged per descriptor rather than in the boot's catalog-free pass, so
+  a relational host with no descriptor boots and a stored-descriptor boot stands down instead of exiting (spec §6.6).
+  The registry lists only the tenants the descriptor honours (`MembershipRules.Honours`, the test every membership
+  passes): after `personalTenant` is dropped, personal tenants get no runs. **The cost it leaves, recorded rather than
+  bounded:** under `signUp.mode: open` with `personalTenant`, every sign-up adds a tenant — and each account up to
+  `maxPerAccount` more, none deletable yet — so every `EachTenant` schedule tick and every data migration on a scoped
+  schema mints one more run per account, a per-tick cost any member of the public grows by signing up (bounded only by the
+  token rate limit). It is a cost, not a wall breach: each run is the system in its own tenant. A host that wants it
+  bounded registers its own `IAlvoTenantCatalog`, which always wins.
+- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only.
+- **D15** — members arrive only through invitations (S4); tests seed them.
+
+And where the implementation answered differently from the plan's first wording:
+
+- **422, not 400, for a bad name or member patch** — `validation` is 422 everywhere in Alvo.
+- **The last owner over HTTP:** only leaving reaches 409 `last-owner`. Demoting yourself is 403 (nobody changes their own
+  membership, judged first), and anyone who could demote or remove the only owner is not an owner (403). Two owners
+  racing: the loser is told it is no longer an owner (403) or no longer a member (404).
+- **A personal tenant's `PATCH` naming another id is 409 `conflict`**, not 404: only the tenant's owner gets that far.
+- **A refused `PATCH` on a global row is 404, not 403:** an `update` rule filters the rows a caller may change, the Data
+  API's existing contract.
+- **A refresh now commits a replay** (needed to create a missing personal tenant). Nothing else writes on that path today.
+
+### Not in S3
+
+- Invitations — the only way a second member joins a shared tenant (S4).
+- Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person (S5).
+- Deleting a tenant, and transferring a personal one.

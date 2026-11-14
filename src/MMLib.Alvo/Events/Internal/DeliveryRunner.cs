@@ -1,11 +1,13 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.Internal;
 using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Tenants.SelfService;
 
 using System.Data.Common;
 using System.Diagnostics;
@@ -62,6 +64,13 @@ internal enum DeliveryRunOutcome
 /// flow, at the event's own depth.
 /// </para>
 /// <para>
+/// <b>An actor's tenant roles are the ones its membership still holds</b> (S3 plan D10b). An <c>EventActor</c> run of a
+/// person (<see cref="AlvoActorKind.User"/>) with a tenant and tenant roles reads that person's membership in the event's
+/// tenant through <see cref="IMembershipResolution"/>, inside the attempt: a person removed since the event runs with no
+/// tenant role, a demoted one with the recorded roles they still hold — never one they gained since. Project roles stay as
+/// at the event (E8). Every other run reads nothing; a failed read fails the attempt, which is retried.
+/// </para>
+/// <para>
 /// <b>Fail closed on the envelope.</b> A payload that is no longer an Alvo envelope, or whose present <c>tenantid</c> —
 /// or, for an actor run, <c>authid</c> — cannot be read, is dead <c>event-unreadable</c>: it never runs as a tenantless
 /// system or an anonymous caller.
@@ -72,6 +81,7 @@ internal sealed class DeliveryRunner(
     IServiceScopeFactory scopes,
     IAlvoSessions sessions,
     IPolicyCatalogProvider catalogs,
+    IMembershipResolution memberships,
     DeliveryBackoff backoff,
     AbandonedHandlers abandoned,
     TimeProvider time,
@@ -347,17 +357,43 @@ internal sealed class DeliveryRunner(
         var scope = scopes.CreateAsyncScope();
         await using (scope.ConfigureAwait(false))
         {
-            var caller = sessions.For(CallerFor(@event, handler.Settings.RunAs));
+            var caller = sessions.For(await CallerForAsync(@event, handler.Settings.RunAs, ct).ConfigureAwait(false));
             var context = new AlvoEventContext(@event, delivery.Subscriber, delivery.Attempts, caller, steps);
             var message = HandlerMessage.For(@event, handler.Registration);
             await handler.Registration.Invoker.InvokeAsync(scope.ServiceProvider, message, context, ct).ConfigureAwait(false);
         }
     }
 
-    private AlvoContext CallerFor(AlvoEvent @event, AlvoRunAs runAs) =>
-        runAs is AlvoRunAs.EventActor
-            ? EventActor.Of(@event, catalogs.DeclaredRoles ?? RoleCatalog.BuiltInOnly)
-            : AlvoContext.System(EventActor.TenantOf(@event));
+    /// <summary>The caller a run of <paramref name="runAs"/> acts as: the system in the event's tenant, or the actor as narrowed.</summary>
+    private async ValueTask<AlvoContext> CallerForAsync(AlvoEvent @event, AlvoRunAs runAs, CancellationToken ct)
+    {
+        if (runAs is not AlvoRunAs.EventActor)
+        {
+            return AlvoContext.System(EventActor.TenantOf(@event));
+        }
+
+        var actor = EventActor.Of(
+            @event, catalogs.DeclaredRoles ?? RoleCatalog.BuiltInOnly, catalogs.Current?.SelfService ?? SelfServicePolicy.None);
+        return await HeldTenantRolesAsync(actor, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// <paramref name="actor"/> with its tenant roles narrowed to those its membership in its tenant still holds — none when it
+    /// is no member any more; never widened. Reads only for a person with a tenant and tenant roles.
+    /// </summary>
+    private async ValueTask<AlvoContext> HeldTenantRolesAsync(AlvoContext actor, CancellationToken ct)
+    {
+        if (actor.ActorKind is not AlvoActorKind.User || actor.Tenant is not { } tenant || actor.TenantRoles.Count == 0)
+        {
+            return actor;
+        }
+
+        var membership = await memberships.ResolveAsync(actor.User, tenant, ct).ConfigureAwait(false);
+        var held = membership.Refused || membership.Tenant != tenant
+            ? []
+            : membership.TenantRoles.Select(role => role.Name).ToHashSet(StringComparer.Ordinal);
+        return actor with { TenantRoles = actor.TenantRoles.Where(role => held.Contains(role.Name)).ToHashSet() };
+    }
 
     private static AlvoProvenance FlowOf(AlvoEvent @event) => new()
     {
