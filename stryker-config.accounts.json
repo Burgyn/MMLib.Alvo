@@ -1,0 +1,26 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Accounts.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Accounts.Tests/MMLib.Alvo.Accounts.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "log-to-file": true,
+    "additional-timeout": 300000,
+    "mutate": [
+      "**/*.cs",
+      "!**/AssemblyInfo.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 40,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

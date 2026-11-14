@@ -32,7 +32,11 @@
       "!EfCoreOutboxStore.cs",
       "!Internal/OutboxTable.cs",
       "!Internal/EfAlvoData.Hooks.cs",
-      "!Internal/UnitRun.cs"
+      "!Internal/UnitRun.cs",
+      "!EfCoreAccountStore.cs",
+      "!EfCoreAccountStore.Sessions.cs",
+      "!EfCoreAccountStore.Keys.cs",
+      "!Internal/AuthTables.cs"
     ],
     "thresholds": {
       "high": 90,
