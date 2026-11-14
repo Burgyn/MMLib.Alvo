@@ -23,17 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The descriptor is the switch.** `auth.signUp` (`open` | `invitationOnly`, optional `allowedEmailDomains`) is
     required once `auth.providers` lists `google`, which is no longer reported as unhonoured. Only a provider the
     descriptor lists *and* the host configures signs anyone in. Dropping it ends live sessions on their next request.
+    **Breaking for an apply:** a descriptor that lists `google` without `auth.signUp` — accepted before, with an
+    unhonoured-subsystem warning — is now refused at `/auth/signUp`, on every host, accounts or not. Add
+    `"signUp": { "mode": "open" }` or `{ "mode": "invitationOnly" }`.
   - **Disabling a person.** An operator disables a person with `PUT {management}/projects/{project}/accounts/{id}/disabled`
     (the new `ManageAccounts` operation, `admin`). The person is refused from their next request. Enabling them again
     ends every session the account still has, so they sign in afresh; enabling an account that is not disabled is a
     no-op that logs nobody out.
   - **Storage.** Five new framework tables (`{prefix}_auth_*`) hold accounts, identities, sessions, refresh tokens and
-    keys. The keys are encrypted with `Alvo:Secrets:EncryptionKeyFile`, which an accounts host must configure.
+    keys. The keys are encrypted with `Alvo:Secrets:EncryptionKeyFile`, which an accounts host must configure. Nothing
+    deletes a session or refresh-token row yet, so those two tables grow with every sign-in and refresh (#527).
   - **CORS and rate limits.** `Alvo:Api:Cors:Origins` and `Alvo:Api:RateLimits:Token` (default 30 per minute per client
     IP) cover the Data API and the sign-in routes without a pipeline step.
-  - **A host that does not add accounts is unchanged.** It needs no key file, maps no `/auth` route, publishes no Bearer
-    scheme and ignores `Authorization` exactly as before. Its OpenAPI document gains only the four new problem types
-    in the shared `type` enum: `token-refused`, `sign-up-refused`, `sign-in-refused` and `rate-limited`.
+  - **A host that does not add accounts behaves as before.** It needs no key file, maps no `/auth` route, publishes no
+    Bearer scheme and ignores `Authorization` exactly as before. Its OpenAPI document gains only the four new problem
+    types in the shared `type` enum: `token-refused`, `sign-up-refused`, `sign-in-refused` and `rate-limited`. Two
+    things do reach it: on a relational provider the five `{prefix}_auth_*` tables are created, empty, on every host;
+    and the framework's CORS services are registered (`AddCors()`), sending nothing until `Alvo:Api:Cors:Origins` is set.
   - **Tests.** Level 1 is proven end to end on SQLite and PostgreSQL (`AccountsEngineFacts`). A log scan at Trace finds
     no ID token, access token, refresh token or API key in any message, exception, structured value or scope.
   - **Docs.** The contributor's view is `docs/architecture/accounts.md`.
@@ -501,6 +507,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A descriptor that lists `google` must say who may sign up** (accounts slice S2). `auth.providers` naming `google`
+  without `auth.signUp` was applied with an unhonoured-subsystem warning; it is now refused at `/auth/signUp`, on every
+  host, whether or not it adds accounts. Add `"signUp": { "mode": "open" }` or `{ "mode": "invitationOnly" }`.
 - **A scoped `ref` can no longer name another tenant's row** (#161): a reference between two `tenancy: "scoped"`
   entities is now a foreign key over `(tenant_id, id)`, with a matching alternate key on the target, so the database
   refuses a row whose reference names another tenant's. A write that tries it through `IAlvoData` is refused as

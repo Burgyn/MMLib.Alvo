@@ -244,6 +244,15 @@ top-level management block, which §3.1's refusals below refer to.
   acceptance *Zmena role je auditovaná*). They need the event envelope to carry a tenant (#153) and the
   audit component (#42). This initiative records `created_by`/`joined_at`/`invitation_id` on the rows so
   the later audit has facts to start from; §14 does not claim those two criteria.
+- **D10 — Sessions and refresh tokens are not swept yet** (recorded by the S2 final review). Nothing deletes a
+  `{prefix}_auth_sessions` or `{prefix}_auth_refresh_tokens` row: every sign-in inserts a session, every refresh a token
+  (about 96 rows a day for one session refreshed every 15 minutes), and with `signUp: open` anyone holding a Google
+  account can add rows within the token budget. Session stores ordinarily expire such rows; Alvo does not in S2,
+  because the sweep has a constraint of its own — it must keep a session's `subject_token_id` for at least the
+  ID-token acceptance window (`iat` ≤ 5 min plus 2 min skew), or an ID token becomes replayable once its session row
+  is gone — and it is a bounded background job, not a sign-in concern. Follow-up:
+  [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527) (rotated tokens and expired or revoked sessions past the
+  grace window).
 
 ## 5. Accounts and sessions
 

@@ -84,12 +84,16 @@ with `PUT {management}/projects/{project}/accounts/{account}/disabled` (`managem
   disable or a sign-out takes effect on the next request, not after 15 minutes.
 - **The descriptor is the switch** (D10). A provider must be configured by the host *and* listed by the applied
   descriptor. Drop `google` from the descriptor and the next exchange, refresh and Bearer request are all refused.
-- **Accounts are a package, and on per host** (D1, D9). A host that never calls `AddAlvoAccounts` is byte-for-byte the
-  host it was:
+- **Accounts are a package, and on per host** (D1, D9). A host that never calls `AddAlvoAccounts` behaves as the host
+  it was:
   - no key file is required;
   - no `/auth` route is mapped;
   - the OpenAPI document gains no path or security scheme (only the shared problem-type enum lists the four new slugs);
   - `Authorization` is ignored.
+
+  It is not untouched, though. On a relational provider the schema initializer creates the five `_auth_*` tables on
+  every host, accounts or not, and they stay empty. `AddAlvoApi` calls `services.AddCors()` on every host, so the
+  framework's CORS services are registered; Alvo sends no CORS header until `Alvo:Api:Cors:Origins` names an origin.
 
 ## The tables
 
@@ -170,7 +174,7 @@ The token endpoint follows the same pattern:
 | Two replicas on a fresh database converge on one signing key and one HMAC key (Review Focus 2) | `AccountStoreFacts.Two_concurrent_first_keys_converge_on_one`; `AccountKeysTests.Two_replicas_over_one_store_mint_tokens_each_other_validates` |
 | The descriptor drops `google` → the next Bearer request is 401, the next refresh `invalid_grant`, the exchange refused (Review Focus 3) | `PersonResolverTests.A_descriptor_that_drops_google_refuses_live_sessions_and_refreshes`; `RefreshGrantTests.A_session_whose_provider_the_descriptor_dropped_is_invalid_grant` |
 | A provider the descriptor does not list costs no outbound fetch | `TokenExchangeTests.A_provider_the_descriptor_does_not_list_is_invalid_request`; `OidcIdTokenVerifierTests.A_provider_the_caller_does_not_list_is_refused_before_anything_is_fetched` |
-| A host without accounts is unchanged; `Alvo:Auth:HeaderName = Authorization` is refused beside accounts (Review Focus 4) | `HostAccountsTests`; `OpenApiDocumentTests.Without_a_person_resolver_there_is_no_bearer_scheme`; `AccountsOptionsTests.An_api_key_header_named_authorization_is_refused_beside_accounts` |
+| A host without accounts maps no `/auth` route, needs no key file and ignores `Authorization` (it does get the five empty `_auth_*` tables and the CORS services); `Alvo:Auth:HeaderName = Authorization` is refused beside accounts (Review Focus 4) | `HostAccountsTests`; `OpenApiDocumentTests.Without_a_person_resolver_there_is_no_bearer_scheme`; `AccountsOptionsTests.An_api_key_header_named_authorization_is_refused_beside_accounts` |
 | An API key beside sign-in works exactly as before; a key and a Bearer together are 401 ambiguous | `AccountsEngineFacts.An_api_key_beside_sign_in_behaves_exactly_as_before`; `CredentialReadingTests` |
 | Clock boundaries: `iat` 5 min in, 5 min + 1 s out; ID-token `exp` ± 2 min; access token 30 s past `exp` in, 31 s out; reuse at 10 s replays, at 11 s kills (Review Focus 5) | `OidcIdTokenVerifierTests.The_boundaries_are_accepted`, `…An_id_token_is_refused`; `AccessTokensTests.A_token_validates_within_30_seconds_past_exp_and_not_31`; `RefreshGrantTests.A_reuse_at_exactly_ten_seconds_answers_the_same_child` |
 | An ID token starts at most one session; an account is found by `(provider, subject)`, never by email | `TokenExchangeTests.A_replayed_id_token_starts_no_second_session`; `AccountStoreFacts.A_second_sign_in_finds_the_account_by_provider_and_subject_never_by_email` |
@@ -226,4 +230,8 @@ The S2 plan adds its own recorded deviations:
 - Personal and service tokens (S5).
 - Key rotation (D12): one key per purpose, generation 1.
 - Auth events and role-change audit (spec D9).
+- A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
+  yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
+  for the ID-token acceptance window, or single use breaks. Follow-up:
+  [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527).
 - §3.1's global-write warning (S3).

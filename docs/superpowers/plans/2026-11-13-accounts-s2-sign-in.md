@@ -81,7 +81,9 @@ protocol (Fetch standard).
   "refresh profile fields": a refresh would silently undo the person's own edit).
 - **D9 — Accounts are on per host, by configuration.** `AddAlvoAccounts` is the switch for an embedded host; the
   standalone host calls it only when `Alvo:Accounts:Providers` has at least one provider section. So an existing
-  deployment without accounts keeps starting without a key file, its OpenAPI document gains no path, operation or
+  deployment without accounts keeps starting without a key file (it does get the five empty `_auth_*` tables, which
+  the schema initializer creates on every relational host, and ASP.NET Core's CORS services, which `AddAlvoApi`
+  registers on every host and which send nothing until `Alvo:Api:Cors:Origins` is set), its OpenAPI document gains no path, operation or
   security scheme, and **no TeaPie path pin moves in S2** (both stacks run without accounts; S6 turns them on in
   field-service). The Bearer security scheme is published only when a person resolver is registered. What the document
   of a host without accounts does gain is the four problem-type values D4 adds, in the `problemDetails.type` enum:
@@ -112,7 +114,10 @@ protocol (Fetch standard).
 - **D17 — Not in S2:** §3.1's global-write warning (spec §11 gives it to S3, and at level 1 every entity is global, so it
   would fire on every level-1 app); every `selfService` refusal (S3); the `invitations`/`create` rate limits (S3/S4); key
   rotation (D12). Startup refusal of `Alvo:Auth:HeaderName = Authorization` lives in Accounts' option validation
-  (S1 carry-over); the `AnyKey` hole is closed by S1's fix wave.
+  (S1 carry-over); the `AnyKey` hole is closed by S1's fix wave. **Amended by the final review (I2):** no sweep of
+  sessions or refresh tokens — nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row in S2. Recorded as
+  spec D10; the sweep, which must keep `subject_token_id` for the ID-token acceptance window, is
+  [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527).
 
 ## Global Constraints
 
