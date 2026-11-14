@@ -11,6 +11,9 @@ internal enum IdTokenRefusal
     /// <summary>Its <c>iss</c> is no provider this deployment configured.</summary>
     UnknownIssuer,
 
+    /// <summary>Its provider is one this deployment configured but the caller does not list (S2 D10).</summary>
+    NotListed,
+
     /// <summary>Its signature does not verify under a key its provider publishes for its <c>kid</c>.</summary>
     Signature,
 
@@ -59,8 +62,13 @@ internal sealed record IdentityVerification(VerifiedIdentity? Identity, string? 
 /// </summary>
 internal interface IIdentityVerifier
 {
-    /// <summary>Verifies <paramref name="subjectToken"/>.</summary>
+    /// <summary>Verifies <paramref name="subjectToken"/>, if it names a provider <paramref name="listed"/> admits.</summary>
+    /// <remarks>
+    /// The provider the token names is judged against <paramref name="listed"/> first — before any key, signature or
+    /// discovery document — so a provider nobody may sign in through costs no outbound request (spec §5.2 step 1).
+    /// </remarks>
     /// <param name="subjectToken">The token the client presented; never logged.</param>
+    /// <param name="listed">Whether a provider, by its name in the descriptor, may sign anyone in now.</param>
     /// <param name="ct">A token to cancel the operation.</param>
-    ValueTask<IdentityVerification> VerifyAsync(string subjectToken, CancellationToken ct);
+    ValueTask<IdentityVerification> VerifyAsync(string subjectToken, Func<string, bool> listed, CancellationToken ct);
 }

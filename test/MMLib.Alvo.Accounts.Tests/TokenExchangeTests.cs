@@ -118,6 +118,20 @@ public sealed class TokenExchangeTests
         var problem = await RefusalAsync(response, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_request");
         problem["error_description"]!.GetValue<string>().ShouldBe(TokenProblems.SubjectTokenDescription);
         (await world.CountAsync("_auth_accounts")).ShouldBe(0);
+        world.Oidc.Requests.ShouldBe(0, "a provider nobody may sign in through costs no discovery fetch (spec §5.2 step 1)");
+    }
+
+    [Theory]
+    [InlineData("audience")]
+    [InlineData("resource")]
+    [InlineData("requested_token_type")]
+    public async Task An_empty_parameter_counts_as_absent(string name)
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine);
+
+        using var response = await world.TokenAsync(Exchange(world.IdToken("sub-1"), ("subject_token_type", IdTokenType), (name, "")));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
     }
 
     [Fact]

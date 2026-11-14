@@ -37,6 +37,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         _services = services.BuildServiceProvider();
     }
 
+    private static Func<string, bool> AnyProvider { get; } = _ => true;
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <inheritdoc/>
@@ -52,7 +54,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         using var verifier = Verifier(Google());
         var token = _issuer.Mint("sub-1", jti: "jti-1");
 
-        var verification = await verifier.VerifyAsync(token, Ct);
+        var verification = await verifier.VerifyAsync(token, AnyProvider, Ct);
 
         verification.Refusal.ShouldBeNull();
         verification.Identity.ShouldBe(new VerifiedIdentity("google", "sub-1", "ada@gmail.com", true, "Ada Lovelace", "https://img.test/ada.png"));
@@ -67,7 +69,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         using var verifier = Verifier(Google());
         var token = _issuer.Mint("sub-1", jti: TestOidcIssuer.NoJti);
 
-        var verification = await verifier.VerifyAsync(token, Ct);
+        var verification = await verifier.VerifyAsync(token, AnyProvider, Ct);
 
         verification.SubjectTokenId.ShouldBe(Hash($"{TestOidcIssuer.Authority}\n{Hash(token)}"));
     }
@@ -109,7 +111,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
             _ => _issuer.Mint(string.Empty),
         };
 
-        (await verifier.VerifyAsync(token, Ct)).ShouldBe(IdentityVerification.Refused(Enum.Parse<IdTokenRefusal>(expected)));
+        (await verifier.VerifyAsync(token, AnyProvider, Ct)).ShouldBe(IdentityVerification.Refused(Enum.Parse<IdTokenRefusal>(expected)));
     }
 
     [Fact]
@@ -118,7 +120,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         using var verifier = Verifier(Google());
         var token = _issuer.Mint("sub-1", issuedAt: _now.AddMinutes(-5), lifetime: TimeSpan.FromMinutes(3));
 
-        var verification = await verifier.VerifyAsync(token, Ct);
+        var verification = await verifier.VerifyAsync(token, AnyProvider, Ct);
 
         verification.Refusal.ShouldBeNull();
         new JsonWebToken(token).ValidTo.ShouldBe(_now.AddMinutes(-2).UtcDateTime);
@@ -129,9 +131,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     {
         using var verifier = Verifier(Google() with { Issuers = GooglePreset.Issuers });
 
-        var https = await verifier.VerifyAsync(_issuer.Mint("sub-1", issuer: "https://accounts.google.com"), Ct);
-        var bare = await verifier.VerifyAsync(_issuer.Mint("sub-1", issuer: "accounts.google.com"), Ct);
-        var lookalike = await verifier.VerifyAsync(_issuer.Mint("sub-1", issuer: "https://accounts.google.com/"), Ct);
+        var https = await verifier.VerifyAsync(_issuer.Mint("sub-1", issuer: "https://accounts.google.com"), AnyProvider, Ct);
+        var bare = await verifier.VerifyAsync(_issuer.Mint("sub-1", issuer: "accounts.google.com"), AnyProvider, Ct);
+        var lookalike = await verifier.VerifyAsync(_issuer.Mint("sub-1", issuer: "https://accounts.google.com/"), AnyProvider, Ct);
 
         https.Identity.ShouldNotBeNull().Provider.ShouldBe("google");
         bare.Identity.ShouldNotBeNull().Provider.ShouldBe("google");
@@ -143,15 +145,15 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     public async Task An_unknown_kid_refetches_the_jwks_once_within_five_minutes()
     {
         using var verifier = Verifier(Google());
-        (await verifier.VerifyAsync(_issuer.Mint("sub-1"), Ct)).Refusal.ShouldBeNull();
+        (await verifier.VerifyAsync(_issuer.Mint("sub-1"), AnyProvider, Ct)).Refusal.ShouldBeNull();
         var fetches = _issuer.JwksFetches;
 
         _issuer.RotateKey("test-2");
-        var rotated = await verifier.VerifyAsync(_issuer.Mint("sub-1"), Ct);
+        var rotated = await verifier.VerifyAsync(_issuer.Mint("sub-1"), AnyProvider, Ct);
         var afterRotation = _issuer.JwksFetches;
         _clock.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
-        var invented = await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), Ct);
-        var inventedAgain = await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), Ct);
+        var invented = await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), AnyProvider, Ct);
+        var inventedAgain = await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), AnyProvider, Ct);
 
         rotated.Refusal.ShouldBeNull();
         afterRotation.ShouldBe(fetches + 1);
@@ -164,11 +166,11 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     public async Task After_five_minutes_an_unknown_kid_may_refetch_again()
     {
         using var verifier = Verifier(Google());
-        await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), Ct);
+        await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), AnyProvider, Ct);
         var fetches = _issuer.JwksFetches;
 
         _clock.Advance(TimeSpan.FromMinutes(5));
-        var invented = await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), Ct);
+        var invented = await verifier.VerifyAsync(_issuer.Mint("sub-1", kid: "test-3"), AnyProvider, Ct);
 
         invented.Refusal.ShouldBe(IdTokenRefusal.Signature);
         _issuer.JwksFetches.ShouldBe(fetches + 1);
@@ -186,7 +188,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     {
         using var verifier = Verifier(Google());
 
-        var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", email: email, emailVerified: verified, hd: hd), Ct);
+        var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", email: email, emailVerified: verified, hd: hd), AnyProvider, Ct);
 
         var identity = verification.Identity.ShouldNotBeNull();
         identity.Email.ShouldBe(email);
@@ -203,7 +205,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         options.TrustEmail = trustEmail;
         using var verifier = Verifier(OidcProvider.Generic("oidc", AuthProvider.Oidc, TestOidcIssuer.Authority, options));
 
-        var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", email: "ada@example.com", emailVerified: verified), Ct);
+        var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", email: "ada@example.com", emailVerified: verified), AnyProvider, Ct);
 
         verification.Identity.ShouldNotBeNull().EmailTrusted.ShouldBe(trusted);
         verification.Identity.Provider.ShouldBe("oidc");
@@ -214,9 +216,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     {
         using var verifier = Verifier(OidcProvider.Generic("oidc", AuthProvider.Oidc, TestOidcIssuer.Authority, Options(TestOidcIssuer.Authority)));
 
-        (await verifier.VerifyAsync(_issuer.Mint("sub-1", alg: "HS256"), Ct)).Refusal.ShouldBe(IdTokenRefusal.Algorithm);
-        (await verifier.VerifyAsync(_issuer.Mint("sub-1", alg: "none"), Ct)).Refusal.ShouldBe(IdTokenRefusal.Algorithm);
-        (await verifier.VerifyAsync(_issuer.Mint("sub-1"), Ct)).Refusal.ShouldBeNull();
+        (await verifier.VerifyAsync(_issuer.Mint("sub-1", alg: "HS256"), AnyProvider, Ct)).Refusal.ShouldBe(IdTokenRefusal.Algorithm);
+        (await verifier.VerifyAsync(_issuer.Mint("sub-1", alg: "none"), AnyProvider, Ct)).Refusal.ShouldBe(IdTokenRefusal.Algorithm);
+        (await verifier.VerifyAsync(_issuer.Mint("sub-1"), AnyProvider, Ct)).Refusal.ShouldBeNull();
     }
 
     [Fact]
@@ -226,9 +228,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         using var refusing = Verifier(refused);
         using var allowing = Verifier(refused with { AllowHttpMetadata = true });
 
-        var withoutPermission = await refusing.VerifyAsync(_issuer.Mint("sub-1"), Ct);
+        var withoutPermission = await refusing.VerifyAsync(_issuer.Mint("sub-1"), AnyProvider, Ct);
         var fetchesWithoutPermission = _issuer.DiscoveryFetches + _issuer.JwksFetches;
-        var withPermission = await allowing.VerifyAsync(_issuer.Mint("sub-1"), Ct);
+        var withPermission = await allowing.VerifyAsync(_issuer.Mint("sub-1"), AnyProvider, Ct);
 
         withoutPermission.Refusal.ShouldBe(IdTokenRefusal.Unreachable);
         fetchesWithoutPermission.ShouldBe(0);
@@ -242,7 +244,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         using var verifier = Verifier(Google(authority: TestOidcIssuer.Authority + "/missing"), log);
         var token = _issuer.Mint("sub-1");
 
-        var verification = await verifier.VerifyAsync(token, Ct);
+        var verification = await verifier.VerifyAsync(token, AnyProvider, Ct);
 
         verification.ShouldBe(IdentityVerification.Refused(IdTokenRefusal.Unreachable));
         var line = log.Lines.ShouldHaveSingleItem();
@@ -256,9 +258,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         using var verifier = Verifier(Google(authority: TestOidcIssuer.Authority + "/missing"));
         var token = _issuer.Mint("sub-1");
 
-        var attempts = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => verifier.VerifyAsync(token, Ct).AsTask()));
+        var attempts = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => verifier.VerifyAsync(token, AnyProvider, Ct).AsTask()));
         _clock.Advance(OidcMetadata.FirstBackoff - TimeSpan.FromSeconds(1));
-        var insideTheBackoff = await verifier.VerifyAsync(token, Ct);
+        var insideTheBackoff = await verifier.VerifyAsync(token, AnyProvider, Ct);
 
         attempts.ShouldAllBe(attempt => attempt.Refusal == IdTokenRefusal.Unreachable);
         insideTheBackoff.Refusal.ShouldBe(IdTokenRefusal.Unreachable);
@@ -272,7 +274,7 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         var token = _issuer.Mint("sub-1");
         var delays = new List<int>();
 
-        await verifier.VerifyAsync(token, Ct);
+        await verifier.VerifyAsync(token, AnyProvider, Ct);
         for (var failure = 0; failure < 6; failure++)
         {
             var before = _issuer.Requests;
@@ -281,13 +283,33 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
             {
                 _clock.Advance(TimeSpan.FromSeconds(1));
                 waited++;
-                await verifier.VerifyAsync(_issuer.Mint("sub-1"), Ct);
+                await verifier.VerifyAsync(_issuer.Mint("sub-1"), AnyProvider, Ct);
             }
 
             delays.Add(waited);
         }
 
         delays.ShouldBe([30, 60, 120, 240, 300, 300]);
+    }
+
+    [Fact]
+    public async Task A_provider_the_caller_does_not_list_is_refused_before_anything_is_fetched()
+    {
+        using var verifier = Verifier(Google());
+        var asked = new List<string>();
+
+        var verification = await verifier.VerifyAsync(
+            _issuer.Mint("sub-1"),
+            provider =>
+            {
+                asked.Add(provider);
+                return false;
+            },
+            Ct);
+
+        verification.ShouldBe(IdentityVerification.Refused(IdTokenRefusal.NotListed));
+        asked.ShouldBe(["google"]);
+        _issuer.Requests.ShouldBe(0);
     }
 
     [Fact]

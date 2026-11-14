@@ -12,7 +12,12 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// <para>
 /// <b>Every refused subject token is one <c>invalid_request</c></b> (RFC 8693 §2.2.2), whatever the verifier found and
 /// also when the descriptor does not list the token's provider (S2 D10): the provider must be one this deployment
-/// configured <em>and</em> the applied descriptor lists.
+/// configured <em>and</em> the applied descriptor lists. That check is the verifier's first, before any key or discovery
+/// document is fetched (spec §5.2 step 1), so a provider the descriptor dropped costs an anonymous caller no outbound
+/// request.
+/// </para>
+/// <para>
+/// <b>A parameter sent empty is a parameter not sent</b> (RFC 6749 §3.2): <c>audience=</c> asks for no audience.
 /// </para>
 /// <para>
 /// <b>The sign-up policy is decided here and applied by the store</b>: the store creates an account only when the
@@ -59,9 +64,10 @@ internal sealed class ExchangeGrant(
             return refused;
         }
 
-        var verification = await verifier.VerifyAsync(form[SubjectToken]!, ct).ConfigureAwait(false);
         var policy = signIn.Policy;
-        if (verification is not { Identity: { } identity, SubjectTokenId: { } tokenId } || !signIn.Admits(policy, identity.Provider))
+        var verification = await verifier.VerifyAsync(form[SubjectToken]!, provider => signIn.Admits(policy, provider), ct)
+            .ConfigureAwait(false);
+        if (verification is not { Identity: { } identity, SubjectTokenId: { } tokenId })
         {
             return TokenProblems.SubjectTokenRefused();
         }
@@ -74,7 +80,7 @@ internal sealed class ExchangeGrant(
 
     private static IResult? ParameterRefusal(TokenForm form)
     {
-        if (form.Has("audience") || form.Has("resource"))
+        if (form["audience"] is not null || form["resource"] is not null)
         {
             return TokenProblems.InvalidTarget();
         }
@@ -82,7 +88,7 @@ internal sealed class ExchangeGrant(
         var requested = form[RequestedTokenType];
         return form[SubjectToken] is null
             || !string.Equals(form[SubjectTokenType], IdTokenType, StringComparison.Ordinal)
-            || (form.Has(RequestedTokenType) && !string.Equals(requested, TokenIssuance.AccessTokenType, StringComparison.Ordinal))
+            || (requested is not null && !string.Equals(requested, TokenIssuance.AccessTokenType, StringComparison.Ordinal))
                 ? TokenProblems.MalformedExchange()
                 : null;
     }

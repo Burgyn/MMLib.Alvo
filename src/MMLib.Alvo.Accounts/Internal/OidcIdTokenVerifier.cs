@@ -10,7 +10,7 @@ namespace MMLib.Alvo.Accounts.Internal;
 
 /// <summary>
 /// Verifies an ID token per OpenID Connect Core §3.1.3.7 (spec §5.2 steps 1–3): the provider is found by the token's
-/// exact <c>iss</c>; the signature by the key its <c>kid</c> names among the provider's published keys, under an
+/// exact <c>iss</c>, and must be one the caller lists before anything is fetched; the signature by the key its <c>kid</c> names among the provider's published keys, under an
 /// algorithm the provider signs with; <c>aud</c> must name a configured client id; <c>exp</c>/<c>nbf</c> hold within two
 /// minutes and <c>iat</c> is at most five minutes old, on the injected clock (S2 D5).
 /// </summary>
@@ -78,8 +78,9 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
     }
 
     /// <inheritdoc/>
-    public async ValueTask<IdentityVerification> VerifyAsync(string subjectToken, CancellationToken ct)
+    public async ValueTask<IdentityVerification> VerifyAsync(string subjectToken, Func<string, bool> listed, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(listed);
         if (Read(subjectToken) is not { } token)
         {
             return IdentityVerification.Refused(IdTokenRefusal.Malformed);
@@ -90,7 +91,9 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
             return IdentityVerification.Refused(IdTokenRefusal.UnknownIssuer);
         }
 
-        return await VerifyAsync(subjectToken, token, provider, ct).ConfigureAwait(false);
+        return listed(provider.Name)
+            ? await VerifyAsync(subjectToken, token, provider, ct).ConfigureAwait(false)
+            : IdentityVerification.Refused(IdTokenRefusal.NotListed);
     }
 
     private async ValueTask<IdentityVerification> VerifyAsync(

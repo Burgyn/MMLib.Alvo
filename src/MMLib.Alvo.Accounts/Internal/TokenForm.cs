@@ -30,15 +30,14 @@ internal sealed class TokenForm
 
     private TokenForm(Dictionary<string, StringValues> values) => _values = values;
 
-    /// <summary>The value of <paramref name="name"/>, or <see langword="null"/> when it is absent or empty.</summary>
+    /// <summary>
+    /// The value of <paramref name="name"/>, or <see langword="null"/> when it is absent or empty — RFC 6749 §3.2: "parameters
+    /// sent without a value MUST be treated as if they were omitted from the request".
+    /// </summary>
     /// <param name="name">The parameter's name.</param>
     internal string? this[string name] => _values.TryGetValue(name, out var value) && value.Count == 1 && !string.IsNullOrEmpty(value[0])
         ? value[0]
         : null;
-
-    /// <summary>Whether <paramref name="name"/> was sent at all, empty or not.</summary>
-    /// <param name="name">The parameter's name.</param>
-    internal bool Has(string name) => _values.ContainsKey(name);
 
     /// <summary>The form <paramref name="request"/> carries, or <see langword="null"/> when it is not a well-formed one.</summary>
     /// <param name="request">The token request.</param>
