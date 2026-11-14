@@ -89,6 +89,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     [InlineData("not a JWT", nameof(IdTokenRefusal.Malformed))]
     [InlineData("three parts of garbage", nameof(IdTokenRefusal.Malformed))]
     [InlineData("no sub", nameof(IdTokenRefusal.Malformed))]
+    [InlineData("iss null", nameof(IdTokenRefusal.Malformed))]
+    [InlineData("iss empty", nameof(IdTokenRefusal.Malformed))]
+    [InlineData("no iss", nameof(IdTokenRefusal.Malformed))]
     public async Task An_id_token_is_refused(string defect, string expected)
     {
         using var verifier = Verifier(Google());
@@ -108,6 +111,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
             "iat 2 min + 1 s ahead" => _issuer.Mint("sub-1", issuedAt: _now.AddMinutes(2).AddSeconds(1)),
             "not a JWT" => "not-a-token",
             "three parts of garbage" => "e30.e30.e30",
+            "iss null" => IssuerDefects.Null,
+            "iss empty" => IssuerDefects.Empty,
+            "no iss" => IssuerDefects.Missing,
             _ => _issuer.Mint(string.Empty),
         };
 

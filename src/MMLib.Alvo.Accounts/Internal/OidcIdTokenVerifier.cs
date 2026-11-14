@@ -130,6 +130,11 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
         return TimeRefusal(token) is { } late ? IdentityVerification.Refused(late) : Verified(provider, token, subjectToken);
     }
 
+    /// <summary>
+    /// The token as a signed JWT naming an algorithm and an issuer, or <see langword="null"/> (malformed). IdentityModel
+    /// reads a JSON-<c>null</c> <c>iss</c> as a <see langword="null"/> <see cref="JsonWebToken.Issuer"/> and an absent
+    /// one as empty; neither may reach the issuer lookup.
+    /// </summary>
     private JsonWebToken? Read(string subjectToken)
     {
         if (string.IsNullOrEmpty(subjectToken) || !_handler.CanReadToken(subjectToken))
@@ -140,7 +145,7 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
         try
         {
             var token = _handler.ReadJsonWebToken(subjectToken);
-            return token.IsEncrypted || string.IsNullOrEmpty(token.Alg) ? null : token;
+            return token.IsEncrypted || string.IsNullOrEmpty(token.Alg) || string.IsNullOrEmpty(token.Issuer) ? null : token;
         }
         catch (ArgumentException)
         {

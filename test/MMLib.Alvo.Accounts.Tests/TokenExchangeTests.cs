@@ -108,6 +108,27 @@ public sealed class TokenExchangeTests
         problem["error_description"]!.GetValue<string>().ShouldBe(TokenProblems.SubjectTokenDescription);
     }
 
+    [Theory]
+    [InlineData("iss null")]
+    [InlineData("iss empty")]
+    [InlineData("no iss")]
+    public async Task A_subject_token_without_an_issuer_is_invalid_request_not_a_500(string defect)
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine);
+        var subjectToken = defect switch
+        {
+            "iss null" => IssuerDefects.Null,
+            "iss empty" => IssuerDefects.Empty,
+            _ => IssuerDefects.Missing,
+        };
+
+        using var response = await world.ExchangeAsync(subjectToken);
+
+        var problem = await RefusalAsync(response, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_request");
+        problem["error_description"]!.GetValue<string>().ShouldBe(TokenProblems.SubjectTokenDescription);
+        (await world.CountAsync("_auth_sessions")).ShouldBe(0);
+    }
+
     [Fact]
     public async Task A_provider_the_descriptor_does_not_list_is_invalid_request()
     {
