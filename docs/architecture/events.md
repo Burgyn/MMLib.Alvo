@@ -858,7 +858,10 @@ ordinal order. An author-declared template may render `{{@user.roles}}`; only th
 **Tenant roles travel in the same claim, and an after-hook condition can admit one.** When the writer held tenant roles
 in the event's tenant, `authclaims` also carries `"tenantRoles":[...]` (written only when non-empty, so no existing
 envelope moves), and `EnvelopeReading.CallerOf` rebuilds them for the condition beside `roles`, only when the envelope
-names both an identity and a tenant, and never a built-in. The condition's entity decides whether they fold, by the
+names both an identity and a tenant, and never a built-in. Only the ones the applied descriptor still lets a membership
+carry count: recorded ∩ declared ∩ `tenancy.selfService.assignableRoles` (`EventActor.AssignableTenantRoles`, accounts S3
+plan D10a), so a role dropped from `assignableRoles` stops admitting old envelopes on the apply that drops it, and
+without `selfService` no recorded tenant role counts at all. The condition's entity decides whether they fold, by the
 same path rule the request path uses (`relation-rules.md`, *Binding*): on a `tenancy: scoped` entity
 `'dispatcher' in @user.roles` is true for a tenant `dispatcher`; on a global entity it is not. That rule governs
 *authorization decisions*, and an after-hook is not one. So a scoped entity's after-hook whose condition admits a tenant
@@ -1035,6 +1038,15 @@ host stopping records nothing; a delivery reclaimed past its policy's last attem
 running; an envelope gone from the outbox is dead `event-missing`; an envelope whose `tenantid` (or, for `EventActor`,
 `authid`) does not parse is dead `event-unreadable` — never run as a tenantless system or an anonymous caller. Every
 other failure records the exception's **type name**, never its message, and `DeliveryRunFailed` logs the type only.
+
+**An event actor's tenant roles are the ones its membership still holds.** `EventActor` starts from the recorded tenant
+roles still assignable (above); for a person (`authtype` `user`) with a tenant and tenant roles, the runner then reads the
+person's membership in the event's tenant once through `IMembershipResolution`, inside the attempt, and keeps the
+intersection: a member removed since the event runs with no tenant role, a demoted one with the recorded roles still
+held, and a role gained since is never added. Project roles stay as at the event (E8). An API-key actor, a system run
+and an actor with no tenant role read nothing; a failed read fails the attempt, which is retried. Accounts S3 plan D10b:
+the anti-goal *roles that survive their reason*, at one registry read per such delivery, only in a `selfService`
+project.
 
 **Timeouts are enforced, not requested.** The runner awaits the handler with `WaitAsync(Timeout)` (default 30 s, at most
 1 h — a longer one refuses the start, because the lease would overflow), cancels its token and waits at most
