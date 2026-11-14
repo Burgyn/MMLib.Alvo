@@ -19,4 +19,11 @@ public sealed class AlvoRateLimitOptions
     /// minute. Default 10.
     /// </summary>
     public int Create { get; set; } = 10;
+
+    /// <summary>
+    /// Gets or sets the invitations budget, per minute, charged on every invitation route on a host that maps the sign-in
+    /// routes (<c>{prefix}/tenants/{id}/invitations</c>, <c>{prefix}/invitations/preview</c> and
+    /// <c>{prefix}/invitations/accept</c>). Default 20.
+    /// </summary>
+    public int Invitations { get; set; } = 20;
 }

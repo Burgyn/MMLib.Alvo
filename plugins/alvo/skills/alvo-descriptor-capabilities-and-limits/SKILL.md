@@ -18,7 +18,7 @@ These are declared by the schema and accepted, and are not honoured, or only in 
 `entity.realtime`, and a descriptor that sets them looks as if it works:
 
 <!-- gen:warned -->
-`dynamicEntities` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `tenancy.selfService.invitations` `entity.realtime`
+`dynamicEntities` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `entity.realtime`
 <!-- /gen:warned -->
 
 **Declarative actions.** `webhook`, `email`, `function` and `entity.update` run from after-hooks and `automation` rules,

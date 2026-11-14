@@ -108,9 +108,6 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// (<c>DescriptorBootPlan</c>), so this table stays a fact about the build, not about one host's composition. <b>Warned, not refused</b>:
 /// nothing is wrongly <em>permitted</em> by either absence — a dropped entity serves nothing, a missing provider
 /// admits nobody — which is the line between this table and <see cref="UnhonouredFeatures"/>.
-/// <c>tenancy.selfService.invitations</c> is the same limb one row (plan D11): the key is accepted now so the
-/// <c>selfService</c> block is frozen once, and until invitations ship (S4) an owner simply has no way to invite —
-/// nobody is admitted by the absence.
 /// </para>
 /// <para>
 /// <b>Two entries are now <em>partially</em> honoured, and the wording carries that rather than the entry
@@ -176,10 +173,6 @@ internal static partial class UnhonouredSubsystems
             "an entity declared with 'storage: dynamic' is not created: this build has no dynamic schema-registry "
             + "driver (F7, #41), so the entity gets no table, no Data API route and no records, and the apply "
             + "drops it without refusing it"),
-        new(
-            "tenancy.selfService.invitations",
-            descriptor => descriptor.Tenancy?.SelfService?.Invitations == true,
-            "owners cannot invite anyone in this build; invitations arrive with S4 of the accounts initiative"),
     ];
 
     /// <summary>
