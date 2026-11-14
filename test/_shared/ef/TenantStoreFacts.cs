@@ -411,7 +411,7 @@ public abstract class TenantStoreFacts : IAsyncDisposable
     {
         var identity = new VerifiedIdentity("google", "sub-" + Guid.NewGuid().ToString("N"), "ada@gmail.com", true, name, picture);
         var request = new SignInRequest(
-            identity, MayCreate: true, Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), _now, _now.AddDays(180));
+            identity, MayCreate: true, Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), _now, _now.AddDays(180), null);
         var outcome = await services.GetRequiredService<IAccountStore>().SignInAsync(request, Ct);
         return outcome.Account!.Value;
     }

@@ -38,6 +38,9 @@ internal sealed class TenantTables(string schemaPrefix)
     /// <summary>The stored <c>kind</c> of a shared tenant.</summary>
     internal const string SharedKind = "shared";
 
+    /// <summary>A personal tenant's name when its account has no display name (D6).</summary>
+    internal const string PersonalTenantName = "Personal";
+
     /// <summary>The columns a membership is read from, in <see cref="ReadMembership"/>'s order, over <c>m</c> ⨝ <c>t</c>.</summary>
     private const string MembershipColumns = "t.id, t.kind, t.name, m.roles, m.is_owner, m.joined_at";
 
@@ -136,6 +139,47 @@ internal sealed class TenantTables(string schemaPrefix)
          WHERE m.user_id = @user_id AND t.personal_owner = @user_id
         """;
 
+    /// <summary>
+    /// Gets the statement ensuring an account's personal tenant (D6): named after the account's display name, else
+    /// <c>Personal</c>; a tenant it already has — committed, or being inserted by a concurrent sign-in, which this waits
+    /// for on PostgreSQL — wins, and this inserts nothing. No row when there is no such account.
+    /// </summary>
+    internal string EnsurePersonalTenantSql =>
+        $"""
+        INSERT INTO {Tenants} (id, kind, name, created_by, created_at, personal_owner, version)
+        SELECT @tenant_id, '{PersonalKind}', COALESCE(NULLIF(a.display_name, ''), '{PersonalTenantName}'), a.id, @now, a.id, 0
+          FROM {Accounts} a WHERE a.id = @account_id
+        ON CONFLICT (personal_owner) DO NOTHING
+        """;
+
+    /// <summary>
+    /// Gets the statement ensuring the owner membership of an account's personal tenant — whichever tenant stands after
+    /// <see cref="EnsurePersonalTenantSql"/> — with no stored roles: a personal tenant's roles are the descriptor's (D5).
+    /// </summary>
+    internal string EnsurePersonalMemberSql =>
+        $"""
+        INSERT INTO {Members} (tenant_id, user_id, roles, is_owner, joined_at)
+        SELECT t.id, t.personal_owner, '[]', 1, @now FROM {Tenants} t WHERE t.personal_owner = @account_id
+        ON CONFLICT (tenant_id, user_id) DO NOTHING
+        """;
+
+    /// <summary>
+    /// The statement of one caller read (D4): the live session of <paramref name="auth"/>'s <see cref="AuthTables.LiveSessionSql"/>
+    /// with the account's membership left-joined on — in <c>@tenant_id</c>, or in its personal tenant when
+    /// <paramref name="personal"/>. One row while the session lives, its membership columns <c>NULL</c> when the account is
+    /// no member; no row once it is dead.
+    /// </summary>
+    /// <param name="auth">The account tables of the same prefix.</param>
+    /// <param name="personal">Whether the membership is the personal tenant's rather than <c>@tenant_id</c>'s.</param>
+    internal string CallerSql(AuthTables auth, bool personal) =>
+        $"""
+        SELECT {MembershipColumns}
+          FROM {auth.LiveSessionFrom}
+          LEFT JOIN ({Members} m JOIN {Tenants} t ON t.id = m.tenant_id)
+            ON m.user_id = s.account_id AND {(personal ? "t.personal_owner = s.account_id" : "t.id = @tenant_id")}
+         WHERE {AuthTables.LiveSessionWhere}
+        """;
+
     /// <summary>Gets the statement reading every tenant's id, by creation and then id.</summary>
     internal string TenantIdsSql => $"SELECT id FROM {Tenants} ORDER BY created_at, id";
 
@@ -184,8 +228,8 @@ internal sealed class TenantTables(string schemaPrefix)
     internal static string RolesText(IReadOnlyList<string> roles) => JsonSerializer.Serialize(roles);
 
     /// <summary>
-    /// Maps a row of <see cref="MembershipColumns"/>, read from <paramref name="first"/> on — the store's reads and, from
-    /// S3 Task 5, the account store's one caller read share it.
+    /// Maps a row of <see cref="MembershipColumns"/>, read from <paramref name="first"/> on — the store's reads and the
+    /// account store's one caller read (<see cref="CallerSql"/>) share it.
     /// </summary>
     /// <param name="reader">A reader positioned on a row.</param>
     /// <param name="first">The ordinal of the tenant id.</param>

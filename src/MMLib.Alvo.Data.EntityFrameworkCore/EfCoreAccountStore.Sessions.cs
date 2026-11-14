@@ -15,6 +15,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// so the second reads the rotated token outright.
 /// </para>
 /// <para>
+/// <b>Every answer but a refusal commits.</b> A rotation and a reuse write their own rows; a replay writes only the personal
+/// tenant it may ensure (S3 plan D6), and nothing when it ensures none. A refusal rolls back, so a rotation whose session
+/// died meanwhile leaves no child.
+/// </para>
+/// <para>
 /// <b>A zero grace window is strict reuse detection</b>: any second presentation revokes the session, even at the
 /// rotation's own instant. The window is otherwise inclusive — 10 s after the rotation still answers the child.
 /// </para>
@@ -30,7 +35,7 @@ internal sealed partial class EfCoreAccountStore
 
         return InTransactionAsync(
             (connection, transaction, token) => RefreshedAsync(connection, transaction, request, token),
-            outcome => outcome.Status is RefreshStatus.Rotated or RefreshStatus.Reused,
+            outcome => outcome.Status is not RefreshStatus.Refused,
             ct);
     }
 
@@ -56,6 +61,18 @@ internal sealed partial class EfCoreAccountStore
             ct);
 
     private async Task<RefreshOutcome> RefreshedAsync(
+        DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
+    {
+        var outcome = await AnsweredAsync(connection, transaction, request, ct).ConfigureAwait(false);
+        if (outcome is { Status: RefreshStatus.Rotated or RefreshStatus.Replayed, Account: { } account })
+        {
+            await PersonalTenantEnsuredAsync(connection, transaction, account, request.PersonalTenant, request.Now, ct).ConfigureAwait(false);
+        }
+
+        return outcome;
+    }
+
+    private async Task<RefreshOutcome> AnsweredAsync(
         DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
     {
         var token = await TokenAsync(connection, transaction, request.TokenId, ct).ConfigureAwait(false);

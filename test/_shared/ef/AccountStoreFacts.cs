@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Tenants;
 using Shouldly;
 using System.Data.Common;
 using System.Globalization;
@@ -14,8 +15,9 @@ using Xunit;
 namespace MMLib.Alvo.Tests.Ef;
 
 /// <summary>
-/// The account store — accounts, identities, sessions, refresh tokens and keys — the same facts on SQLite and on
-/// PostgreSQL (accounts spec §5.1, §5.5, §5.6, D6; S2 plan D2, D8, D12). Every instant and id is the fact's own.
+/// The account store — accounts, identities, sessions, refresh tokens and keys, the personal tenant a sign-in or a refresh
+/// ensures and the one caller read — the same facts on SQLite and on PostgreSQL (accounts spec §5.1, §5.5, §5.6, §5.7,
+/// §6.5, D6; S2 plan D2, D8, D12; S3 plan D4, D6). Every instant and id is the fact's own.
 /// </summary>
 public abstract class AccountStoreFacts : IAsyncDisposable
 {
@@ -74,7 +76,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         account.Email.ShouldBe("ada@gmail.com");
         account.EmailTrusted.ShouldBeTrue();
         account.CreatedAt.ShouldBe(_now);
-        (await store.IsSessionLiveAsync(account.Id, request.SessionId, _now, Ct)).ShouldBeTrue();
+        (await IsLiveAsync(store, account.Id, request.SessionId, _now)).ShouldBeTrue();
         (await CountAsync(services, AlvoFrameworkTables.AuthAccountsSuffix)).ShouldBe(1);
         (await CountAsync(services, AlvoFrameworkTables.AuthIdentitiesSuffix)).ShouldBe(1);
         (await CountAsync(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)).ShouldBe(1);
@@ -175,24 +177,211 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
             outcomes.Select(outcome => outcome.Status).ShouldBe([SignInStatus.Created, SignInStatus.SignedIn], ignoreOrder: true);
             outcomes[0].Account.ShouldBe(outcomes[1].Account);
-            (await store.IsSessionLiveAsync(outcomes[0].Account!.Value, first.SessionId, _now, Ct)).ShouldBeTrue();
-            (await store.IsSessionLiveAsync(outcomes[0].Account!.Value, second.SessionId, _now, Ct)).ShouldBeTrue();
+            (await IsLiveAsync(store, outcomes[0].Account!.Value, first.SessionId, _now)).ShouldBeTrue();
+            (await IsLiveAsync(store, outcomes[0].Account!.Value, second.SessionId, _now)).ShouldBeTrue();
         }
 
         (await CountAsync(services, AlvoFrameworkTables.AuthAccountsSuffix)).ShouldBe(Iterations);
     }
 
     [Fact]
-    public async Task A_session_is_dead_after_its_expiry_and_for_another_account()
+    public async Task A_first_sign_in_with_a_personal_tenant_creates_it_with_its_owner_in_one_transaction()
+    {
+        var (store, services) = await StoreAsync();
+        var request = PersonalSignIn(Identity("sub-1", name: "Ada"));
+
+        var outcome = await store.SignInAsync(request, Ct);
+
+        outcome.Status.ShouldBe(SignInStatus.Created);
+        var personal = (await Tenants(services).FindMembershipAsync(outcome.Account!.Value, null, Ct)).ShouldNotBeNull();
+        personal.Tenant.ShouldBe(request.PersonalTenant!.Id);
+        personal.Kind.ShouldBe(TenantKind.Personal);
+        personal.IsOwner.ShouldBeTrue();
+        personal.Roles.ShouldBeEmpty();
+        personal.Name.ShouldBe("Ada");
+        personal.JoinedAt.ShouldBe(_now);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1);
+        (await CountAsync(services, AlvoFrameworkTables.TenantMembersSuffix)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_personal_tenant_of_a_nameless_account_is_called_personal()
+    {
+        var (store, services) = await StoreAsync();
+
+        var outcome = await store.SignInAsync(PersonalSignIn(Identity("sub-1", name: null)), Ct);
+
+        (await Tenants(services).FindMembershipAsync(outcome.Account!.Value, null, Ct)).ShouldNotBeNull().Name.ShouldBe("Personal");
+    }
+
+    [Fact]
+    public async Task A_refused_sign_up_creates_no_tenant()
+    {
+        var (store, services) = await StoreAsync();
+
+        var refused = await store.SignInAsync(PersonalSignIn(Identity("sub-1")) with { MayCreate = false }, Ct);
+        var first = PersonalSignIn(Identity("sub-2"));
+        await store.SignInAsync(first, Ct);
+        var replayed = await store.SignInAsync(PersonalSignIn(Identity("sub-3")) with { SubjectTokenId = first.SubjectTokenId }, Ct);
+
+        refused.Status.ShouldBe(SignInStatus.SignUpRefused);
+        replayed.Status.ShouldBe(SignInStatus.SubjectTokenReplayed);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1, "only sub-2's");
+        (await CountAsync(services, AlvoFrameworkTables.TenantMembersSuffix)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_disabled_account_s_sign_in_creates_no_tenant()
+    {
+        var (store, services) = await StoreAsync();
+        var account = (await store.SignInAsync(SignIn(Identity("sub-1")), Ct)).Account!.Value;
+        await store.SetDisabledAsync(account, disabled: true, _now, Ct);
+
+        var outcome = await store.SignInAsync(PersonalSignIn(Identity("sub-1")), Ct);
+
+        outcome.Status.ShouldBe(SignInStatus.Disabled);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_later_sign_in_creates_a_missing_personal_tenant_once()
+    {
+        var (store, services) = await StoreAsync();
+        var account = (await store.SignInAsync(SignIn(Identity("sub-1", name: "Ada")), Ct)).Account!.Value;
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(0, "no personal tenant was asked for");
+        await store.SetDisplayNameAsync(account, "Countess", Ct);
+
+        var second = PersonalSignIn(Identity("sub-1"));
+        await store.SignInAsync(second, Ct);
+        await store.SignInAsync(PersonalSignIn(Identity("sub-1")), Ct);
+
+        var personal = (await Tenants(services).FindMembershipAsync(account, null, Ct)).ShouldNotBeNull();
+        personal.Tenant.ShouldBe(second.PersonalTenant!.Id, "the first sign-in that asked created it; the next kept it");
+        personal.Name.ShouldBe("Countess", "named after the account's display name at creation");
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1);
+        (await CountAsync(services, AlvoFrameworkTables.TenantMembersSuffix)).ShouldBe(1);
+    }
+
+    /// <summary>Review Focus 4: two devices sign a new person in at once at level 2.</summary>
+    [Fact]
+    public async Task Two_concurrent_first_sign_ins_create_one_personal_tenant()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var subject = "race-" + iteration.ToString(CultureInfo.InvariantCulture);
+            var first = PersonalSignIn(Identity(subject));
+            var second = PersonalSignIn(Identity(subject));
+
+            var outcomes = await Task.WhenAll(store.SignInAsync(first, Ct), store.SignInAsync(second, Ct));
+
+            outcomes.Select(outcome => outcome.Status).ShouldBe([SignInStatus.Created, SignInStatus.SignedIn], ignoreOrder: true);
+            outcomes[0].Account.ShouldBe(outcomes[1].Account);
+            var personal = (await Tenants(services).FindMembershipAsync(outcomes[0].Account!.Value, null, Ct)).ShouldNotBeNull();
+            personal.Tenant.ShouldBeOneOf(first.PersonalTenant!.Id, second.PersonalTenant!.Id);
+            personal.IsOwner.ShouldBeTrue();
+        }
+
+        (await CountAsync(services, AlvoFrameworkTables.AuthAccountsSuffix)).ShouldBe(Iterations);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(Iterations);
+        (await CountAsync(services, AlvoFrameworkTables.TenantMembersSuffix)).ShouldBe(Iterations);
+    }
+
+    [Fact]
+    public async Task A_refresh_creates_a_missing_personal_tenant_and_a_refused_one_does_not()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var personal = new PersonalTenantRequest(new TenantId(Guid.NewGuid()));
+        var refused = await store.RefreshAsync(Refresh(Guid.NewGuid(), _now.AddMinutes(1)) with { PersonalTenant = personal }, Ct);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(0);
+
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(1)) with { PersonalTenant = personal };
+        var outcome = await store.RefreshAsync(rotated, Ct);
+        var replayed = await store.RefreshAsync(
+            Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(1)) with { PersonalTenant = new(new TenantId(Guid.NewGuid())) }, Ct);
+
+        refused.Status.ShouldBe(RefreshStatus.Refused);
+        outcome.Status.ShouldBe(RefreshStatus.Rotated);
+        replayed.Status.ShouldBe(RefreshStatus.Replayed);
+        (await Tenants(services).FindMembershipAsync(account, null, Ct)).ShouldNotBeNull().Tenant.ShouldBe(personal.Id);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1);
+        (await CountAsync(services, AlvoFrameworkTables.TenantMembersSuffix)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_replayed_refresh_creates_a_missing_personal_tenant()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(1));
+        await store.RefreshAsync(rotated, Ct);
+        var personal = new PersonalTenantRequest(new TenantId(Guid.NewGuid()));
+
+        var replayed = await store.RefreshAsync(Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(1)) with { PersonalTenant = personal }, Ct);
+
+        replayed.Status.ShouldBe(RefreshStatus.Replayed);
+        (await Tenants(services).FindMembershipAsync(account, null, Ct)).ShouldNotBeNull().Tenant.ShouldBe(personal.Id);
+    }
+
+    [Fact]
+    public async Task The_caller_read_answers_the_session_and_the_named_membership()
+    {
+        var (store, services) = await StoreAsync();
+        var signIn = PersonalSignIn(Identity("sub-1"));
+        var account = (await store.SignInAsync(signIn, Ct)).Account!.Value;
+        var (other, _) = await SignedInAsync(store);
+        var shared = new TenantId(Guid.NewGuid());
+        var foreign = new TenantId(Guid.NewGuid());
+        await Tenants(services).CreateSharedAsync(new CreateTenantRequest(shared, "Acme", account, ["dispatcher"], 5, _now), Ct);
+        await Tenants(services).CreateSharedAsync(new CreateTenantRequest(foreign, "Other", other, ["dispatcher"], 5, _now), Ct);
+
+        var named = await ReadAsync(store, account, signIn.SessionId, _now, new MembershipQuery(shared));
+        var another = await ReadAsync(store, account, signIn.SessionId, _now, new MembershipQuery(foreign));
+        var unknown = await ReadAsync(store, account, signIn.SessionId, _now, new MembershipQuery(new TenantId(Guid.NewGuid())));
+        var personal = await ReadAsync(store, account, signIn.SessionId, _now, new MembershipQuery(null));
+        var none = await ReadAsync(store, account, signIn.SessionId, _now, null);
+        var dead = await ReadAsync(store, account, signIn.SessionId, signIn.SessionExpiresAt, new MembershipQuery(shared));
+
+        named.Live.ShouldBeTrue();
+        var membership = named.Membership.ShouldNotBeNull();
+        (membership.Tenant, membership.Kind, membership.Name, membership.IsOwner).ShouldBe((shared, TenantKind.Shared, "Acme", true));
+        membership.Roles.ShouldBe(["dispatcher"]);
+        another.ShouldBe(new CallerRead(true, null));
+        unknown.ShouldBe(new CallerRead(true, null));
+        personal.Live.ShouldBeTrue();
+        personal.Membership.ShouldNotBeNull().Tenant.ShouldBe(signIn.PersonalTenant!.Id);
+        none.ShouldBe(new CallerRead(true, null));
+        dead.ShouldBe(new CallerRead(false, null), "a dead session answers no membership");
+    }
+
+    [Fact]
+    public async Task The_caller_read_finds_no_personal_tenant_an_account_does_not_have()
+    {
+        var (store, _) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var (other, otherSession) = await SignedInAsync(store);
+
+        var personal = await ReadAsync(store, account, session.SessionId, _now, new MembershipQuery(null));
+        var crossed = await ReadAsync(store, other, session.SessionId, _now, new MembershipQuery(null));
+
+        personal.ShouldBe(new CallerRead(true, null));
+        crossed.ShouldBe(new CallerRead(false, null), "a session read under another account is dead");
+        (await IsLiveAsync(store, other, otherSession.SessionId, _now)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_caller_read_is_dead_after_the_session_s_expiry_and_for_another_account()
     {
         var (store, _) = await StoreAsync();
         var request = SignIn(Identity("sub-1"));
         var account = (await store.SignInAsync(request, Ct)).Account!.Value;
 
-        (await store.IsSessionLiveAsync(account, request.SessionId, request.SessionExpiresAt.AddTicks(-1), Ct)).ShouldBeTrue();
-        (await store.IsSessionLiveAsync(account, request.SessionId, request.SessionExpiresAt, Ct)).ShouldBeFalse();
-        (await store.IsSessionLiveAsync(UserId.New(), request.SessionId, _now, Ct)).ShouldBeFalse();
-        (await store.IsSessionLiveAsync(account, Guid.NewGuid(), _now, Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, request.SessionId, request.SessionExpiresAt.AddTicks(-1))).ShouldBeTrue();
+        (await IsLiveAsync(store, account, request.SessionId, request.SessionExpiresAt)).ShouldBeFalse();
+        (await IsLiveAsync(store, UserId.New(), request.SessionId, _now)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, Guid.NewGuid(), _now)).ShouldBeFalse();
     }
 
     [Fact]
@@ -210,7 +399,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
         outcome.ShouldBe(new RefreshOutcome(RefreshStatus.Rotated, refresh.ChildId, account, session.SessionId, "google"));
         (await ChildrenAsync(services, session.RefreshTokenId)).ShouldBe(1);
-        (await store.IsSessionLiveAsync(account, session.SessionId, refresh.Now, Ct)).ShouldBeTrue();
+        (await IsLiveAsync(store, account, session.SessionId, refresh.Now)).ShouldBeTrue();
     }
 
     [Fact]
@@ -241,7 +430,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
         reuse.Status.ShouldBe(RefreshStatus.Reused);
         (await store.RefreshAsync(Refresh(rotated.ChildId, rotated.Now.AddSeconds(12)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
-        (await store.IsSessionLiveAsync(account, session.SessionId, rotated.Now.AddSeconds(12), Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, session.SessionId, rotated.Now.AddSeconds(12))).ShouldBeFalse();
     }
 
     [Fact]
@@ -269,7 +458,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         var reuse = await store.RefreshAsync(rotated with { ChildId = Guid.NewGuid() }, Ct);
 
         reuse.Status.ShouldBe(RefreshStatus.Reused, "even at the rotation's own instant");
-        (await store.IsSessionLiveAsync(account, session.SessionId, rotated.Now, Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, session.SessionId, rotated.Now)).ShouldBeFalse();
     }
 
     [Fact]
@@ -290,7 +479,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
             outcomes[0].ChildId.ShouldNotBeNull();
             outcomes[1].ChildId.ShouldBe(outcomes[0].ChildId);
             (await ChildrenAsync(services, session.RefreshTokenId)).ShouldBe(1);
-            (await store.IsSessionLiveAsync(account, session.SessionId, at, Ct)).ShouldBeTrue();
+            (await IsLiveAsync(store, account, session.SessionId, at)).ShouldBeTrue();
         }
     }
 
@@ -328,7 +517,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await store.SetDisabledAsync(account, disabled: true, _now.AddMinutes(1), Ct)).ShouldBeTrue();
 
         (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(2)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
-        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(2), Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, session.SessionId, _now.AddMinutes(2))).ShouldBeFalse();
         (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Disabled);
         (await store.SignInAsync(SignIn(session.Identity), Ct)).ShouldBe(new SignInOutcome(SignInStatus.Disabled, null));
         (await CountAsync(services, AlvoFrameworkTables.AuthSessionsSuffix)).ShouldBe(1, "a refused sign-in starts nothing");
@@ -344,11 +533,11 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
         (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(2), Ct)).ShouldBeTrue();
 
-        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(3), Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, session.SessionId, _now.AddMinutes(3))).ShouldBeFalse();
         (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(3)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
         var again = SignIn(session.Identity);
         (await store.SignInAsync(again, Ct)).ShouldBe(new SignInOutcome(SignInStatus.SignedIn, account));
-        (await store.IsSessionLiveAsync(account, again.SessionId, _now, Ct)).ShouldBeTrue();
+        (await IsLiveAsync(store, account, again.SessionId, _now)).ShouldBeTrue();
     }
 
     /// <summary>
@@ -367,7 +556,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
         (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(2), Ct)).ShouldBeTrue();
 
-        (await store.IsSessionLiveAsync(account, late, _now.AddMinutes(3), Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, late, _now.AddMinutes(3))).ShouldBeFalse();
         (await RevokedReasonAsync(services, late)).ShouldBe(SessionRevocations.Disabled, "it ends as the ban's");
     }
 
@@ -384,7 +573,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(1), Ct)).ShouldBeTrue();
         (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(2), Ct)).ShouldBeTrue();
 
-        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(3), Ct)).ShouldBeTrue();
+        (await IsLiveAsync(store, account, session.SessionId, _now.AddMinutes(3))).ShouldBeTrue();
         (await RevokedReasonAsync(services, session.SessionId)).ShouldBeNull();
         (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(3)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
         (await store.SetDisabledAsync(UserId.New(), disabled: false, _now, Ct)).ShouldBeFalse("an unknown account is still unknown");
@@ -400,7 +589,7 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await store.RevokeSessionAsync(session.SessionId, SessionRevocations.Reuse, _now.AddMinutes(2), Ct)).ShouldBeTrue();
 
         (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Logout, "the first revocation stands");
-        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(3), Ct)).ShouldBeFalse();
+        (await IsLiveAsync(store, account, session.SessionId, _now.AddMinutes(3))).ShouldBeFalse();
         (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(3)), Ct)).Status.ShouldBe(RefreshStatus.Refused);
         (await store.RevokeSessionAsync(Guid.NewGuid(), SessionRevocations.Logout, _now, Ct)).ShouldBeFalse();
     }
@@ -485,10 +674,31 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         return (outcome.Account!.Value, request);
     }
 
-    /// <summary>A presentation of <paramref name="token"/> at <paramref name="now"/> with a fresh child id.</summary>
+    /// <summary>A presentation of <paramref name="token"/> at <paramref name="now"/> with a fresh child id and no personal tenant.</summary>
     /// <param name="token">The refresh token id.</param>
     /// <param name="now">The instant of the presentation.</param>
-    private protected static RefreshRequest Refresh(Guid token, DateTimeOffset now) => new(token, Guid.NewGuid(), now, _grace, _idle);
+    private protected static RefreshRequest Refresh(Guid token, DateTimeOffset now) =>
+        new(token, Guid.NewGuid(), now, _grace, _idle, PersonalTenant: null);
+
+    /// <summary>Whether the session is live: the caller read with no membership.</summary>
+    /// <param name="store">The store under test.</param>
+    /// <param name="account">The account the token names.</param>
+    /// <param name="session">The session the token names.</param>
+    /// <param name="now">The instant to judge expiry at.</param>
+    private protected static async Task<bool> IsLiveAsync(IAccountStore store, UserId account, Guid session, DateTimeOffset now) =>
+        (await ReadAsync(store, account, session, now, null)).Live;
+
+    /// <summary>One caller read.</summary>
+    /// <param name="store">The store under test.</param>
+    /// <param name="account">The account the token names.</param>
+    /// <param name="session">The session the token names.</param>
+    /// <param name="now">The instant to judge expiry at.</param>
+    /// <param name="membership">The membership to read, if any.</param>
+    private protected static Task<CallerRead> ReadAsync(
+        IAccountStore store, UserId account, Guid session, DateTimeOffset now, MembershipQuery? membership) =>
+        store.ReadCallerAsync(new CallerQuery(account, session, now, membership), Ct);
+
+    private static ITenantStore Tenants(IServiceProvider services) => services.GetRequiredService<ITenantStore>();
 
     private static KeyCandidate Candidate(string purpose, string kid, string material) => new(purpose, 1, kid, material, _now);
 
@@ -550,7 +760,12 @@ public abstract class AccountStoreFacts : IAsyncDisposable
     /// <summary>A sign-in of <paramref name="identity"/> that may create an account, with fresh ids.</summary>
     /// <param name="identity">The verified identity.</param>
     private protected static SignInRequest SignIn(VerifiedIdentity identity) =>
-        new(identity, MayCreate: true, Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), _now, _now + _session);
+        new(identity, MayCreate: true, Guid.NewGuid().ToString("N"), Guid.NewGuid(), Guid.NewGuid(), _now, _now + _session, null);
+
+    /// <summary>A sign-in of <paramref name="identity"/> that may create an account and ensures a personal tenant.</summary>
+    /// <param name="identity">The verified identity.</param>
+    private protected static SignInRequest PersonalSignIn(VerifiedIdentity identity) =>
+        SignIn(identity) with { PersonalTenant = new PersonalTenantRequest(new TenantId(Guid.NewGuid())) };
 
     /// <summary>The prefixed name of the framework table <paramref name="suffix"/> names.</summary>
     /// <param name="services">The host container.</param>

@@ -86,6 +86,7 @@ internal sealed class PersonSessions(
     {
         ArgumentNullException.ThrowIfNull(session);
         return signIn.Admits(signIn.Policy, session.Provider)
-            && await store.IsSessionLiveAsync(session.Account, session.Session, clock.GetUtcNow(), ct).ConfigureAwait(false);
+            && (await store.ReadCallerAsync(new CallerQuery(session.Account, session.Session, clock.GetUtcNow(), null), ct)
+                .ConfigureAwait(false)).Live;
     }
 }

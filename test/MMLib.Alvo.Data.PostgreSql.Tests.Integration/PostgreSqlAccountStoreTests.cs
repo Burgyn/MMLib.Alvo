@@ -99,8 +99,8 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
         (await RevokedReasonAsync(services, late) is not null).ShouldBe(banWaits, race);
         (await store.SetDisabledAsync(account, disabled: false, Start.AddMinutes(2), Ct)).ShouldBeTrue();
 
-        (await store.IsSessionLiveAsync(account, late, Start.AddMinutes(3), Ct)).ShouldBeFalse(race);
-        (await store.IsSessionLiveAsync(account, session.SessionId, Start.AddMinutes(3), Ct)).ShouldBeFalse(race);
+        (await IsLiveAsync(store, account, late, Start.AddMinutes(3))).ShouldBeFalse(race);
+        (await IsLiveAsync(store, account, session.SessionId, Start.AddMinutes(3))).ShouldBeFalse(race);
     }
 
     /// <inheritdoc/>

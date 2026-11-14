@@ -182,10 +182,10 @@ public sealed class PersonResolverTests
             Interlocked.Exchange(ref _keyReads, 0);
         }
 
-        public Task<bool> IsSessionLiveAsync(UserId account, Guid session, DateTimeOffset now, CancellationToken ct)
+        public Task<CallerRead> ReadCallerAsync(CallerQuery query, CancellationToken ct)
         {
             Interlocked.Increment(ref _sessionReads);
-            return inner.IsSessionLiveAsync(account, session, now, ct);
+            return inner.ReadCallerAsync(query, ct);
         }
 
         public Task<StoredKey> EnsureKeyAsync(KeyCandidate candidate, CancellationToken ct)

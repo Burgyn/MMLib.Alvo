@@ -72,6 +72,7 @@ internal sealed class RefreshGrant(
             Guid.NewGuid(),
             clock.GetUtcNow(),
             TimeSpan.FromSeconds(settings.RefreshReuseGraceSeconds),
-            TimeSpan.FromDays(settings.RefreshIdleDays));
+            TimeSpan.FromDays(settings.RefreshIdleDays),
+            PersonalTenant: null);
     }
 }
