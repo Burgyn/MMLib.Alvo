@@ -59,7 +59,7 @@ public sealed class SignUpCheckTests
         var result = new DescriptorValidator().Validate(Descriptor("""{ "providers": ["google"] }"""));
 
         result.IsValid.ShouldBeFalse();
-        result.Errors.ShouldContain(SignUpCheck.Refusal);
+        result.Errors.Where(error => error == SignUpCheck.Refusal).ShouldHaveSingleItem("the schema pass and the rule pass must not both report it");
         result.Errors.ShouldNotContain(error => error.Message.Contains("required property 'signUp'", StringComparison.Ordinal));
     }
 
