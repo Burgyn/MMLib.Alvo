@@ -25,7 +25,6 @@ namespace MMLib.Alvo.Accounts
         public bool AllowHttpMetadata { get; set; }
         public string? Authority { get; set; }
         public System.Collections.Generic.List<string> ClientIds { get; }
-        public bool TrustEmail { get; set; }
     }
 }
 namespace Microsoft.AspNetCore.Builder

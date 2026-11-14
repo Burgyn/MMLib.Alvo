@@ -365,7 +365,10 @@ static class SessionRevocations { const string Logout = "logout"; const string R
   and `../_shared/ai/InternalMemberReferences.cs`).
 - Public: `public static class AlvoAccounts { public const string ConfigurationSection = "Alvo:Accounts"; }`;
   `AlvoAccountsOptions { string Prefix = "/auth/v1"; string? Issuer; string? Audience; int AccessTokenMinutes = 15; int RefreshIdleDays = 30; int SessionLifetimeDays = 180; int RefreshReuseGraceSeconds = 10; Dictionary<string, AlvoOidcProviderOptions> Providers (OrdinalIgnoreCase) }`;
-  `AlvoOidcProviderOptions { List<string> ClientIds; string? Authority; bool AllowHttpMetadata; bool TrustEmail }`;
+  `AlvoOidcProviderOptions { List<string> ClientIds; string? Authority; bool AllowHttpMetadata }` (**amended by the
+  final review, M6:** `bool TrustEmail` was public here but nothing could configure a generic provider in S2, so it bound
+  and did nothing; it is a parameter of the internal `OidcProvider.Generic` until the slice that ships a configurable
+  generic provider makes it public);
   `IServiceCollection AddAlvoAccounts(this IServiceCollection services, Action<AlvoAccountsOptions>? configure = null)`;
   `IEndpointRouteBuilder MapAlvoAccounts(this IEndpointRouteBuilder endpoints)` (maps nothing until Task 7).
 - Validation (`ValidateOnStart`, every failure names its key, all collected): `Issuer` required outside Development

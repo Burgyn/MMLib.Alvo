@@ -207,9 +207,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     [InlineData(true, true, true)]
     public async Task A_generic_provider_trusts_email_only_when_configured_and_verified(bool trustEmail, bool verified, bool trusted)
     {
-        var options = Options(TestOidcIssuer.Authority);
-        options.TrustEmail = trustEmail;
-        using var verifier = Verifier(OidcProvider.Generic("oidc", AuthProvider.Oidc, TestOidcIssuer.Authority, options));
+        using var verifier = Verifier(
+            OidcProvider.Generic("oidc", AuthProvider.Oidc, TestOidcIssuer.Authority, Options(TestOidcIssuer.Authority), trustEmail));
 
         var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", email: "ada@example.com", emailVerified: verified), AnyProvider, Ct);
 
@@ -220,7 +219,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     [Fact]
     public async Task A_generic_provider_signs_only_with_the_discovered_asymmetric_algorithms()
     {
-        using var verifier = Verifier(OidcProvider.Generic("oidc", AuthProvider.Oidc, TestOidcIssuer.Authority, Options(TestOidcIssuer.Authority)));
+        using var verifier = Verifier(
+            OidcProvider.Generic("oidc", AuthProvider.Oidc, TestOidcIssuer.Authority, Options(TestOidcIssuer.Authority), trustEmail: false));
 
         (await verifier.VerifyAsync(_issuer.Mint("sub-1", alg: "HS256"), AnyProvider, Ct)).Refusal.ShouldBe(IdTokenRefusal.Algorithm);
         (await verifier.VerifyAsync(_issuer.Mint("sub-1", alg: "none"), AnyProvider, Ct)).Refusal.ShouldBe(IdTokenRefusal.Algorithm);

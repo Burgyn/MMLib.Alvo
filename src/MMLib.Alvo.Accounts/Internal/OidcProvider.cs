@@ -29,14 +29,21 @@ internal sealed record OidcProvider(
 
     /// <summary>
     /// A generic OIDC provider: its one issuer, its authority (the issuer unless configured), the discovery document's
-    /// algorithms, and an email trusted only when the configuration says <c>TrustEmail</c> and the token
-    /// <c>email_verified</c>.
+    /// algorithms, and an email trusted only when <paramref name="trustEmail"/> says so and the token
+    /// <c>email_verified</c> (spec §5.3).
     /// </summary>
+    /// <remarks>
+    /// <b>No configuration reaches it in this build</b>: startup validation offers Google alone, so the spec's
+    /// <c>TrustEmail</c> setting is a parameter here, not a public option that would bind and do nothing. It becomes
+    /// <c>AlvoOidcProviderOptions.TrustEmail</c> in the slice that ships a configurable generic provider (spec §5.8).
+    /// </remarks>
     /// <param name="name">The provider's name in the descriptor.</param>
     /// <param name="provider">The descriptor's provider.</param>
     /// <param name="issuer">The exact <c>iss</c> the provider signs as.</param>
     /// <param name="options">The provider's configuration.</param>
-    internal static OidcProvider Generic(string name, AuthProvider provider, string issuer, AlvoOidcProviderOptions options)
+    /// <param name="trustEmail">Whether the provider's verified email is trusted.</param>
+    internal static OidcProvider Generic(
+        string name, AuthProvider provider, string issuer, AlvoOidcProviderOptions options, bool trustEmail)
     {
         ArgumentNullException.ThrowIfNull(options);
         return new(
@@ -46,7 +53,7 @@ internal sealed record OidcProvider(
             options.Authority ?? issuer,
             [.. options.ClientIds],
             null,
-            options.TrustEmail ? EmailVerified : static _ => false,
+            trustEmail ? EmailVerified : static _ => false,
             options.AllowHttpMetadata);
     }
 

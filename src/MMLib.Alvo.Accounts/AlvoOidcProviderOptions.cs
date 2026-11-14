@@ -25,12 +25,4 @@ public sealed class AlvoOidcProviderOptions
     /// and with them every identity the provider asserts. Setting it logs a warning on every start.
     /// </remarks>
     public bool AllowHttpMetadata { get; set; }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether a generic provider's verified email (<c>email_verified</c>) is trusted.
-    /// </summary>
-    /// <remarks>
-    /// Ignored for Google, whose own rule decides (a verified <c>@gmail.com</c> address or a Workspace domain).
-    /// </remarks>
-    public bool TrustEmail { get; set; }
 }
