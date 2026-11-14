@@ -71,6 +71,7 @@ internal static partial class ManagementEndpoints
 
         MapAiConnection(group);
         MapUsers(endpoints, group);
+        MapAccounts(endpoints, group);
 
         return group;
     }
@@ -681,11 +682,19 @@ internal static partial class ManagementEndpoints
     /// </remarks>
     /// <typeparam name="T">What the member answers with.</typeparam>
     /// <param name="operation">The member to run.</param>
-    private static async Task<IResult> Answer<T>(Func<Task<T>> operation)
+    private static Task<IResult> Answer<T>(Func<Task<T>> operation) =>
+        Rendered(async () => Results.Ok(await operation().ConfigureAwait(false)));
+
+    /// <summary>
+    /// Runs a delegate that chooses its own success answer, and turns the same refusals <see cref="Answer{T}"/> does into
+    /// problem documents — for a route whose success is not a <c>200</c> with the member's value.
+    /// </summary>
+    /// <param name="operation">The delegate to run.</param>
+    private static async Task<IResult> Rendered(Func<Task<IResult>> operation)
     {
         try
         {
-            return Results.Ok(await operation().ConfigureAwait(false));
+            return await operation().ConfigureAwait(false);
         }
         catch (ManagementProjectNotFoundException refusal)
         {
@@ -766,9 +775,15 @@ internal static partial class ManagementEndpoints
     /// <summary>Attaches the caller filter, the access gate and the metadata the contract test reads.</summary>
     /// <param name="route">The route being built.</param>
     /// <param name="operation">What the route stands for.</param>
-    private static RouteHandlerBuilder Gate(RouteHandlerBuilder route, ManagementRoute operation) =>
+    /// <param name="qualifier">
+    /// A segment that keeps the endpoint name unique when two contracts declare a member of the same name, or
+    /// <see langword="null"/>.
+    /// </param>
+    private static RouteHandlerBuilder Gate(RouteHandlerBuilder route, ManagementRoute operation, string? qualifier = null) =>
         route.AddEndpointFilter<RouteHandlerBuilder, ManagementCallerFilter>()
             .RequireAlvoManagementAccess(operation.Operation)
             .WithMetadata(operation)
-            .WithName($"Alvo.Management.{operation.Member}");
+            .WithName(qualifier is null
+                ? $"Alvo.Management.{operation.Member}"
+                : $"Alvo.Management.{qualifier}.{operation.Member}");
 }

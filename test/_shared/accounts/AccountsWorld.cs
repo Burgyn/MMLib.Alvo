@@ -96,6 +96,7 @@ internal sealed class AccountsWorld : IAsyncDisposable
     /// <param name="services">Changes to the host's services after Alvo's and the accounts' own, e.g. a decorated store.</param>
     /// <param name="app">Routes of the host's own, mapped beside the sign-in routes.</param>
     /// <param name="openApi">Whether the host serves an OpenAPI document at <c>/openapi/v1.json</c>.</param>
+    /// <param name="keys">Dev API keys the world issues beside <see cref="Operator"/>.</param>
     internal static async Task<AccountsWorld> StartAsync(
         AlvoApiEngine engine,
         Action<AlvoAccountsOptions>? configure = null,
@@ -103,7 +104,8 @@ internal sealed class AccountsWorld : IAsyncDisposable
         Action<AlvoApiOptions>? api = null,
         Action<IServiceCollection>? services = null,
         Action<WebApplication>? app = null,
-        bool openApi = false)
+        bool openApi = false,
+        IReadOnlyList<TestApiKey>? keys = null)
     {
         var clock = new FakeTimeProvider(Start);
         var oidc = new TestOidcIssuer(clock);
@@ -128,7 +130,7 @@ internal sealed class AccountsWorld : IAsyncDisposable
                 host.MapAlvoAccounts();
                 app?.Invoke(host);
             });
-        var world = await AlvoApiWorld.FromDescriptorAsync(descriptor, [Operator], setup, engine);
+        var world = await AlvoApiWorld.FromDescriptorAsync(descriptor, [Operator, .. keys ?? []], setup, engine);
         return new AccountsWorld(world, oidc, clock, logs, keyFile, ProjectOf(descriptor));
     }
 

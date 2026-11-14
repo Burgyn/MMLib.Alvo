@@ -1,7 +1,8 @@
 # The Management API
 
-The configuration surface: twenty-one HTTP routes over two services — `IAlvoManagement`, and `IAlvoUserAdministration`
-for *Administering people* — that read and change what a project **is** — its descriptor, its revision history, its
+The configuration surface: thirty-one HTTP routes over four services — `IAlvoManagement`, `IAlvoOperations` for
+*Operations*, `IAlvoUserAdministration` for *Administering people*, and `IAlvoAccountAdministration` for *Disabling an
+end user* — that read and change what a project **is** — its descriptor, its revision history, its
 resolved schema, what this build honours, the host code registered with it, and who a policy would admit. It never reads or writes a row of application data. That is not an omission; it is
 deviation **D4**, and the whole shape of this document follows from it.
 
@@ -54,6 +55,13 @@ And seven more, from a second contract — see *Administering people*:
 | `PUT {m}/projects/{project}/users/{user:guid}/disabled` | `SetDisabledAsync` | `admin` |
 | `POST {m}/projects/{project}/users/{user:guid}/credential-reset` | `IssueCredentialTokenAsync` | `admin` |
 | `DELETE {m}/projects/{project}/users/{user:guid}/lockout` | `ClearLockoutAsync` | `admin` |
+
+And one more, from a fourth contract, mapped only when `AddAlvoAccounts` registered end-user sign-in — see *Disabling an
+end user*:
+
+| Route | `IAlvoAccountAdministration` member | Level |
+|---|---|---|
+| `PUT {m}/projects/{project}/accounts/{account:guid}/disabled` | `SetDisabledAsync` | `admin` |
 
 **This table is generated from nothing.** It is prose, and prose drifts — so it is not what holds the
 mapping. `ManagementContractTests` does, reflectively and in four directions: every member of
@@ -562,6 +570,37 @@ resolves from the host's own composed container rather than constructing the dec
 `IAlvoManagement` is the descriptor's surface, membership is a store's, and a deployment can have the first
 without the second. `ManagementContractTests` still holds this table — `UserAdministrationRouteTests` is its
 counterpart for the second contract, including the non-vacuity guard and a 403-over-the-wire fact per route.
+
+## Disabling an end user
+
+Spec 2026-11-13 §5.6: an operator of an open-sign-up app must be able to ban a person on day one.
+`PUT {m}/projects/{project}/accounts/{account}/disabled` with `{"disabled": true}` stamps the account's `disabled_at`
+and revokes every live session of it (reason `disabled`) **in one transaction** — one `IAccountStore` call — so the
+person's next request with an access token is `401 invalid_token`, their next refresh `invalid_grant`, and their next
+sign-in `403 sign-in-refused`. `{"disabled": false}` clears the stamp and lets them sign in again; the sessions it
+revoked stay revoked, so a ban is also a force-logout. The success answer is `204`; an account id that does not exist
+is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
+must not be the permissive one. The ban takes effect on the very next request, not when the access token expires:
+every Bearer request reads its session (spec §5.7's one store read), and that read sees the revocation.
+
+**Its own operation, `ManageAccounts`, at `admin`.** Not `ManageUsers`: those people manage the project, these use
+the app — a deployment can have either without the other, and a later level split between them should not need a new
+operation then. Disabling a person decides who may reach the backend, which spec §3.3 gives to `admin`.
+
+**Mapped only when sign-in is registered** — `MapAccounts` asks `IServiceProviderIsService` whether
+`IAlvoAccountAdministration` exists (the `MapUsers` precedent), so a deployment without `AddAlvoAccounts` answers
+`404`, not `500`, and its route table does not change. **The gate is the whole of the authorization**: the port is
+`internal` to the family and this route is its only caller. When a dashboard view of end users needs it in-process
+(spec §10), it becomes public in the `IAlvoUserAdministration` shape — the implementation under an unguarded key, a
+core decorator the only registration under the plain interface. The delegate also admits through `ManagementGate`,
+which is what answers a project this build does not serve with its named `404`.
+
+**A Bearer token never reaches it.** The Management API reads no `Authorization` header (S1), so a person presenting
+their own access token here is an anonymous caller and is refused `403` like one —
+`AccountAdministrationTests.A_bearer_token_never_reaches_the_route`. The endpoint's name is
+`Alvo.Management.Accounts.SetDisabledAsync`, qualified because `IAlvoUserAdministration` has a member of the same name
+and endpoint names must be unique. `AccountAdministrationRouteTests` is `ManagementContractTests`' counterpart for this
+contract.
 
 ## What is deliberately absent
 

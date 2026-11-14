@@ -124,8 +124,8 @@ on the built container.
 ## Configuration
 
 The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`,
-`AlvoManagementOptions`) are bound from `Alvo:*`, `Alvo:Api:*`, `Alvo:Auth:*` and
-`Alvo:Management:*`; the host's own decisions live in
+`AlvoManagementOptions`, and `AlvoAccountsOptions` when sign-in is on) are bound from `Alvo:*`, `Alvo:Api:*`,
+`Alvo:Auth:*`, `Alvo:Management:*` and `Alvo:Accounts:*`; the host's own decisions live in
 `AlvoHostOptions` (`Alvo:DescriptorPath`, `Alvo:Database:*`, `Alvo:PathBase`,
 `Alvo:ForwardedHeaders:Enabled`, `Alvo:Docs:*`).
 
@@ -136,6 +136,28 @@ mounts the surface, and it is **closed by default** — every management route c
 gate the descriptor's `access` block compiles, so an image whose descriptor declares no
 `access` answers 403 to everyone but the bootstrap administrator. See
 `docs/architecture/management-api.md`.
+**`Alvo:Accounts:*`** (`Alvo__Accounts__*`) is end-user sign-in (accounts spec §5, §11.2), and it is **off unless
+a provider is configured**: the host calls `AddAlvoAccounts` — binding the whole section into `AlvoAccountsOptions` —
+and, after `MapAlvo()`, `MapAlvoAccounts()` only when `Alvo:Accounts:Providers` has a child section, e.g.
+`Alvo__Accounts__Providers__Google__ClientIds__0`. Any other key set alone (an issuer, a lifetime) switches nothing on.
+Off, the image is exactly what it was before sign-in existed: no secrets key file is required, no `/auth` route is
+mapped, the OpenAPI document gains no path and no `alvoBearer` scheme, and an `Authorization` header is nobody's
+credential (`HostAccountsTests`). On, `AddAlvoAccounts`' own startup validation refuses the start, naming each key,
+without `Alvo:Secrets:EncryptionKeyFile`, with an `Alvo:Auth:HeaderName` of `Authorization`, or — outside
+Development — without `Alvo:Accounts:Issuer`, the absolute `https` URL of the auth prefix (default `/auth/v1`) as
+clients reach it. **In Development an unset issuer is the URL each request reached the sign-in routes at** (scheme,
+host, path base and prefix — `http://localhost:5000/auth/v1` on a local run), read per request; set, it must be
+`https` in every environment, so a local `http` issuer is spelled by leaving it unset. An operator disables a person
+with `PUT /management/projects/{project}/accounts/{account}/disabled` (`admin`; see `management-api.md`, *Disabling an
+end user*).
+
+**`Alvo:Api:Cors:Origins`** and **`Alvo:Api:RateLimits:Token`** come with the `Alvo:Api` binding the host already
+makes into `AlvoApiOptions` — nothing host-specific. `Cors:Origins` lists the exact browser origins
+(`https://app.example.com`, no path, no `*`) allowed to call the Data API and the auth routes; empty, which is the
+default, sends no CORS headers and answers no preflight. `RateLimits:Token` is the token endpoint's budget per client
+IP per minute (default 30). The client IP is the connection's, so behind a proxy it is honest only with
+`Alvo:ForwardedHeaders:Enabled` — see *Behind a reverse proxy*. See `data-api.md`, *CORS and rate limits*.
+
 **`Alvo:Admin:Dashboard:Enabled`** (`Alvo__Admin__Dashboard__Enabled`) is the whole of the
 dashboard's configuration, and the smallness is deliberate: everything a screen shows comes
 from the descriptor, the schema and `capabilities`, so there is nothing else to configure that

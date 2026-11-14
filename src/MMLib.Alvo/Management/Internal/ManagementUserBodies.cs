@@ -18,3 +18,11 @@ internal sealed record ManagementTenantGrant(Guid? Tenant);
 /// <summary>Whether a person is barred from signing in.</summary>
 /// <param name="Disabled">Whether they are barred.</param>
 internal sealed record ManagementDisabledFlag(bool Disabled);
+
+/// <summary>Whether an end user's account is disabled (accounts spec §5.6).</summary>
+/// <remarks>
+/// Nullable, unlike <see cref="ManagementDisabledFlag"/>, so a body without the member is refused rather than read as
+/// "enable": on a ban, the absent answer must not be the permissive one.
+/// </remarks>
+/// <param name="Disabled">Whether the account is to be disabled, or <see langword="null"/> when the body did not say.</param>
+internal sealed record ManagementAccountDisabledFlag(bool? Disabled);

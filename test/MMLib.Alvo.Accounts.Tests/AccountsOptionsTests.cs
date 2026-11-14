@@ -117,6 +117,21 @@ public sealed class AccountsOptionsTests : IDisposable
         log.Lines.ShouldBeEmpty();
     }
 
+    /// <summary>An authority that is no absolute URI is refused naming only the schemes this provider may use.</summary>
+    [Theory]
+    [InlineData(false, "which is not an absolute https URI.")]
+    [InlineData(true, "which is not an absolute http or https URI.")]
+    public async Task An_authority_that_is_not_absolute_names_the_schemes_this_provider_may_use(bool allowHttp, string expected)
+    {
+        var refusal = await RefusalAsync(Composition.Valid(_keyFile, options =>
+        {
+            Google(options).Authority = "issuer.test";
+            Google(options).AllowHttpMetadata = allowHttp;
+        }));
+
+        refusal.ShouldNotBeNull().Message.ShouldContain($"Alvo:Accounts:Providers:Google:Authority is 'issuer.test', {expected}");
+    }
+
     /// <summary>
     /// Review Focus 4: the header both channels would read is refused once accounts are on — and only then, so an
     /// existing host that never added accounts keeps starting exactly as S1 left it, key file or not.

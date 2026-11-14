@@ -23,9 +23,18 @@ public sealed class AlvoAccountsOptions
 
     /// <summary>Gets or sets the issuer (<c>iss</c>) every access token is signed as.</summary>
     /// <remarks>
+    /// <para>
     /// An absolute <c>https</c> URI, conventionally the public URL of <see cref="Prefix"/>. Required outside the
     /// <c>Development</c> environment: a token's issuer is what a client and a second replica check it against, so
     /// guessing it from an incoming request's host would let that request choose it.
+    /// </para>
+    /// <para>
+    /// <b>Unset in <c>Development</c>, it is the URL the request reached the sign-in routes at</b> — scheme, host, path
+    /// base and <see cref="Prefix"/>, so <c>http://localhost:5000/auth/v1</c> on a local run — read per request, when a
+    /// token is minted and when one is validated. That is the dev loop's convenience and nothing more: a token minted
+    /// through one host name does not validate through another. Set, it must be <c>https</c> in every environment, so a
+    /// local <c>http</c> issuer is spelled by leaving this unset.
+    /// </para>
     /// </remarks>
     public string? Issuer { get; set; }
 
@@ -35,8 +44,9 @@ public sealed class AlvoAccountsOptions
 
     /// <summary>Gets or sets how long an access token is valid, in minutes — 1 to 60.</summary>
     /// <remarks>
-    /// Short on purpose: an access token is not looked up on use, so this is how long a disabled account or an ended
-    /// session can still be honoured by a copy of it.
+    /// Short on purpose. Alvo reads the session on every request, so a disabled account or an ended session is refused
+    /// at once here; this is how long a copy of the token can still be honoured by anything that checks only its
+    /// signature against the published keys.
     /// </remarks>
     public int AccessTokenMinutes { get; set; } = 15;
 

@@ -74,8 +74,9 @@
 // End-user accounts (spec 2026-11-13 §5, S2 D1/D2): IAccountStore and its records are an internal port the EF driver
 // implements (granted above) and MMLib.Alvo.Accounts consumes — the ledger precedent: one in-family producer, one
 // in-family consumer, so publishing the seam would be a commitment no third party has asked for. The package also reads
-// AlvoFrameworkTables for the five _auth_* names it never spells itself. Its suite names the same records to stub the
-// store. An architecture fact in the Accounts suite holds that it references none of the guarded internals these grants
+// AlvoFrameworkTables for the five _auth_* names it never spells itself, and implements IAlvoAccountAdministration, the
+// port the core's gated management route disables an account through (spec §5.6). Its suite names the same records to
+// stub the store. An architecture fact in the Accounts suite holds that it references none of the guarded internals these grants
 // expose; the same forgeability caveat applies (an unsigned grant is a name match).
 [assembly: InternalsVisibleTo("MMLib.Alvo.Accounts")]
 

@@ -78,7 +78,8 @@ internal sealed class AlvoAccountsOptionsValidation(
         if (!IsHttpsUri(options.Issuer))
         {
             yield return $"{key} is '{options.Issuer}', which is not an absolute https URI. "
-                + "Set it to the public https URL tokens are issued from (for example https://api.example.com/auth/v1).";
+                + "Set it to the public https URL tokens are issued from (for example https://api.example.com/auth/v1)"
+                + (IsDevelopment ? ", or — in Development only — leave it unset to issue from the URL each request reached." : ".");
         }
     }
 
@@ -159,7 +160,8 @@ internal sealed class AlvoAccountsOptionsValidation(
         if (!Uri.TryCreate(authority, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
-            yield return $"{authorityKey} is '{authority}', which is not an absolute https URI.";
+            yield return $"{authorityKey} is '{authority}', which is not an absolute "
+                + (provider.AllowHttpMetadata ? "http or https" : "https") + " URI.";
         }
         else if (uri.Scheme == Uri.UriSchemeHttp && !provider.AllowHttpMetadata)
         {

@@ -31,7 +31,9 @@ public static class AlvoAccountsServiceCollectionExtensions
     /// an Alvo access token presented as <c>Authorization: Bearer</c> on the Data API is the person it names; and it must have a relational store
     /// (<c>UseSqlite</c> or <c>UsePostgreSql</c> inside <c>AddAlvo</c>), a secrets key file
     /// (<c>Alvo:Secrets:EncryptionKeyFile</c>), an API-key header other than <c>Authorization</c>, at least one
-    /// provider, and — outside Development — an issuer; the start is refused, naming each, otherwise.
+    /// provider, and — outside Development — an issuer; the start is refused, naming each, otherwise. It also gives
+    /// <c>MapAlvo</c>'s Management API the operator's route that disables an account
+    /// (<c>PUT {m}/projects/{project}/accounts/{account}/disabled</c>, at <c>admin</c>).
     /// </para>
     /// <para>
     /// <b>It binds nothing from configuration itself</b>, the <c>AddAlvoIdentity</c> precedent: the host decides where
@@ -52,6 +54,7 @@ public static class AlvoAccountsServiceCollectionExtensions
         AddVerification(services);
         AddTokenEndpoint(services);
         AddPerson(services);
+        services.TryAddSingleton<IAlvoAccountAdministration, AccountAdministration>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<OpenApiOptions>, AccountsOpenApiSetup>());
 
         return services;

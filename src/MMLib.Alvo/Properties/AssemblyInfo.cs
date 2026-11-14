@@ -58,7 +58,7 @@
 // What MMLib.Alvo.Accounts consumes is core by the spec — CallerResolution and its person-resolver key,
 // ProblemResultFactory, the CORS and rate-limit filters, membership resolution and SignInPolicy — and publishing those
 // would make five seams public for one in-family consumer, which un-publishing could never take back. The grant reaches
-// every other internal here too, so an architecture fact in the Accounts suite (InternalGrantArchitectureTests) holds
+// every other internal here too, so an architecture fact in the Accounts suite (AccountsArchitectureTests) holds
 // that it references none of the security-core members and none of the ambient flow's setters the Abstractions grants
 // already police. The same forgeability caveat applies: an unsigned grant is a name match.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Accounts")]
