@@ -1,4 +1,5 @@
 {
+  "assignable-role-in-access.json": { "pointer": "/access/admin", "messageContains": "is a tenant role", "refusedBy": "apply" },
   "decimal-without-scale.json": { "pointer": "#/entities/orders/fields/total", "messageContains": "scale" },
   "events-exclude-duplicate.json": { "pointer": "#/entities/notes/events/exclude/0", "messageContains": "uniqueItems" },
   "events-exclude-typo.json": { "pointer": "#/entities/notes/events/exclud" },

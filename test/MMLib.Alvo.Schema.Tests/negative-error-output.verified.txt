@@ -1,5 +1,8 @@
 [
   {
+    file: assignable-role-in-access.json
+  },
+  {
     file: decimal-without-scale.json,
     failures: [
       {
