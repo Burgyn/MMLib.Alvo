@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Auth.Internal;
+﻿using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
@@ -81,4 +82,19 @@ public sealed class AppTokenPolicyTests
     [Fact]
     public void Declined_kinds_are_off() =>
         Compile(Descriptor("""{ "personal": false, "service": false }""", SharedTenants)).Any.ShouldBeFalse();
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Allows_configured_always_and_each_kind_only_when_on(bool personal, bool service)
+    {
+        var policy = new AppTokenPolicy(personal, service, AppTokenPolicy.DefaultMaxLifetimeDays);
+
+        policy.Allows(ApiKeyKind.Configured).ShouldBeTrue();
+        policy.Allows(ApiKeyKind.Personal).ShouldBe(personal);
+        policy.Allows(ApiKeyKind.Service).ShouldBe(service);
+        policy.Allows((ApiKeyKind)42).ShouldBeFalse();
+    }
 }

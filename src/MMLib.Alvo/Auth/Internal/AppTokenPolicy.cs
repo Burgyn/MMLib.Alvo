@@ -27,6 +27,19 @@ internal sealed record AppTokenPolicy(bool Personal, bool Service, int MaxLifeti
     /// <summary>Gets whether either kind is on — the token routes answer at all only then.</summary>
     internal bool Any => Personal || Service;
 
+    /// <summary>
+    /// Whether a key of <paramref name="kind"/> may be minted or presented under this policy: a configured key always —
+    /// the descriptor does not govern it — and an app token only while its kind is on.
+    /// </summary>
+    /// <param name="kind">The key's kind.</param>
+    internal bool Allows(ApiKeyKind kind) => kind switch
+    {
+        ApiKeyKind.Configured => true,
+        ApiKeyKind.Personal => Personal,
+        ApiKeyKind.Service => Service,
+        _ => false,
+    };
+
     /// <summary>Builds the policy <paramref name="descriptor"/> declares.</summary>
     /// <param name="descriptor">The descriptor being compiled.</param>
     internal static AppTokenPolicy From(AlvoDescriptor descriptor)

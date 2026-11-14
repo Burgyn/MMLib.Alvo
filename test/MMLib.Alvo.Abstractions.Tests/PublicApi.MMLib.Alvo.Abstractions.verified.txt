@@ -307,12 +307,20 @@ namespace MMLib.Alvo.Auth
         public required string KeyId { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
     }
+    public enum ApiKeyKind
+    {
+        Configured = 0,
+        Personal = 1,
+        Service = 2,
+    }
     public sealed class ApiKeyRecord : System.IEquatable<MMLib.Alvo.Auth.ApiKeyRecord>
     {
         public ApiKeyRecord() { }
         public System.DateTimeOffset? ExpiresAt { get; init; }
         public required string KeyId { get; init; }
+        public MMLib.Alvo.Auth.ApiKeyKind Kind { get; init; }
         public System.DateTimeOffset? LastUsedAt { get; init; }
+        public MMLib.Alvo.UserId? MintedBy { get; init; }
         public System.DateTimeOffset? RevokedAt { get; init; }
         public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }

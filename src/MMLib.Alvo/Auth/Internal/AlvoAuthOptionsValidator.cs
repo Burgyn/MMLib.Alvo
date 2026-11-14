@@ -21,9 +21,9 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
         ValidateHeaderName(nameof(AlvoAuthOptions.HeaderName), options.HeaderName, failures);
         ValidateHeaderName(nameof(AlvoAuthOptions.TenantHeaderName), options.TenantHeaderName, failures);
 
-        foreach (var key in options.DevKeys)
+        for (var i = 0; i < options.DevKeys.Count; i++)
         {
-            ValidateKey(key, seenKeyIds, failures);
+            ValidateKey(options.DevKeys[i], i, seenKeyIds, failures);
         }
 
         return failures.Count == 0
@@ -98,9 +98,11 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
             + "samples/MMLib.Alvo.Samples.EmbeddedHost.");
     }
 
-    private static void ValidateKey(AlvoDevApiKey key, HashSet<string> seenKeyIds, List<string> failures)
+    private static void ValidateKey(AlvoDevApiKey key, int index, HashSet<string> seenKeyIds, List<string> failures)
     {
         ValidateKeyId(key.KeyId, seenKeyIds, failures);
+
+        ValidateReservedPrefix(key.KeyId, index, failures);
 
         ValidateSecret(key, failures);
 
@@ -178,6 +180,30 @@ internal sealed class AlvoAuthOptionsValidator : IValidateOptions<AlvoAuthOption
         {
             failures.Add($"Duplicate dev API key KeyId '{keyId}'.");
         }
+    }
+
+    /// <summary>Refuses a dev key whose id starts with a prefix Alvo reserves for personal and service tokens.</summary>
+    /// <remarks>
+    /// The reservation is what makes <em>prefix ⇔ persisted app token</em> hold everywhere (S5 plan D3): an id is routed
+    /// to the app-token store, and refused by Management, by its prefix alone — so a configured key wearing one would be
+    /// unreachable at best and mistaken for a person's token at worst.
+    /// </remarks>
+    /// <param name="keyId">The configured key id.</param>
+    /// <param name="index">The key's position in <c>DevKeys</c>, so the message names the configuration path.</param>
+    /// <param name="failures">The failure list this pass appends to.</param>
+    private static void ValidateReservedPrefix(string keyId, int index, List<string> failures)
+    {
+        if (string.IsNullOrEmpty(keyId) || !AppTokenSecret.IsAppTokenId(keyId))
+        {
+            return;
+        }
+
+        var prefix = AppTokenSecret.KindOf(keyId) == ApiKeyKind.Personal
+            ? AppTokenSecret.PersonalPrefix
+            : AppTokenSecret.ServicePrefix;
+        failures.Add(
+            $"Alvo:Auth:DevKeys:{index}:KeyId starts with '{prefix}', which Alvo reserves for personal and service "
+            + "tokens. Rename the key.");
     }
 
     private static void ValidateScopes(AlvoDevApiKey key, List<string> failures)
