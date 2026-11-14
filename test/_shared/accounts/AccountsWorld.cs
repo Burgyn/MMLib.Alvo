@@ -53,6 +53,13 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
     /// </summary>
     internal const int UnthrottledTokenRequests = 10_000;
 
+    /// <summary>
+    /// The invitation routes' per-minute budget in a world, for the same reason as <see cref="UnthrottledTokenRequests"/>:
+    /// a fact that walks every dead reason over preview and accept sends more than the production default of 20. A fact
+    /// about the limit sets its own through <c>api</c>.
+    /// </summary>
+    internal const int UnthrottledInvitationRequests = 10_000;
+
     /// <summary>The instant every world's clock starts at.</summary>
     internal static DateTimeOffset Start { get; } = new(2026, 11, 13, 9, 0, 0, TimeSpan.Zero);
 
@@ -113,6 +120,7 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
             ConfigureApi: options =>
             {
                 options.RateLimits.Token = UnthrottledTokenRequests;
+                options.RateLimits.Invitations = UnthrottledInvitationRequests;
                 api?.Invoke(options);
             },
             MapOpenApiDocument: openApi,

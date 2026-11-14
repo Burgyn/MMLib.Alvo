@@ -36,8 +36,59 @@ internal static partial class AccountsDocumentation
             _ => null,
             RevokeInvitationResponses,
             SelfServiceEndpoints.Tag);
+        operations[SelfServiceEndpoints.PreviewInvitationOperationId] = new(
+            "Preview an invitation",
+            "What a live invitation offers, to anyone holding its code — no credential is needed, so an invitee can see it "
+            + "before signing up: the tenant, who invited, the tenant roles and ownership it grants, until when, and whether "
+            + "it is bound to an email (never which).",
+            Bearer: false,
+            CodeBody,
+            PreviewResponses,
+            SelfServiceEndpoints.InvitationsTag);
+        operations[SelfServiceEndpoints.AcceptInvitationOperationId] = new(
+            "Accept an invitation",
+            "The signed-in person joins the invitation's tenant with its roles, and the next request naming the tenant in "
+            + "`X-Alvo-Tenant` acts there. Accepting again — or as someone who already is a member — answers the membership "
+            + "as it is, consuming nothing.",
+            Bearer: true,
+            CodeBody,
+            AcceptResponses,
+            SelfServiceEndpoints.InvitationsTag);
         return operations;
     }
+
+    private static OpenApiRequestBody CodeBody(OpenApiDocument document)
+        => Body("application/json", AccountsSchemas.InvitationCodeId, "The invitation's code.", document);
+
+    private static OpenApiResponses PreviewResponses(OpenApiDocument document) => Answers(
+        document,
+        ("200", Response(
+            "What the invitation offers.",
+            PersonNoStore(),
+            Media("application/json", AccountsSchemas.InvitationPreviewId, document))),
+        DeadCode(document),
+        Unsupported(document),
+        CodeInvalid(document),
+        InvitationsRateLimited(document));
+
+    private static OpenApiResponses AcceptResponses(OpenApiDocument document) => Answers(
+        document,
+        MembershipAnswer(document, "200", "The person's membership in the invitation's tenant: new, or as it already was."),
+        PersonUnauthenticated(document),
+        NotAPerson(document),
+        DeadCode(document),
+        Unsupported(document),
+        CodeInvalid(document),
+        InvitationsRateLimited(document));
+
+    private static (string, OpenApiResponse) DeadCode(OpenApiDocument document) => Disabled(
+        document,
+        "`not-found`: the code admits nobody — unknown, expired, revoked, used up, its creator no longer an owner, or (on "
+        + "accept) bound to an email the person's provider does not vouch for — one answer for all. `feature-disabled`: the "
+        + "descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.");
+
+    private static (string, OpenApiResponse) CodeInvalid(OpenApiDocument document) => TenantRefusal(
+        "422", "`validation`: `code` is missing, empty or not a string, or the body carries another property.", document);
 
     private static OpenApiResponses CreateInvitationResponses(OpenApiDocument document) => Answers(
         document,

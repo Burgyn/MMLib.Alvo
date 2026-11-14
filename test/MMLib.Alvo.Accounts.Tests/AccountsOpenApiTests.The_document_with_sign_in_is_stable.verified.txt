@@ -1822,6 +1822,305 @@
         ]
       }
     },
+    "/auth/v1/invitations/preview": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Preview an invitation",
+        "description": "What a live invitation offers, to anyone holding its code — no credential is needed, so an invitee can see it before signing up: the tenant, who invited, the tenant roles and ownership it grants, until when, and whether it is bound to an email (never which).",
+        "operationId": "invitations.preview",
+        "requestBody": {
+          "description": "The invitation's code.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authInvitationCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "What the invitation offers.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authInvitationPreview"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: the code admits nobody — unknown, expired, revoked, used up, its creator no longer an owner, or (on accept) bound to an email the person's provider does not vouch for — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: `code` is missing, empty or not a string, or the body carries another property.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/invitations/accept": {
+      "post": {
+        "tags": [
+          "invitations"
+        ],
+        "summary": "Accept an invitation",
+        "description": "The signed-in person joins the invitation's tenant with its roles, and the next request naming the tenant in `X-Alvo-Tenant` acts there. Accepting again — or as someone who already is a member — answers the membership as it is, consuming nothing.",
+        "operationId": "invitations.accept",
+        "requestBody": {
+          "description": "The invitation's code.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authInvitationCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The person's membership in the invitation's tenant: new, or as it already was.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authMembership"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: an API key or an integration's token was presented; only a signed-in person manages tenants.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: the code admits nobody — unknown, expired, revoked, used up, its creator no longer an owner, or (on accept) bound to an email the person's provider does not vouch for — one answer for all. `feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.invitations`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: `code` is missing, empty or not a string, or the body carries another property.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client sent more invitation requests this minute than `Alvo:Api:RateLimits:Invitations` allows — one budget for every invitation route. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
     "/auth/v1/.well-known/oauth-authorization-server": {
       "get": {
         "tags": [
@@ -2756,6 +3055,66 @@
           }
         },
         "description": "One invitation of a tenant, as its owners see it. Never its code."
+      },
+      "authInvitationCode": {
+        "required": [
+          "code"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "type": "string",
+            "description": "The code exactly as the invitation's creator received it (`alvo_inv_…`)."
+          }
+        },
+        "additionalProperties": false,
+        "description": "An invitation's code, in the body — never in a URL. No other member is accepted."
+      },
+      "authInvitationPreview": {
+        "required": [
+          "tenantName",
+          "inviterName",
+          "roles",
+          "isOwner",
+          "expiresAt",
+          "emailBound"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantName": {
+            "type": "string",
+            "description": "The tenant's name."
+          },
+          "inviterName": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The display name of the owner who invited, or null."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles accepting it grants under the applied descriptor."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether accepting it makes an owner."
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When it stops admitting anyone.",
+            "format": "date-time"
+          },
+          "emailBound": {
+            "type": "boolean",
+            "description": "Whether only the person whose provider vouches for one particular email may accept it."
+          }
+        },
+        "description": "What a live invitation offers. Never the email it may be bound to."
       },
       "authInvitationRequest": {
         "required": [
@@ -4081,6 +4440,10 @@
     {
       "name": "tenants",
       "description": "Self-service tenants: a signed-in person lists their tenants, creates shared ones, renames and manages the members of those they own, and invites people into them. Each route answers 404 `feature-disabled` naming the descriptor key that enables it while the descriptor leaves it off."
+    },
+    {
+      "name": "invitations",
+      "description": "Invitations by code: anyone holding a code previews what it offers, and a signed-in person accepts it to join the tenant. The code travels only in request bodies. Every code that admits nobody answers the same 404."
     },
     {
       "name": "time_entries"

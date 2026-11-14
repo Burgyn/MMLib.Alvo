@@ -6,7 +6,8 @@ using MMLib.Alvo.Api.Internal;
 namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>
-/// Maps the self-service routes (spec §6.3) under a sign-in group: <c>{prefix}/tenants…</c>, tagged <see cref="Tag"/>.
+/// Maps the self-service routes (spec §6.3) under a sign-in group: <c>{prefix}/tenants…</c>, tagged <see cref="Tag"/>, and
+/// <c>{prefix}/invitations/…</c>, tagged <see cref="InvitationsTag"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -48,6 +49,15 @@ internal static class SelfServiceEndpoints
     /// <summary>The operation id of <c>DELETE {prefix}/tenants/{tenantId}/members/{userId}</c>.</summary>
     internal const string RemoveMemberOperationId = "tenants.removeMember";
 
+    /// <summary>The OpenAPI tag the two routes that take an invitation code carry.</summary>
+    internal const string InvitationsTag = "invitations";
+
+    /// <summary>The operation id of <c>POST {prefix}/invitations/preview</c>.</summary>
+    internal const string PreviewInvitationOperationId = "invitations.preview";
+
+    /// <summary>The operation id of <c>POST {prefix}/invitations/accept</c>.</summary>
+    internal const string AcceptInvitationOperationId = "invitations.accept";
+
     /// <summary>The operation id of <c>POST {prefix}/tenants/{tenantId}/invitations</c>.</summary>
     internal const string CreateInvitationOperationId = "tenants.createInvitation";
 
@@ -68,6 +78,10 @@ internal static class SelfServiceEndpoints
     private const string Invitations = Tenant + "/invitations";
 
     private const string Invitation = Invitations + "/{invitationId:guid}";
+
+    private const string Preview = "/invitations/preview";
+
+    private const string Accept = "/invitations/accept";
 
     /// <summary>Maps the self-service routes into <paramref name="group"/>.</summary>
     /// <param name="group">The sign-in group, mapped at the auth prefix.</param>
@@ -108,7 +122,7 @@ internal static class SelfServiceEndpoints
             RemoveMemberOperationId);
     }
 
-    /// <summary>An owner's invitation routes, each charged the one <see cref="AlvoRateLimit.Invitations"/> budget (S4 plan D13).</summary>
+    /// <summary>The five invitation routes, each charged the one <see cref="AlvoRateLimit.Invitations"/> budget (S4 plan D13).</summary>
     private static void MapInvitations(RouteGroupBuilder group, AlvoCors cors, IEndpointFilter budget)
     {
         Protect(
@@ -125,9 +139,13 @@ internal static class SelfServiceEndpoints
                 static (HttpContext http, Guid tenantId, Guid invitationId) => InvitationRoutes.RevokeAsync(http, tenantId, invitationId)),
             cors,
             RevokeInvitationOperationId).AddEndpointFilter(budget);
+        Protect(group.MapPost(Preview, (Func<HttpContext, Task<IResult>>)InvitationRoutes.PreviewAsync), cors, PreviewInvitationOperationId, InvitationsTag)
+            .AddEndpointFilter(budget);
+        Protect(group.MapPost(Accept, (Func<HttpContext, Task<IResult>>)InvitationRoutes.AcceptAsync), cors, AcceptInvitationOperationId, InvitationsTag)
+            .AddEndpointFilter(budget);
     }
 
     /// <summary>CORS first, then <c>no-store</c>; then the tag and the operation id.</summary>
-    private static RouteHandlerBuilder Protect(RouteHandlerBuilder route, AlvoCors cors, string operationId) =>
-        route.AddEndpointFilter(cors.Filter).AddEndpointFilter(NoStoreResponseFilter.Instance).WithTags(Tag).WithName(operationId);
+    private static RouteHandlerBuilder Protect(RouteHandlerBuilder route, AlvoCors cors, string operationId, string tag = Tag) =>
+        route.AddEndpointFilter(cors.Filter).AddEndpointFilter(NoStoreResponseFilter.Instance).WithTags(tag).WithName(operationId);
 }

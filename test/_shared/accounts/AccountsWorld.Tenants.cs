@@ -23,6 +23,8 @@ internal sealed partial class AccountsWorld
 {
     private const string TenantMembersSuffix = "_tenant_members";
 
+    private const string TenantInvitationsSuffix = "_tenant_invitations";
+
     /// <summary>Adds <paramref name="user"/> to <paramref name="tenant"/> with <paramref name="roles"/>.</summary>
     /// <param name="tenant">The tenant.</param>
     /// <param name="user">The new member.</param>
@@ -43,6 +45,35 @@ internal sealed partial class AccountsWorld
         Add(command, "@roles", JsonSerializer.Serialize(roles));
         Add(command, "@is_owner", isOwner ? 1 : 0);
         Add(command, "@now", Clock.GetUtcNow().ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Inserts a live, single-use invitation into <paramref name="tenant"/> with the registry's own column list, bypassing
+    /// every check the creation route makes — e.g. into a personal tenant (S4 plan D4: the acceptance must refuse it on its
+    /// own). The table exists once any invitation route or store call has run; the world's boot creates it too.
+    /// </summary>
+    /// <param name="tenant">The tenant it invites into.</param>
+    /// <param name="createdBy">Its creator.</param>
+    /// <param name="codeHash">The SHA-256 of its code, lowercase hex.</param>
+    internal async Task AddInvitationAsync(TenantId tenant, UserId createdBy, string codeHash)
+    {
+        var prefix = Api.Services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix;
+        await using var connection = Api.Database.Connect();
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO {prefix}{TenantInvitationsSuffix} (id, tenant_id, code_hash, roles, grants_owner, email, max_uses, uses, expires_at, created_by, created_at, revoked_at)
+            VALUES (@id, @tenant_id, @code_hash, @roles, 0, NULL, 1, 0, @expires_at, @created_by, @now, NULL)
+            """;
+        var now = Clock.GetUtcNow().ToUniversalTime();
+        Add(command, "@id", Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture));
+        Add(command, "@tenant_id", tenant.Value.ToString("D", CultureInfo.InvariantCulture));
+        Add(command, "@code_hash", codeHash);
+        Add(command, "@roles", "[]");
+        Add(command, "@expires_at", now.AddDays(7).ToString("O", CultureInfo.InvariantCulture));
+        Add(command, "@created_by", createdBy.Value.ToString("D", CultureInfo.InvariantCulture));
+        Add(command, "@now", now.ToString("O", CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 

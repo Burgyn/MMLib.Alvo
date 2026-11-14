@@ -19,8 +19,16 @@ internal static partial class AccountsSchemas
     /// <summary>A just-created invitation: <see cref="InvitationId"/>'s members and its code, shown this once.</summary>
     internal const string NewInvitationId = "authNewInvitation";
 
+    /// <summary>The code an invitee presents to preview or accept an invitation.</summary>
+    internal const string InvitationCodeId = "authInvitationCode";
+
+    /// <summary>What a live invitation offers, as anyone holding its code sees it.</summary>
+    internal const string InvitationPreviewId = "authInvitationPreview";
+
     private static void AddInvitationComponents(OpenApiDocument document)
     {
+        document.AddComponent(InvitationCodeId, InvitationCode());
+        document.AddComponent(InvitationPreviewId, InvitationPreview());
         document.AddComponent(InvitationRequestId, InvitationRequest());
         document.AddComponent(InvitationId, Invitation(withCode: false));
         document.AddComponent(NewInvitationId, Invitation(withCode: true));
@@ -67,6 +75,35 @@ internal static partial class AccountsSchemas
         schema.AdditionalPropertiesAllowed = false;
         return schema;
     }
+
+    private static OpenApiSchema InvitationCode()
+    {
+        var schema = Object(
+            "An invitation's code, in the body — never in a URL. No other member is accepted.",
+            ["code"],
+            ("code", new OpenApiSchema
+            {
+                Type = JsonSchemaType.String,
+                MinLength = 1,
+                Description = "The code exactly as the invitation's creator received it (`alvo_inv_…`).",
+            }));
+        schema.AdditionalPropertiesAllowed = false;
+        return schema;
+    }
+
+    private static OpenApiSchema InvitationPreview() => Object(
+        "What a live invitation offers. Never the email it may be bound to.",
+        ["tenantName", "inviterName", "roles", "isOwner", "expiresAt", "emailBound"],
+        ("tenantName", Text("The tenant's name.")),
+        ("inviterName", Nullable("The display name of the owner who invited, or null.")),
+        ("roles", Strings("The tenant roles accepting it grants under the applied descriptor.")),
+        ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether accepting it makes an owner." }),
+        ("expiresAt", Instant("When it stops admitting anyone.")),
+        ("emailBound", new OpenApiSchema
+        {
+            Type = JsonSchemaType.Boolean,
+            Description = "Whether only the person whose provider vouches for one particular email may accept it.",
+        }));
 
     private static OpenApiSchema Invitation(bool withCode)
     {

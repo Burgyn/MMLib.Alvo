@@ -1,11 +1,14 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Api.Internal;
 
 namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>
-/// A tenant's invitations (spec §6.3, S4 plan D9–D11): an owner creates one at <c>POST {prefix}/tenants/{id}/invitations</c>
+/// A tenant's invitations (spec §6.3, S4 plan D8–D11): an owner creates one at <c>POST {prefix}/tenants/{id}/invitations</c>
 /// — the answer carries its code, once — lists them at <c>GET</c> on the same path, and revokes one at
-/// <c>DELETE …/invitations/{invitationId}</c>.
+/// <c>DELETE …/invitations/{invitationId}</c>; anyone holding a code previews it at <c>POST {prefix}/invitations/preview</c>,
+/// and a signed-in person accepts it at <c>POST {prefix}/invitations/accept</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,9 +20,17 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// either sees a non-owner or is swept by the demotion. The membership read before it is the S3 routes' stranger gate — a
 /// tenant the person is no honoured member of answers as one that does not exist.
 /// </para>
+/// <para>
+/// <b>Every dead code is one answer</b> (D3): unknown, malformed, expired, revoked, used up, bound to another or an untrusted
+/// email, into a personal tenant, or from a creator who is no longer an owner — preview and accept answer the S3 routes'
+/// <c>not-found</c>, byte for byte. A person who already is a member of the code's tenant is answered their membership
+/// instead, whatever the code's state (the <c>AlreadyMember</c> ruling): that tells them nothing they do not know.
+/// </para>
 /// </remarks>
 internal static class InvitationRoutes
 {
+    private const string InvalidToken = "invalid_token";
+
     /// <summary><c>POST {prefix}/tenants/{tenantId}/invitations</c>: a new invitation, answered with its code.</summary>
     /// <param name="http">The request.</param>
     /// <param name="tenantId">The tenant, from the route.</param>
@@ -92,6 +103,70 @@ internal static class InvitationRoutes
         var status = await call.Store.RevokeInvitationAsync(revocation, call.Ct).ConfigureAwait(false);
         return status == MemberChangeStatus.Changed ? Results.NoContent() : SelfServiceProblems.Refused(status);
     }
+
+    /// <summary>
+    /// <c>POST {prefix}/invitations/preview</c>: what a live invitation offers, to anyone holding its code — no credential is
+    /// read (D8), since under <c>invitationOnly</c> the invitee has no account yet.
+    /// </summary>
+    /// <param name="http">The request.</param>
+    internal static async Task<IResult> PreviewAsync(HttpContext http)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        var policy = SelfServiceCall.PolicyOf(http);
+        if (SelfServiceProblems.InvitationsOff(policy) is { } disabled)
+        {
+            return disabled;
+        }
+
+        var (body, invalid) = await SelfServiceCall.ReadAsync<InvitationCodeBody>(http, InvitationCodeBody.ReadAsync).ConfigureAwait(false);
+        if (body is null)
+        {
+            return invalid!;
+        }
+
+        var services = http.RequestServices;
+        var now = services.GetRequiredService<TimeProvider>().GetUtcNow();
+        var preview = await services.GetRequiredService<ITenantStore>()
+            .PreviewInvitationAsync(body.CodeHash, now, http.RequestAborted).ConfigureAwait(false);
+        return preview is null ? Dead() : SelfServiceCall.Json(InvitationPreviewResponse.From(preview, policy));
+    }
+
+    /// <summary><c>POST {prefix}/invitations/accept</c>: the person joins the invitation's tenant, or already is a member.</summary>
+    /// <param name="http">The request.</param>
+    /// <exception cref="InvalidOperationException">The registry answered a status this route does not know.</exception>
+    internal static async Task<IResult> AcceptAsync(HttpContext http)
+    {
+        var (call, refusal) = await SelfServiceCall.EnterAsync(http, SelfServiceProblems.InvitationsOff).ConfigureAwait(false);
+        if (call is null)
+        {
+            return refusal!;
+        }
+
+        var (body, invalid) = await call.ReadAsync<InvitationCodeBody>(InvitationCodeBody.ReadAsync).ConfigureAwait(false);
+        if (body is null)
+        {
+            return invalid!;
+        }
+
+        var outcome = await call.Store.AcceptInvitationAsync(
+            new AcceptInvitationRequest(body.CodeHash, call.Person, call.Now), call.Ct).ConfigureAwait(false);
+        return outcome.Status switch
+        {
+            AcceptInvitationStatus.Joined or AcceptInvitationStatus.AlreadyMember => Membership(call, outcome.Membership!),
+            AcceptInvitationStatus.Dead => Dead(),
+            AcceptInvitationStatus.NoAccount => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
+            _ => throw new InvalidOperationException(
+                $"The tenant registry answered an acceptance with {outcome.Status}, which this route does not know."),
+        };
+    }
+
+    private static IResult Membership(SelfServiceCall call, StoredMembership membership) =>
+        MembershipRules.Honours(membership, call.Policy)
+            ? SelfServiceCall.Json(SelfServiceMemberships.Response(membership, call.Policy))
+            : Dead();
+
+    /// <summary>The one answer for every dead code (D3): the S3 routes' <c>not-found</c>, byte for byte.</summary>
+    private static IResult Dead() => SelfServiceProblems.NoSuchTenant();
 
     private static async Task<IResult> CreatedAsync(SelfServiceCall call, TenantId tenant, InvitationRequest request)
     {
