@@ -23,6 +23,12 @@ internal sealed record PersonSession(UserId Account, Guid Session, string Provid
 /// <b>The descriptor stays the switch</b> (S2 D10): a session whose provider the applied descriptor no longer lists is not
 /// live, whatever the store says — checked in memory, before the read.
 /// </para>
+/// <para>
+/// <b>No applied descriptor, no person.</b> A host that has not applied a descriptor yet identifies nobody — not even for
+/// <c>/logout</c>, which needs no live session — and says so here rather than leaving it to IdentityModel to refuse an
+/// empty audience: a configured <see cref="AlvoAccountsOptions.Audience"/> would otherwise validate a token no
+/// descriptor admits.
+/// </para>
 /// </remarks>
 /// <param name="tokens">Validates the access token.</param>
 /// <param name="store">Answers whether the session is live.</param>
@@ -56,11 +62,16 @@ internal sealed class PersonSessions(
     internal async ValueTask<PersonSession?> IdentifyAsync(string accessToken, HttpRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(accessToken);
+        if (signIn.Applied is not { } policy)
+        {
+            return null;
+        }
+
         var settings = options.Value;
         var subject = await tokens.ValidateAsync(
             accessToken,
             AccountsIssuer.IssuerFor(request, settings),
-            AccountsIssuer.AudienceFor(settings, signIn.Policy),
+            AccountsIssuer.AudienceFor(settings, policy),
             ct).ConfigureAwait(false);
         return subject is null ? null : new PersonSession(subject.Account, subject.Session, subject.Provider);
     }

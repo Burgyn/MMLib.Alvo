@@ -16,7 +16,10 @@ namespace MMLib.Alvo.Accounts.Internal;
 internal sealed class DescriptorSignIn(IPolicyCatalogProvider catalog, OidcProviders providers)
 {
     /// <summary>Gets the applied descriptor's sign-in policy; <see cref="SignInPolicy.None"/> before any apply.</summary>
-    internal SignInPolicy Policy => catalog.Current?.SignIn ?? SignInPolicy.None;
+    internal SignInPolicy Policy => Applied ?? SignInPolicy.None;
+
+    /// <summary>Gets the applied descriptor's sign-in policy, or <see langword="null"/> while no descriptor is applied.</summary>
+    internal SignInPolicy? Applied => catalog.Current?.SignIn;
 
     /// <summary>Whether <paramref name="policy"/> lists the configured provider named <paramref name="provider"/>.</summary>
     /// <param name="policy">The sign-in policy the caller read once for this request.</param>
