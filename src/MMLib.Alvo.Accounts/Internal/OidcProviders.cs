@@ -38,6 +38,15 @@ internal sealed class OidcProviders
     internal bool TryFindByIssuer(string issuer, [NotNullWhen(true)] out OidcProvider? provider)
         => _byIssuer.TryGetValue(issuer, out provider);
 
+    /// <summary>The configured provider named <paramref name="name"/> — the name an identity and a session record.</summary>
+    /// <param name="name">The provider's name in the descriptor, e.g. <c>google</c>.</param>
+    /// <param name="provider">The provider, when this deployment configures one by that name.</param>
+    internal bool TryFindByName(string name, [NotNullWhen(true)] out OidcProvider? provider)
+    {
+        provider = All.FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.Ordinal));
+        return provider is not null;
+    }
+
     private void AddIssuers(OidcProvider provider)
     {
         foreach (var issuer in provider.Issuers)

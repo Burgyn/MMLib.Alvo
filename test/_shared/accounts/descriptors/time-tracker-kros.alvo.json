@@ -1,0 +1,35 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "time-tracker",
+  "description": "Level 1 restricted to one company: only a person whose trusted email is in kros.sk may sign up.",
+  "auth": {
+    "providers": [
+      "google"
+    ],
+    "signUp": {
+      "mode": "open",
+      "allowedEmailDomains": [
+        "kros.sk"
+      ]
+    }
+  },
+  "entities": {
+    "time_entries": {
+      "audit": true,
+      "fields": {
+        "minutes": {
+          "type": "integer",
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "created_by == @user.id",
+        "get": "created_by == @user.id",
+        "create": "'authenticated' in @user.roles",
+        "update": "created_by == @user.id",
+        "delete": "created_by == @user.id"
+      }
+    }
+  }
+}

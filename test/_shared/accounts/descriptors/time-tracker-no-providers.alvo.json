@@ -1,0 +1,24 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "time-tracker",
+  "description": "Level 1's entities with no auth.providers, so no person can sign in whatever the host configures (S2 D10).",
+  "entities": {
+    "time_entries": {
+      "audit": true,
+      "fields": {
+        "minutes": {
+          "type": "integer",
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "created_by == @user.id",
+        "get": "created_by == @user.id",
+        "create": "'authenticated' in @user.roles",
+        "update": "created_by == @user.id",
+        "delete": "created_by == @user.id"
+      }
+    }
+  }
+}

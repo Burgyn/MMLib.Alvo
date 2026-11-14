@@ -86,6 +86,10 @@ namespace MMLib.Alvo.Api
         public const string OutOfScope = "out-of-scope";
         public const string PreconditionFailed = "precondition-failed";
         public const string PreconditionRequired = "precondition-required";
+        public const string RateLimited = "rate-limited";
+        public const string SignInRefused = "sign-in-refused";
+        public const string SignUpRefused = "sign-up-refused";
+        public const string TokenRefused = "token-refused";
         public const string Unauthenticated = "unauthenticated";
         public const string UnreadableRequest = "unreadable-request";
         public const string UnsupportedMediaType = "unsupported-media-type";

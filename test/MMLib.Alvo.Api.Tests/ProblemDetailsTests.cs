@@ -473,7 +473,8 @@ public sealed class ProblemDetailsTests
         reached.Add(await ExpressionFailedSlugAnsweredByAnIntOfTextAsync());
 
         reached.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ShouldBe(
-            AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal).Order(StringComparer.Ordinal),
+            AlvoProblemTypes.All.Except(PendingUntilALaterTask, StringComparer.Ordinal)
+                .Except(AnsweredOnlyOnTheSignInRoutes, StringComparer.Ordinal).Order(StringComparer.Ordinal),
             "every slug not pending a later task must be reachable from an endpoint");
     }
 
@@ -666,6 +667,24 @@ public sealed class ProblemDetailsTests
     /// </remarks>
     private static string[] PendingUntilALaterTask => [];
 
+    /// <summary>
+    /// The slugs only <c>MMLib.Alvo.Accounts</c>' sign-in routes answer with — never a Data API route, which is all this
+    /// suite maps (it references no Accounts package).
+    /// </summary>
+    /// <remarks>
+    /// Not pending: each is reached over HTTP by the Accounts suite, which drives the token endpoint —
+    /// <c>TokenExchangeTests</c> (<c>token-refused</c>, <c>sign-up-refused</c>, <c>sign-in-refused</c>) and
+    /// <c>TokenRateLimitTests</c> (<c>rate-limited</c>, once the token endpoint is limited). A Data API route that came to
+    /// answer one of them would be a route Alvo limits or signs in through, and would have to leave this list with a probe.
+    /// </remarks>
+    private static string[] AnsweredOnlyOnTheSignInRoutes =>
+    [
+        AlvoProblemTypes.TokenRefused,
+        AlvoProblemTypes.SignUpRefused,
+        AlvoProblemTypes.SignInRefused,
+        AlvoProblemTypes.RateLimited,
+    ];
+
     private static readonly TestApiKey _narrow = new("narrow-key", ["authenticated"], ["vehicles:read"]);
 
     /// <summary>One request per slug the Data API can answer with today, each reaching a different refusal path.</summary>
@@ -792,6 +811,10 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.DestructiveChange("a plan that discards data"),
         ProblemResultFactory.ManagementDescriptorRefused(
             new MMLib.Alvo.Descriptor.DescriptorValidationException("no entities")),
+        ProblemResultFactory.OAuthError(StatusCodes.Status400BadRequest, AlvoProblemTypes.TokenRefused, "invalid_grant", "Sign in again."),
+        ProblemResultFactory.OAuthError(StatusCodes.Status403Forbidden, AlvoProblemTypes.SignUpRefused, "access_denied", "Not admitted."),
+        ProblemResultFactory.OAuthError(StatusCodes.Status403Forbidden, AlvoProblemTypes.SignInRefused, "access_denied", "Refused."),
+        ProblemResultFactory.RateLimited(60),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),

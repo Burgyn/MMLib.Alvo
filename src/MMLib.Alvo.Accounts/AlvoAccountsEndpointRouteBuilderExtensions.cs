@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Routing;
+using MMLib.Alvo.Accounts.Internal;
 
 namespace Microsoft.AspNetCore.Builder;
 
@@ -9,14 +10,17 @@ public static class AlvoAccountsEndpointRouteBuilderExtensions
     /// Maps the sign-in routes under <see cref="MMLib.Alvo.Accounts.AlvoAccountsOptions.Prefix"/>.
     /// </summary>
     /// <remarks>
-    /// Requires <c>AddAlvoAccounts</c>, and no pipeline step beyond routing.
+    /// Requires <c>AddAlvoAccounts</c>, and no pipeline step beyond routing. Today: <c>POST {prefix}/token</c>, signing a
+    /// person in by exchanging a provider's ID token (RFC 8693).
     /// </remarks>
+    /// <exception cref="InvalidOperationException"><c>AddAlvoAccounts</c> was not called.</exception>
     /// <param name="endpoints">The route builder to map into.</param>
     /// <returns>The route builder, for chaining.</returns>
     public static IEndpointRouteBuilder MapAlvoAccounts(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        AccountsEndpoints.Map(endpoints);
         return endpoints;
     }
 }

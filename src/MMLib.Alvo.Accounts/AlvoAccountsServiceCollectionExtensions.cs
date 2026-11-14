@@ -11,6 +11,12 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>Registers Alvo's end-user sign-in.</summary>
 public static class AlvoAccountsServiceCollectionExtensions
 {
+    /// <summary>The largest discovery document or key set read: Google's are a few KiB.</summary>
+    private const long MetadataMaxBytes = 256 * 1024;
+
+    /// <summary>How long a provider's discovery document or keys may take to arrive.</summary>
+    private static readonly TimeSpan _metadataTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// Adds end-user sign-in: its options, refused at startup when they cannot sign anyone in safely, and the services
     /// <see cref="Microsoft.AspNetCore.Builder.AlvoAccountsEndpointRouteBuilderExtensions.MapAlvoAccounts"/> maps.
@@ -39,8 +45,38 @@ public static class AlvoAccountsServiceCollectionExtensions
 
         AddValidatedOptions(services, configure);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AccountsStartupWarnings>());
+        AddVerification(services);
+        AddTokenEndpoint(services);
 
         return services;
+    }
+
+    /// <summary>
+    /// The ID-token verifier and the named client it fetches provider metadata with: bounded in time and size, because a
+    /// sign-in waits on it, and without <c>IHttpClientFactory</c>'s logging handlers (only metadata URLs travel on it, but
+    /// the webhook client's rule — the library decides what its clients log — holds here too).
+    /// </summary>
+    private static void AddVerification(IServiceCollection services)
+    {
+        services.TryAddSingleton<OidcProviders>();
+        services.TryAddSingleton<OidcIdTokenVerifier>();
+        services.TryAddSingleton<IIdentityVerifier>(provider => provider.GetRequiredService<OidcIdTokenVerifier>());
+        services.AddHttpClient(OidcIdTokenVerifier.HttpClientName, client =>
+        {
+            client.Timeout = _metadataTimeout;
+            client.MaxResponseContentBufferSize = MetadataMaxBytes;
+        }).RemoveAllLoggers();
+    }
+
+    private static void AddTokenEndpoint(IServiceCollection services)
+    {
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<AccountKeys>();
+        services.TryAddSingleton<AccessTokens>();
+        services.TryAddSingleton<DescriptorSignIn>();
+        services.TryAddSingleton<TokenIssuance>();
+        services.TryAddSingleton<ExchangeGrant>();
+        services.TryAddSingleton<TokenEndpoint>();
     }
 
     private static void AddValidatedOptions(IServiceCollection services, Action<AlvoAccountsOptions>? configure)

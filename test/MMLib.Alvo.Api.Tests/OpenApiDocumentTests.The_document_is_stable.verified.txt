@@ -1930,7 +1930,11 @@
               "https://alvo.dev/errors/function-failed",
               "https://alvo.dev/errors/chain-depth-exceeded",
               "https://alvo.dev/errors/hook-failed",
-              "https://alvo.dev/errors/expression-failed"
+              "https://alvo.dev/errors/expression-failed",
+              "https://alvo.dev/errors/token-refused",
+              "https://alvo.dev/errors/sign-up-refused",
+              "https://alvo.dev/errors/sign-in-refused",
+              "https://alvo.dev/errors/rate-limited"
             ],
             "type": "string",
             "description": "The classification to branch on. Every value is listed here, so a client needs no prose: the namespace is `https://alvo.dev/errors/` and the slug names the kind of refusal.",

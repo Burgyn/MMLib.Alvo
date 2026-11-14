@@ -375,6 +375,54 @@ internal static class ProblemResultFactory
         "The request could not be completed because of an internal error. It has been logged; retry, and if it "
         + "persists, report it to whoever operates this instance.");
 
+    /// <summary>
+    /// An OAuth 2.0 error from the token endpoint (spec D4): a problem document that also carries RFC 6749 §5.2's
+    /// <c>error</c> and <c>error_description</c> members, so an OAuth client reading <c>error</c> from the body and an agent
+    /// branching on <c>type</c> both find what they look for.
+    /// </summary>
+    /// <remarks>
+    /// The description is the <c>detail</c> as well, and is always a fixed sentence the caller chose nothing of: a token
+    /// endpoint's input is a credential, and echoing any of it would put a secret in a response body and a log.
+    /// </remarks>
+    /// <param name="status">The status code.</param>
+    /// <param name="slug">One of <see cref="AlvoProblemTypes"/>' sign-in slugs.</param>
+    /// <param name="error">The RFC 6749 / RFC 8693 error code.</param>
+    /// <param name="description">The fixed, human-readable description.</param>
+    /// <param name="extensions">Further members, e.g. the sign-up refusal's <c>policy</c>.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult OAuthError(
+        int status, string slug, string error, string description, IReadOnlyDictionary<string, object?>? extensions = null)
+    {
+        var members = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [OAuthErrorMember] = error,
+            [OAuthErrorDescriptionMember] = description,
+        };
+        foreach (var (name, value) in extensions ?? new Dictionary<string, object?>())
+        {
+            members[name] = value;
+        }
+
+        return Problem(status, slug, description, members);
+    }
+
+    /// <summary>The 429 for a caller over a route's rate limit, with the <c>Retry-After</c> the limiter suggests.</summary>
+    /// <param name="retryAfterSeconds">Whole seconds until the window admits the caller again.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult RateLimited(int retryAfterSeconds) => new AdvertisingResult(
+        Problem(
+            StatusCodes.Status429TooManyRequests,
+            AlvoProblemTypes.RateLimited,
+            "Too many requests from this client. Wait for the time Retry-After names, then send the request again."),
+        HeaderNames.RetryAfter,
+        retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>RFC 6749 §5.2's error-code member.</summary>
+    private const string OAuthErrorMember = "error";
+
+    /// <summary>RFC 6749 §5.2's human-readable description member.</summary>
+    private const string OAuthErrorDescriptionMember = "error_description";
+
     /// <summary>An inbound webhook delivery that failed verification: 401, with no challenge — Standard Webhooks names none.</summary>
     internal static IResult WebhookRefused(string detail) =>
         Problem(StatusCodes.Status401Unauthorized, AlvoProblemTypes.Unauthenticated, detail);
