@@ -25,8 +25,9 @@ internal static class GeneratedEntityCheck
     /// <summary>The shipped packages: they hold no generated class, so discovery never loads them.</summary>
     internal static IReadOnlySet<string> ShippedPackages { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
-        "MMLib.Alvo", "MMLib.Alvo.Abstractions", "MMLib.Alvo.Admin", "MMLib.Alvo.Ai", "MMLib.Alvo.Data.EntityFrameworkCore",
-        "MMLib.Alvo.Data.PostgreSql", "MMLib.Alvo.Data.Sqlite", "MMLib.Alvo.Identity", "MMLib.Alvo.TestHost",
+        "MMLib.Alvo", "MMLib.Alvo.Abstractions", "MMLib.Alvo.Accounts", "MMLib.Alvo.Admin", "MMLib.Alvo.Ai",
+        "MMLib.Alvo.Data.EntityFrameworkCore", "MMLib.Alvo.Data.PostgreSql", "MMLib.Alvo.Data.Sqlite", "MMLib.Alvo.Identity",
+        "MMLib.Alvo.TestHost",
     };
 
     /// <summary>The generated classes in <paramref name="root"/> and the assemblies it references that reference the core.</summary>

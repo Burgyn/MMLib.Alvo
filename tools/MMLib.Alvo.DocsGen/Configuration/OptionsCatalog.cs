@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Admin;
+﻿using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Admin;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
@@ -38,6 +39,7 @@ internal static class OptionsCatalog
     {
         typeof(AlvoIdentityOptions),
         typeof(AlvoAdminOptions),
+        typeof(AlvoAccountsOptions),
     };
 
     internal static IReadOnlyDictionary<string, string> OverwrittenByTheStandaloneHost { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -64,12 +66,14 @@ internal static class OptionsCatalog
     internal static IReadOnlyList<ConfigurationSection> Read(IEnumerable<Assembly> assemblies, XmlDocs docs)
     {
         var candidates = Discover(assemblies);
-        var nested = candidates.SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)).Select(property => property.PropertyType).ToHashSet();
+        var nested = candidates.SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)).SelectMany(property => HeldTypes(property.PropertyType)).ToHashSet();
         return [.. candidates
             .Where(type => !nested.Contains(type) && !NotBoundFromConfiguration.ContainsKey(type))
             .Select(type => Section(type, docs))
             .OrderBy(section => section.Name, StringComparer.Ordinal)];
     }
+
+    private static IEnumerable<Type> HeldTypes(Type propertyType) => [propertyType, .. propertyType.GenericTypeArguments];
 
     internal static List<Type> Discover(IEnumerable<Assembly> assemblies) =>
     [

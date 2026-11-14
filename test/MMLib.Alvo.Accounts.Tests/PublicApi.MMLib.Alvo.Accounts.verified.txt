@@ -1,0 +1,44 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Accounts
+{
+    public static class AlvoAccounts
+    {
+        public const string ConfigurationSection = "Alvo:Accounts";
+    }
+    public sealed class AlvoAccountsOptions
+    {
+        public AlvoAccountsOptions() { }
+        public int AccessTokenMinutes { get; set; }
+        public string? Audience { get; set; }
+        public string? Issuer { get; set; }
+        public string Prefix { get; set; }
+        public System.Collections.Generic.Dictionary<string, MMLib.Alvo.Accounts.AlvoOidcProviderOptions> Providers { get; }
+        public int RefreshIdleDays { get; set; }
+        public int RefreshReuseGraceSeconds { get; set; }
+        public int SessionLifetimeDays { get; set; }
+    }
+    public sealed class AlvoOidcProviderOptions
+    {
+        public AlvoOidcProviderOptions() { }
+        public bool AllowHttpMetadata { get; set; }
+        public string? Authority { get; set; }
+        public System.Collections.Generic.List<string> ClientIds { get; }
+        public bool TrustEmail { get; set; }
+    }
+}
+namespace Microsoft.AspNetCore.Builder
+{
+    public static class AlvoAccountsEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoAccounts(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+}
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class AlvoAccountsServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAlvoAccounts(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<MMLib.Alvo.Accounts.AlvoAccountsOptions>? configure = null) { }
+    }
+}

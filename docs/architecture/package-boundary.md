@@ -104,6 +104,20 @@
   (a heavy dependency an embedded host that wants only the Data API must not acquire) and **(b)**
   (identity is a real swap point — `samples/MMLib.Alvo.Samples.EmbeddedHost` already replaces it).
   Referenced by `MMLib.Alvo.Host` only.
+- `src/MMLib.Alvo.Accounts` — end-user sign-in (spec 2026-11-13 §5, §11.1): the OAuth token endpoint, sessions,
+  signing keys, the OIDC ID-token verifier, JWKS and metadata, `/user`, and the person resolver. Earned by **(a)** — it
+  brings `Microsoft.IdentityModel.JsonWebTokens` and `Microsoft.IdentityModel.Protocols.OpenIdConnect` (MIT,
+  first-party, one version for both), which an embedded host that wants only the Data API must not acquire — and by
+  **(b)**: sign-in is a real swap point, and a host with its own identity provider (#210) replaces exactly this package.
+  It references **Abstractions and the core**, and it is the first shipped product assembly the core grants
+  `InternalsVisibleTo`: what it consumes (`CallerResolution`, `ProblemResultFactory`, the CORS and rate-limit filters,
+  membership resolution, `SignInPolicy`) is core by the spec, and publishing five seams for one in-family consumer would
+  be a commitment no un-publishing could take back. The grant reaches every other core internal too, so
+  `AccountsArchitectureTests` holds that it references none of the security-core members or ambient-flow setters the
+  Abstractions grants already police, that it adds nothing beyond IdentityModel to what the core brings, and that its
+  project file asks for exactly those four references. Its stores live in the EF adapter behind the Abstractions-internal
+  `IAccountStore`, so it takes no data driver. Its public surface is five things: `AlvoAccounts`,
+  `AlvoAccountsOptions`, `AlvoOidcProviderOptions`, `AddAlvoAccounts` and `MapAlvoAccounts`.
 - `src/MMLib.Alvo.TestHost` — the testing kit (`AlvoTestHost`): a real backend over a private in-memory SQLite
   database, with the outbox drained on the test's schedule (spec 2026-10-14 §4.15). **Earned by rule (a)**: it drags
   a database driver (`MMLib.Alvo.Data.Sqlite`, and through it EF Core's SQLite provider), and it carries

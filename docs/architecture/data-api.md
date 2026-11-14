@@ -979,8 +979,11 @@ one document-wide list of every classification Alvo can mint, not a per-operatio
 ## How a request becomes a caller: one credential reading
 
 **The guarantee.** A host that runs its own authentication keeps working. Alvo reads the `Authorization` header only
-when a person resolver (an `IAlvoContextResolver` registered under the key `alvo-person`) is registered, and then only
-for the `Bearer` scheme. Without one, every `Authorization` value, `Bearer` included, is left alone for the host's
+when a person resolver is registered — the `IAlvoContextResolver` `MMLib.Alvo.Accounts` registers in `AddAlvoAccounts`,
+under the core's internal key `CallerResolution.PersonResolverKey` — and then only for the `Bearer` scheme. The key is
+deliberately not published: a host-supplied person resolver is #210's design, and a string a host could register under
+today would be a contract nobody designed (S2 decision; `AlvoIdentity.ResolverKey` is public because a host does
+consume it). Without one, every `Authorization` value, `Bearer` included, is left alone for the host's
 own `JwtBearer` or a Basic-auth proxy, exactly as before. The Management API never reads it at all.
 
 **Why one reading.** Three places turn a request into an `AlvoContext`: the Data API filter (`AlvoContextFilter`), the
@@ -1004,17 +1007,17 @@ endpoints; `Management`), not three copies.
 **The rules the table leaves open**
 
 - `Authorization` is read only when `Alvo:Auth:HeaderName` is *not* `Authorization` (compared ignoring case). Naming it
-  as the API-key header is allowed today, and the API-key channel then owns it exactly as before. The accounts slice
-  that registers the person resolver (S2) must refuse that combination at startup, because the two channels cannot both
-  own one header.
+  as the API-key header is allowed in a host without accounts, and the API-key channel then owns it exactly as before.
+  `AddAlvoAccounts` refuses that combination at startup, naming `Alvo:Auth:HeaderName`, because the two channels cannot
+  both own one header.
 - The scheme is the text before the first space, compared ignoring case (RFC 7235 section 2.1). Any scheme but `Bearer`
   is ignored.
 - A Bearer value is malformed when its token is empty or contains whitespace, or when more than one `Authorization`
   line arrives and any of them is Bearer. That is a 401, never "take the first": it is the repeated-header rule the
   API key already follows.
 - "A person resolver is registered" is read once, from the container's keyed-service lookup; a container that cannot
-  answer counts as *not registered*, which is today's behaviour. Only a registration under exactly `alvo-person`
-  counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
+  answer counts as *not registered*, which is today's behaviour. Only a registration under exactly the person-resolver
+  key counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
   register, and a container that says yes to that one holds a catch-all, not a person resolver — the channel stays
   closed. The resolver itself is resolved per request, so a scoped one works.
 - The tenant header is passed to the person resolver as received, as it is to the API-key resolver. Validating it is the

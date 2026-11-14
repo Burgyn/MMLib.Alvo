@@ -1,4 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Ai.Eval")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Analyzers.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Api.Invariants.Tests.Integration")]

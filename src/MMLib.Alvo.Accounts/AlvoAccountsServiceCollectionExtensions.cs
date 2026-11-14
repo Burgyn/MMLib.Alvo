@@ -1,0 +1,63 @@
+﻿using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Accounts.Internal;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Secrets;
+
+namespace Microsoft.Extensions.DependencyInjection;
+
+/// <summary>Registers Alvo's end-user sign-in.</summary>
+public static class AlvoAccountsServiceCollectionExtensions
+{
+    /// <summary>
+    /// Adds end-user sign-in: its options, refused at startup when they cannot sign anyone in safely, and the services
+    /// <see cref="Microsoft.AspNetCore.Builder.AlvoAccountsEndpointRouteBuilderExtensions.MapAlvoAccounts"/> maps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This call is the switch.</b> A host that never makes it keeps starting without a secrets key file and leaves
+    /// the <c>Authorization</c> header to its own authentication. A host that makes it must have a relational store
+    /// (<c>UseSqlite</c> or <c>UsePostgreSql</c> inside <c>AddAlvo</c>), a secrets key file
+    /// (<c>Alvo:Secrets:EncryptionKeyFile</c>), an API-key header other than <c>Authorization</c>, at least one
+    /// provider, and — outside Development — an issuer; the start is refused, naming each, otherwise.
+    /// </para>
+    /// <para>
+    /// <b>It binds nothing from configuration itself</b>, the <c>AddAlvoIdentity</c> precedent: the host decides where
+    /// the settings come from, typically <c>configure: o =&gt; configuration.GetSection(AlvoAccounts.ConfigurationSection).Bind(o)</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="configure">Configures sign-in: the providers, the issuer and the lifetimes.</param>
+    /// <returns><paramref name="services"/>, for chaining.</returns>
+    public static IServiceCollection AddAlvoAccounts(
+        this IServiceCollection services,
+        Action<AlvoAccountsOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        AddValidatedOptions(services, configure);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AccountsStartupWarnings>());
+
+        return services;
+    }
+
+    private static void AddValidatedOptions(IServiceCollection services, Action<AlvoAccountsOptions>? configure)
+    {
+        var options = services.AddOptions<AlvoAccountsOptions>().ValidateOnStart();
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoAccountsOptions>, AlvoAccountsOptionsValidation>(CreateValidation));
+    }
+
+    private static AlvoAccountsOptionsValidation CreateValidation(IServiceProvider provider) => new(
+        provider.GetService<IHostEnvironment>(),
+        provider.GetRequiredService<IOptions<AlvoSecretOptions>>(),
+        provider.GetRequiredService<IOptions<AlvoAuthOptions>>(),
+        provider.GetService<IServiceProviderIsService>());
+}

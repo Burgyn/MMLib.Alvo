@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.DocsGen.Configuration;
@@ -29,7 +30,7 @@ public class OptionsCatalogTests
     public void The_sections_are_exactly_what_discovery_finds() =>
         _sections.Select(s => s.Name).ShouldBe(
         [
-            "Alvo", "Alvo:Admin", "Alvo:Admin:Dashboard", "Alvo:Ai", "Alvo:Api", "Alvo:Auth", "Alvo:Deliveries", "Alvo:Events",
+            "Alvo", "Alvo:Accounts", "Alvo:Admin", "Alvo:Admin:Dashboard", "Alvo:Ai", "Alvo:Api", "Alvo:Auth", "Alvo:Deliveries", "Alvo:Events",
             "Alvo:Extensions", "Alvo:Management", "Alvo:Schema", "Alvo:Secrets",
         ]);
 
@@ -39,7 +40,20 @@ public class OptionsCatalogTests
         var accounted = _sections.Select(s => s.OptionsType).Concat(OptionsCatalog.NotBoundFromConfiguration.Keys).ToHashSet();
 
         OptionsCatalog.Discover(_assemblies).Where(type => !accounted.Contains(type))
-            .ShouldBe([typeof(AlvoHostForwardedHeadersOptions), typeof(AlvoHostDatabaseOptions), typeof(AlvoHostDocsOptions)], ignoreOrder: true);
+            .ShouldBe(
+                [typeof(AlvoHostForwardedHeadersOptions), typeof(AlvoHostDatabaseOptions), typeof(AlvoHostDocsOptions), typeof(AlvoOidcProviderOptions)],
+                ignoreOrder: true);
+    }
+
+    /// <summary>An options type held as a dictionary's value is a nested section keyed by name, not a section of its own.</summary>
+    [Fact]
+    public void A_dictionary_of_objects_is_keyed_by_name()
+    {
+        var accounts = _sections.Single(s => s.Name == "Alvo:Accounts");
+
+        accounts.Keys.Select(k => k.Key).ShouldContain("Alvo:Accounts:Providers:{name}:ClientIds:{n}");
+        accounts.Keys.Select(k => k.Key).ShouldContain("Alvo:Accounts:Providers:{name}:AllowHttpMetadata");
+        accounts.Scope.ShouldBe(OptionsCatalog.HostBoundScope);
     }
 
     [Fact]
