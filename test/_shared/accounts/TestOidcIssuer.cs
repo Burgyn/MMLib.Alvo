@@ -40,6 +40,8 @@ public sealed class TestOidcIssuer : IDisposable
 
     private int _discoveryFetches;
 
+    private int _requests;
+
     /// <summary>Creates an issuer whose first key is <c>test-1</c>.</summary>
     /// <param name="clock">The clock a token's default <c>iat</c> comes from; the system clock when omitted.</param>
     public TestOidcIssuer(TimeProvider? clock = null)
@@ -57,6 +59,9 @@ public sealed class TestOidcIssuer : IDisposable
 
     /// <summary>Gets how many times the discovery document was fetched.</summary>
     public int DiscoveryFetches => Volatile.Read(ref _discoveryFetches);
+
+    /// <summary>Gets how many requests reached the issuer at all, answered or not.</summary>
+    public int Requests => Volatile.Read(ref _requests);
 
     private RsaSecurityKey Current => _keys[^1];
 
@@ -92,6 +97,7 @@ public sealed class TestOidcIssuer : IDisposable
     /// <param name="kid">The <c>kid</c> header; the signing key's own when omitted.</param>
     /// <param name="issuer">The <c>iss</c>; <see cref="Authority"/> when omitted.</param>
     /// <param name="notBefore">The <c>nbf</c>, or none.</param>
+    /// <param name="audiences">Several <c>aud</c> values as an array, in place of <paramref name="audience"/>.</param>
     public string Mint(
         string subject,
         string? email = "ada@gmail.com",
@@ -104,15 +110,21 @@ public sealed class TestOidcIssuer : IDisposable
         string? alg = null,
         string? kid = null,
         string? issuer = null,
-        DateTimeOffset? notBefore = null)
+        DateTimeOffset? notBefore = null,
+        string[]? audiences = null)
     {
         var iat = issuedAt ?? _clock.GetUtcNow();
         var claims = Claims(subject, email, emailVerified, hd, jti);
+        if (audiences is not null)
+        {
+            claims["aud"] = audiences;
+        }
+
         var descriptor = new SecurityTokenDescriptor
         {
             TokenType = "JWT",
             Issuer = issuer ?? Authority,
-            Audience = audience,
+            Audience = audiences is null ? audience : null,
             IssuedAt = iat.UtcDateTime,
             NotBefore = notBefore?.UtcDateTime,
             Expires = (iat + (lifetime ?? TimeSpan.FromHours(1))).UtcDateTime,
@@ -178,6 +190,7 @@ public sealed class TestOidcIssuer : IDisposable
 
     private HttpResponseMessage Answer(HttpRequestMessage request)
     {
+        Interlocked.Increment(ref _requests);
         var origin = request.RequestUri!.GetLeftPart(UriPartial.Authority);
         return request.RequestUri.AbsolutePath switch
         {

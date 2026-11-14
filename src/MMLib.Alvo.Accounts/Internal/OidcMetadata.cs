@@ -24,6 +24,14 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// <see cref="UnknownKidInterval"/> rather than on every request; only a provider never reached is
 /// <see cref="IdTokenRefusal.Unreachable"/>.
 /// </para>
+/// <para>
+/// <b>A provider never reached is not asked again on every attempt.</b> A failed first fetch backs off
+/// <see cref="FirstBackoff"/>, doubling per failure up to <see cref="MaxBackoff"/>, and every attempt inside the backoff
+/// is <see cref="IdTokenRefusal.Unreachable"/> with no request. The backoff is re-read after the gate is acquired, so the
+/// attempts queued behind the one that failed answer at once rather than each fetching again — an unsigned JWT naming
+/// the provider's issuer is all a caller needs to reach this point, so without it every attempt would be an outbound
+/// request held for the client's whole timeout.
+/// </para>
 /// </remarks>
 /// <param name="provider">The provider.</param>
 /// <param name="clients">Where the <see cref="OidcIdTokenVerifier.HttpClientName"/> client comes from.</param>
@@ -38,6 +46,12 @@ internal sealed partial class OidcMetadata(
     /// <summary>Gets how long fetched keys are used before they are fetched again (<c>ConfigurationManager</c>'s default).</summary>
     internal static TimeSpan RefreshInterval { get; } = TimeSpan.FromHours(12);
 
+    /// <summary>Gets how long a provider never reached is left alone after its first failed fetch.</summary>
+    internal static TimeSpan FirstBackoff { get; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Gets the longest a provider never reached is left alone after a failed fetch.</summary>
+    internal static TimeSpan MaxBackoff { get; } = TimeSpan.FromMinutes(5);
+
     private const string DiscoveryPath = "/.well-known/openid-configuration";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -46,6 +60,8 @@ internal sealed partial class OidcMetadata(
 
     private DateTimeOffset? _lastUnknownKidFetch;
 
+    private volatile Backoff? _backoff;
+
     /// <inheritdoc/>
     public void Dispose() => _gate.Dispose();
 
@@ -53,20 +69,15 @@ internal sealed partial class OidcMetadata(
     /// <param name="ct">A token to cancel the operation.</param>
     internal async ValueTask<OpenIdConnectConfiguration?> GetAsync(CancellationToken ct)
     {
-        if (_current is { } current && clock.GetUtcNow() < current.RefreshAt)
+        if (TryHeld(out var held))
         {
-            return current.Configuration;
+            return held;
         }
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_current is { } fetched && clock.GetUtcNow() < fetched.RefreshAt)
-            {
-                return fetched.Configuration;
-            }
-
-            return (await FetchAsync(ct).ConfigureAwait(false))?.Configuration;
+            return TryHeld(out var fetched) ? fetched : (await FetchAsync(ct).ConfigureAwait(false))?.Configuration;
         }
         finally
         {
@@ -100,6 +111,19 @@ internal sealed partial class OidcMetadata(
         }
     }
 
+    private bool TryHeld(out OpenIdConnectConfiguration? configuration)
+    {
+        var now = clock.GetUtcNow();
+        if (_current is { } current && now < current.RefreshAt)
+        {
+            configuration = current.Configuration;
+            return true;
+        }
+
+        configuration = null;
+        return _current is null && _backoff is { } backoff && now < backoff.RetryAt;
+    }
+
     private async Task<Snapshot?> FetchAsync(CancellationToken ct)
     {
         try
@@ -109,14 +133,30 @@ internal sealed partial class OidcMetadata(
             var configuration = await OpenIdConnectConfigurationRetriever
                 .GetAsync(provider.Authority.TrimEnd('/') + DiscoveryPath, retriever, ct)
                 .ConfigureAwait(false);
+            _backoff = null;
             return _current = new Snapshot(configuration, clock.GetUtcNow() + RefreshInterval);
         }
         catch (Exception failure) when (IsFetchFailure(failure, ct))
         {
             MetadataUnreachable(logger, provider.Name, provider.Authority, failure.GetType().Name);
-            return _current = _current is { } held ? held with { RefreshAt = clock.GetUtcNow() + UnknownKidInterval } : null;
+            return Failed();
         }
     }
+
+    private Snapshot? Failed()
+    {
+        var now = clock.GetUtcNow();
+        if (_current is { } held)
+        {
+            return _current = held with { RefreshAt = now + UnknownKidInterval };
+        }
+
+        var delay = _backoff is { } previous ? Min(previous.Delay * 2, MaxBackoff) : FirstBackoff;
+        _backoff = new Backoff(now + delay, delay);
+        return null;
+    }
+
+    private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
 
     private static bool IsFetchFailure(Exception failure, CancellationToken ct)
         => failure is IOException or HttpRequestException or ArgumentException or InvalidOperationException or JsonException
@@ -130,4 +170,6 @@ internal sealed partial class OidcMetadata(
     private static partial void MetadataUnreachable(ILogger logger, string provider, string authority, string failure);
 
     private sealed record Snapshot(OpenIdConnectConfiguration Configuration, DateTimeOffset RefreshAt);
+
+    private sealed record Backoff(DateTimeOffset RetryAt, TimeSpan Delay);
 }

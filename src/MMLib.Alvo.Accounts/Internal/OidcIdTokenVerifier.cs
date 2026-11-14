@@ -21,7 +21,13 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// handler's <c>ValidAlgorithms</c> repeats it. The key is the one the <c>kid</c> names, never every key in turn.
 /// </para>
 /// <para>
-/// <b>Deviation: <c>azp</c> is not checked</b> (§3.1.3.7 items 4–5 are SHOULDs). Google's documented server-side check is
+/// <b>Every <c>aud</c> must be a configured client id</b> (§3.1.3.7 item 3: a token is rejected when it "contains
+/// additional audiences not trusted by the Client"), not merely one of them: a multi-audience issuer can mint
+/// <c>aud: [another-app, ours]</c> for another relying party, and that token must not sign anyone in here.
+/// </para>
+/// <para>
+/// <b>Deviation: <c>azp</c> is not checked.</b> OIDC Core errata set 2 reworded §3.1.3.7 items 4–5 so that <c>azp</c> is
+/// validated only as the extension that introduced it says. Google's documented server-side check is
 /// <c>aud</c> alone, and an Android or iOS sign-in carries the mobile client's id in <c>azp</c> while <c>aud</c> names the
 /// web client the backend configured; requiring it would refuse Google's own mobile flow.
 /// </para>
@@ -113,6 +119,11 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
             return IdentityVerification.Refused(RefusalOf(result.Exception));
         }
 
+        if (!OnlyOurAudiences(provider, token))
+        {
+            return IdentityVerification.Refused(IdTokenRefusal.Audience);
+        }
+
         return TimeRefusal(token) is { } late ? IdentityVerification.Refused(late) : Verified(provider, token, subjectToken);
     }
 
@@ -143,6 +154,9 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
 
     private static bool Publishes(OpenIdConnectConfiguration configuration, string kid)
         => configuration.SigningKeys.Any(key => string.Equals(key.KeyId, kid, StringComparison.Ordinal));
+
+    private static bool OnlyOurAudiences(OidcProvider provider, JsonWebToken token)
+        => token.Audiences.All(audience => provider.ClientIds.Contains(audience, StringComparer.Ordinal));
 
     private static TokenValidationParameters Parameters(
         OidcProvider provider, OpenIdConnectConfiguration configuration, string[] algorithms) => new()

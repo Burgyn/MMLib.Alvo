@@ -75,6 +75,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     [Theory]
     [InlineData("issuer not configured", nameof(IdTokenRefusal.UnknownIssuer))]
     [InlineData("another app's client id", nameof(IdTokenRefusal.Audience))]
+    [InlineData("ours beside another app's", nameof(IdTokenRefusal.Audience))]
+    [InlineData("ours with a trailing slash", nameof(IdTokenRefusal.Audience))]
     [InlineData("signed by another key", nameof(IdTokenRefusal.Signature))]
     [InlineData("alg none", nameof(IdTokenRefusal.Algorithm))]
     [InlineData("HS256", nameof(IdTokenRefusal.Algorithm))]
@@ -93,6 +95,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         {
             "issuer not configured" => _issuer.Mint("sub-1", issuer: "https://elsewhere.test"),
             "another app's client id" => _issuer.Mint("sub-1", audience: "another-app"),
+            "ours beside another app's" => _issuer.Mint("sub-1", audiences: [ClientId, "another-app"]),
+            "ours with a trailing slash" => _issuer.Mint("sub-1", audience: ClientId + "/"),
             "signed by another key" => stranger.Mint("sub-1"),
             "alg none" => _issuer.Mint("sub-1", alg: "none"),
             "HS256" => _issuer.Mint("sub-1", alg: "HS256"),
@@ -244,6 +248,46 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         var line = log.Lines.ShouldHaveSingleItem();
         line.ShouldContain("https://issuer.test/missing");
         token.Split('.').ShouldAllBe(part => !line.Contains(part));
+    }
+
+    [Fact]
+    public async Task Concurrent_attempts_against_a_dead_provider_make_one_fetch_and_the_backoff_makes_none()
+    {
+        using var verifier = Verifier(Google(authority: TestOidcIssuer.Authority + "/missing"));
+        var token = _issuer.Mint("sub-1");
+
+        var attempts = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => verifier.VerifyAsync(token, Ct).AsTask()));
+        _clock.Advance(OidcMetadata.FirstBackoff - TimeSpan.FromSeconds(1));
+        var insideTheBackoff = await verifier.VerifyAsync(token, Ct);
+
+        attempts.ShouldAllBe(attempt => attempt.Refusal == IdTokenRefusal.Unreachable);
+        insideTheBackoff.Refusal.ShouldBe(IdTokenRefusal.Unreachable);
+        _issuer.Requests.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task The_backoff_doubles_per_failure_up_to_its_cap()
+    {
+        using var verifier = Verifier(Google(authority: TestOidcIssuer.Authority + "/missing"));
+        var token = _issuer.Mint("sub-1");
+        var delays = new List<int>();
+
+        await verifier.VerifyAsync(token, Ct);
+        for (var failure = 0; failure < 6; failure++)
+        {
+            var before = _issuer.Requests;
+            var waited = 0;
+            while (_issuer.Requests == before)
+            {
+                _clock.Advance(TimeSpan.FromSeconds(1));
+                waited++;
+                await verifier.VerifyAsync(_issuer.Mint("sub-1"), Ct);
+            }
+
+            delays.Add(waited);
+        }
+
+        delays.ShouldBe([30, 60, 120, 240, 300, 300]);
     }
 
     [Fact]
