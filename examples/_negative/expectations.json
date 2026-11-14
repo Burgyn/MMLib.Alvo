@@ -7,6 +7,8 @@
   "index-exclude-missing-to.json": { "pointer": "#/entities/bookings/indexes/0/exclude", "messageContains": "to" },
   "index-where-not-cel-string.json": { "pointer": "#/entities/members/indexes/0/where" },
   "reserved-users-entity.json": { "pointer": "#/entities/users" },
+  "self-service-admin-assignable.json": { "pointer": "/tenancy/selfService/assignableRoles/0", "messageContains": "built-in role", "refusedBy": "apply" },
+  "self-service-without-tenancy.json": { "pointer": "/tenancy/selfService", "messageContains": "tenancy.enabled", "refusedBy": "apply" },
   "sequence-two-numbers.json": { "pointer": "#/entities/orders/fields/code/sequence/format", "messageContains": "pattern" },
   "sequence-unknown-period.json": { "pointer": "#/entities/orders/fields/number/sequence/period" },
   "sequence-windows-time-zone.json": { "pointer": "#/entities/orders/fields/number/sequence/timeZone", "messageContains": "pattern" },

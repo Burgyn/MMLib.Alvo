@@ -287,7 +287,7 @@ public sealed class PostgreSqlExclusionLockTests : IAsyncLifetime
     {
         ApiVersion = "alvo.dev/v1",
         Name = "exclusion-locks",
-        Tenancy = new Tenancy { Enabled = true },
+        Tenancy = new MMLib.Alvo.Descriptor.Tenancy { Enabled = true },
         Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
         {
             [Bookings] = new()

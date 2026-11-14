@@ -72,6 +72,9 @@ public sealed class DeclaredSlotsAgreementTests
         """ "auth": { "providers": ["local"] }, "entities": { "n": { "realtime": false, "fields": { "t": { "type": "string" } } } }""",
         """ "auth": { "providers": ["local", "github"] }, "entities": { "n": { "realtime": true, "storage": "dynamic", "fields": { "t": { "type": "string" } } } }""",
         """ "entities": { "n": { "storage": "physical", "fields": { "t": { "type": "string" } } } }""",
+        """ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": true } }""",
+        """ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": false } }""",
+        """ "tenancy": { "enabled": true, "selfService": {} }""",
     ];
 
     [Theory]

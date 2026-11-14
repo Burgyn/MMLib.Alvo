@@ -7,6 +7,7 @@ using MMLib.Alvo.Functions.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tenancy.SelfService;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
@@ -113,6 +114,14 @@ public sealed class PolicyCatalog
     /// it on the apply that drops it.
     /// </remarks>
     internal SignInPolicy SignIn { get; init; } = SignInPolicy.None;
+
+    /// <summary>Gets what the descriptor's <c>tenancy.selfService</c> says: the tenant roles, the personal tenant and the creator's roles.</summary>
+    /// <remarks>
+    /// <see langword="internal"/> for the reason <see cref="SignIn"/> is; consumers read it as
+    /// <c>IPolicyCatalogProvider.Current?.SelfService ?? SelfServicePolicy.None</c>, so a membership's effective roles
+    /// follow the descriptor that is applied, on the next request.
+    /// </remarks>
+    internal SelfServicePolicy SelfService { get; init; } = SelfServicePolicy.None;
 
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>

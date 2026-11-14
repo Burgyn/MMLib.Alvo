@@ -88,6 +88,12 @@
     ]
   },
   {
+    file: self-service-admin-assignable.json
+  },
+  {
+    file: self-service-without-tenancy.json
+  },
+  {
     file: sequence-two-numbers.json,
     failures: [
       {

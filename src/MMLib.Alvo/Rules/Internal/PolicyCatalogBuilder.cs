@@ -6,6 +6,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tenancy.SelfService;
 
 namespace MMLib.Alvo.Rules.Internal;
 
@@ -69,6 +70,7 @@ internal static class PolicyCatalogBuilder
         catalog = new PolicyCatalog(entities, roles, schema, managementAccess, automation)
         {
             SignIn = SignInPolicy.From(descriptor),
+            SelfService = SelfServicePolicy.From(descriptor, roles),
         };
         errors = [];
         return true;

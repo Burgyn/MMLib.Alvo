@@ -1068,6 +1068,17 @@ namespace MMLib.Alvo.Descriptor
         [System.Text.Json.Serialization.JsonStringEnumMemberName("max")]
         Max = 4,
     }
+    public sealed class SelfServiceCreateTenants : System.IEquatable<MMLib.Alvo.Descriptor.SelfServiceCreateTenants>
+    {
+        public SelfServiceCreateTenants() { }
+        public System.Collections.Generic.IReadOnlyList<string>? CreatorRoles { get; init; }
+        public int? MaxPerAccount { get; init; }
+    }
+    public sealed class SelfServicePersonalTenant : System.IEquatable<MMLib.Alvo.Descriptor.SelfServicePersonalTenant>
+    {
+        public SelfServicePersonalTenant() { }
+        public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+    }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SequencePeriod>))]
     public enum SequencePeriod
     {
@@ -1107,6 +1118,15 @@ namespace MMLib.Alvo.Descriptor
     {
         public Tenancy() { }
         public bool? Enabled { get; init; }
+        public MMLib.Alvo.Descriptor.TenancySelfService? SelfService { get; init; }
+    }
+    public sealed class TenancySelfService : System.IEquatable<MMLib.Alvo.Descriptor.TenancySelfService>
+    {
+        public TenancySelfService() { }
+        public System.Collections.Generic.IReadOnlyList<string>? AssignableRoles { get; init; }
+        public MMLib.Alvo.Descriptor.SelfServiceCreateTenants? CreateTenants { get; init; }
+        public bool? Invitations { get; init; }
+        public MMLib.Alvo.Descriptor.SelfServicePersonalTenant? PersonalTenant { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.Descriptor.ValueOrExprConverter?))]
     public sealed class ValueOrExpr : System.IEquatable<MMLib.Alvo.Descriptor.ValueOrExpr>
