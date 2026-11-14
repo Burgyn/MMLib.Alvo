@@ -137,7 +137,9 @@ internal sealed record VerifiedIdentity(
 /// <param name="PersonalTenant">The personal tenant to ensure, or <see langword="null"/> when the descriptor gives none.</param>
 /// <param name="Invitation">
 /// The invitation to accept in the same transaction (S4 plan D5, D7), or <see langword="null"/> for a sign-in that carries
-/// none; a dead one refuses the whole sign-in with <see cref="SignInStatus.InvitationRefused"/>.
+/// none. A dead one refuses the whole sign-in with <see cref="SignInStatus.InvitationRefused"/> — unless the account
+/// already is a member of the invitation's tenant, which signs in with nothing accepted, however dead the code (the
+/// <c>AlreadyMember</c> ruling of <c>InvitationAcceptance</c>).
 /// </param>
 internal sealed record SignInRequest(
     VerifiedIdentity Identity,

@@ -40,7 +40,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <see cref="InvitationAcceptance"/> — the tenant store's own routine — accepts the sign-in's invitation for the account.
 /// A dead one answers <see cref="SignInStatus.InvitationRefused"/>, which carries no account, so the transaction rolls back
 /// the account, identity, session, refresh token and personal tenant with it: all or nothing, for a new account and an
-/// existing one alike.
+/// existing one alike — except for an account that already is a member of the code's tenant, which signs in with nothing
+/// accepted, however dead the code (<see cref="AcceptInvitationStatus.AlreadyMember"/>).
 /// </para>
 /// <para>
 /// <b>One read answers session and membership</b> (D4): <see cref="ReadCallerAsync"/> is one statement in each of its three
@@ -168,7 +169,8 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
 
     /// <summary>
     /// Accepts the sign-in's invitation, if it carries one, for <paramref name="account"/> with the tenant store's own
-    /// routine (S4 plan D4, D5); <see langword="false"/> when it is dead or the account could not be locked, and then the
+    /// routine (S4 plan D4, D5); <see langword="true"/> too when the account already is a member of the code's tenant,
+    /// however dead the code; <see langword="false"/> when it is dead or the account could not be locked, and then the
     /// caller answers <see cref="SignInStatus.InvitationRefused"/> and nothing commits. The account's email was refreshed
     /// earlier in this transaction, so an email binding is judged by this sign-in's identity.
     /// </summary>
