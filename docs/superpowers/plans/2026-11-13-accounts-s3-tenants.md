@@ -745,4 +745,7 @@ internal static class MembershipRules
   `selfService`. Close with **mark this change `needs-deep-review`**.
 - [ ] **Step 5: Hand back** to the controller (plan-guard, PR report, PR targeting `accounts/s2-sign-in`). Flag for the
   post-merge mutation run: the EF adapter grows by `EfCoreTenantStore` and `EfCoreAccountStore` grows again, so the
-  `data-ef` shards' declared counts go stale (they are the shards nearest their ceiling).
+  `data-ef` shards' declared counts go stale (they are the shards nearest their ceiling). The core half has its own
+  answer since the final review (I1): the twelve self-service route files are off the core leg (`stryker-config.json`)
+  and on a `self-service` leg against `MMLib.Alvo.Accounts.Tests`, whose counts and thresholds are ESTIMATED until its
+  first run re-measures them.

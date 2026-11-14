@@ -23,7 +23,19 @@
       "!**/Commands/Internal/CommandInputs.cs",
       "!**/Commands/Internal/CommandGateCheck.cs",
       "!**/InboundWebhooks/Internal/WebhookReceiver.cs",
-      "!**/InboundWebhooks/Internal/LedgerSweeper.cs"
+      "!**/InboundWebhooks/Internal/LedgerSweeper.cs",
+      "!**/Tenants/SelfService/SelfServiceEndpoints.cs",
+      "!**/Tenants/SelfService/TenantRoutes.cs",
+      "!**/Tenants/SelfService/MemberRoutes.cs",
+      "!**/Tenants/SelfService/MemberPatch.cs",
+      "!**/Tenants/SelfService/SelfServiceCall.cs",
+      "!**/Tenants/SelfService/SelfServicePerson.cs",
+      "!**/Tenants/SelfService/SelfServiceBody.cs",
+      "!**/Tenants/SelfService/SelfServiceProblems.cs",
+      "!**/Tenants/SelfService/SelfServiceMemberships.cs",
+      "!**/Tenants/SelfService/MemberResponse.cs",
+      "!**/Tenants/SelfService/MembershipResponse.cs",
+      "!**/Tenants/SelfService/TenantName.cs"
     ],
     "thresholds": {
       "high": 80,
