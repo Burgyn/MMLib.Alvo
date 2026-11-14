@@ -396,6 +396,31 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The one race whose loser reaches the owner count (spec §6.4): two owners leave at the same instant. The leaver that
+    /// waited on the other's version bump re-counts the owners after it committed and finds itself the last one.
+    /// </summary>
+    [Fact]
+    public async Task Two_owners_leaving_at_once_leave_exactly_one_owner()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (tenant, first, second) = await TwoOwnersAsync(store, services);
+
+            var statuses = await Task.WhenAll(
+                store.RemoveMemberAsync(Remove(tenant, first, first), Ct),
+                store.RemoveMemberAsync(Remove(tenant, second, second), Ct));
+
+            statuses.ShouldBe([MemberChangeStatus.Changed, MemberChangeStatus.LastOwner], ignoreOrder: true, $"iteration {iteration}");
+            var remaining = await Task.WhenAll(store.FindMembershipAsync(first, tenant, Ct), store.FindMembershipAsync(second, tenant, Ct));
+            remaining.Count(membership => membership is { IsOwner: true }).ShouldBe(1, $"iteration {iteration}");
+            remaining.Count(membership => membership is null).ShouldBe(1, $"iteration {iteration}");
+            (await OwnersAsync(services, tenant)).ShouldBe(1, $"iteration {iteration}");
+        }
+    }
+
     /// <summary>Starts a fresh database and returns its tenant store and container.</summary>
     private protected async Task<(ITenantStore Store, IServiceProvider Services)> StoreAsync()
     {
