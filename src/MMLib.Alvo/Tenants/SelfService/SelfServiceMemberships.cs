@@ -21,16 +21,58 @@ internal sealed class SelfServiceMemberships(IServiceProvider services, IPolicyC
     internal async Task<IReadOnlyList<MembershipResponse>> ListAsync(UserId user, CancellationToken ct)
     {
         var policy = catalogs.Current?.SelfService ?? SelfServicePolicy.None;
-        if (!policy.Enabled || services.GetService<ITenantStore>() is not { } store)
-        {
-            return [];
-        }
-
-        var stored = await store.ListMembershipsAsync(user, ct).ConfigureAwait(false);
-        return [.. stored.Where(membership => membership.Kind == TenantKind.Shared || policy.HasPersonalTenant)
-            .Select(membership => MembershipResponse.From(membership, Roles(membership, policy)))];
+        return !policy.Enabled || services.GetService<ITenantStore>() is not { } store
+            ? []
+            : await ListAsync(store, policy, user, ct).ConfigureAwait(false);
     }
 
-    private static IReadOnlySet<Role> Roles(StoredMembership membership, SelfServicePolicy policy) =>
-        membership.Kind == TenantKind.Personal ? policy.PersonalTenantRoles! : policy.Effective(membership.Roles);
+    /// <summary>The memberships of <paramref name="user"/> <paramref name="policy"/> honours, read from <paramref name="store"/>.</summary>
+    /// <param name="store">The registry.</param>
+    /// <param name="policy">The applied self-service policy, enabled.</param>
+    /// <param name="user">The person.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    internal static async Task<IReadOnlyList<MembershipResponse>> ListAsync(
+        ITenantStore store, SelfServicePolicy policy, UserId user, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(policy);
+        var stored = await store.ListMembershipsAsync(user, ct).ConfigureAwait(false);
+        return [.. stored.Where(membership => Honoured(membership, policy)).Select(membership => Response(membership, policy))];
+    }
+
+    /// <summary>Whether <paramref name="policy"/> honours <paramref name="membership"/>: a personal one only with personal tenants.</summary>
+    /// <param name="membership">The stored membership.</param>
+    /// <param name="policy">The applied self-service policy.</param>
+    internal static bool Honoured(StoredMembership membership, SelfServicePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(membership);
+        ArgumentNullException.ThrowIfNull(policy);
+        return policy.Enabled && (membership.Kind == TenantKind.Shared || policy.HasPersonalTenant);
+    }
+
+    /// <summary>The response for <paramref name="membership"/> with the roles <paramref name="policy"/> makes effective (D5).</summary>
+    /// <param name="membership">The stored membership.</param>
+    /// <param name="policy">The applied self-service policy.</param>
+    internal static MembershipResponse Response(StoredMembership membership, SelfServicePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(membership);
+        ArgumentNullException.ThrowIfNull(policy);
+        return MembershipResponse.From(membership, Roles(membership.Kind, membership.Roles, policy));
+    }
+
+    /// <summary>
+    /// The tenant roles a membership of <paramref name="kind"/> storing <paramref name="stored"/> carries under
+    /// <paramref name="policy"/>: a personal one's are <c>personalTenant.roles</c>, a shared one's the stored names still
+    /// assignable — never a name the descriptor no longer lists.
+    /// </summary>
+    /// <param name="kind">The tenant's kind.</param>
+    /// <param name="stored">The stored role names.</param>
+    /// <param name="policy">The applied self-service policy.</param>
+    internal static IReadOnlySet<Role> Roles(TenantKind kind, IEnumerable<string> stored, SelfServicePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        return kind == TenantKind.Personal
+            ? policy.PersonalTenantRoles ?? new HashSet<Role>()
+            : policy.Effective(stored);
+    }
 }

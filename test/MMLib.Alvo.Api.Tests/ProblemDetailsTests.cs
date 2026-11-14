@@ -674,7 +674,9 @@ public sealed class ProblemDetailsTests
     /// <remarks>
     /// Not pending: each is reached over HTTP by the Accounts suite, which drives the token endpoint —
     /// <c>TokenExchangeTests</c> (<c>token-refused</c>, <c>sign-up-refused</c>, <c>sign-in-refused</c>) and
-    /// <c>TokenRateLimitTests</c> (<c>rate-limited</c>, once the token endpoint is limited). A Data API route that came to
+    /// <c>TokenRateLimitTests</c> (<c>rate-limited</c>, once the token endpoint is limited); and the self-service routes
+    /// mapped beside them — <c>TenantRoutesTests</c> (<c>feature-disabled</c>, <c>tenant-limit</c>) and
+    /// <c>MemberRoutesTests</c> (<c>last-owner</c>). A Data API route that came to
     /// answer one of them would be a route Alvo limits or signs in through, and would have to leave this list with a probe.
     /// </remarks>
     private static string[] AnsweredOnlyOnTheSignInRoutes =>
@@ -683,6 +685,9 @@ public sealed class ProblemDetailsTests
         AlvoProblemTypes.SignUpRefused,
         AlvoProblemTypes.SignInRefused,
         AlvoProblemTypes.RateLimited,
+        AlvoProblemTypes.FeatureDisabled,
+        AlvoProblemTypes.LastOwner,
+        AlvoProblemTypes.TenantLimit,
     ];
 
     private static readonly TestApiKey _narrow = new("narrow-key", ["authenticated"], ["vehicles:read"]);
@@ -815,6 +820,11 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.OAuthError(StatusCodes.Status403Forbidden, AlvoProblemTypes.SignUpRefused, "access_denied", "Not admitted."),
         ProblemResultFactory.OAuthError(StatusCodes.Status403Forbidden, AlvoProblemTypes.SignInRefused, "access_denied", "Refused."),
         ProblemResultFactory.RateLimited(60),
+        ProblemResultFactory.FeatureDisabled("tenancy.selfService"),
+        ProblemResultFactory.TenantLimit(5),
+        ProblemResultFactory.LastOwner(),
+        ProblemResultFactory.PersonForbidden("Only an owner makes this change."),
+        ProblemResultFactory.MembershipConflict("A personal tenant has exactly one member."),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),
         Guarded(new AlvoPreconditionFailedException("stale")),

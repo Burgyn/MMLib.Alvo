@@ -424,6 +424,466 @@
         ]
       }
     },
+    "/auth/v1/tenants": {
+      "get": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "List my tenants",
+        "description": "The tenants the signed-in person belongs to, the personal one first, each with the tenant roles that count there under the applied descriptor and whether the person owns it.",
+        "operationId": "tenants.list",
+        "responses": {
+          "200": {
+            "description": "The person's memberships.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/authMembership"
+                  },
+                  "description": "The memberships, the personal one first, then by joining."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: an API key or an integration's token was presented; only a signed-in person manages tenants.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`feature-disabled`: the descriptor does not declare `tenancy.selfService`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Create a shared tenant",
+        "description": "Creates a tenant others can join, with an id the server chooses. The person becomes its owner, holding `createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.",
+        "operationId": "tenants.create",
+        "requestBody": {
+          "description": "The new tenant's name.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authTenantName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The tenant was created; the body is the person's owner membership.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Location": {
+                "description": "The new tenant's URL: `{prefix}/tenants/{tenantId}`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authMembership"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: an API key or an integration's token was presented; only a signed-in person manages tenants.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`feature-disabled`: the descriptor does not declare `tenancy.selfService` or `tenancy.selfService.createTenants`; `descriptorKey` names which.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap).",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body names another member.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Create` allows. Wait for `Retry-After`, then send the request again.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Retry-After": {
+                "description": "Whole seconds until the window admits this client again.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "60"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/auth/v1/tenants/{tenantId}": {
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Rename a tenant",
+        "description": "Renames a tenant the person owns, a personal one included. Answers the person's membership in it.",
+        "operationId": "tenants.rename",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The tenant's id, as `GET /tenants` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The tenant's new name.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authTenantName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The person's membership in the renamed tenant.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authMembership"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: the person is a member but not an owner, or the caller is not a signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not-found`: no such tenant, or the person is no member of it — the two are one answer. `feature-disabled`: the descriptor does not declare `tenancy.selfService`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body names another member.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store`: every answer here is about one person.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
     "/auth/v1/.well-known/oauth-authorization-server": {
       "get": {
         "tags": [
@@ -1345,6 +1805,47 @@
         },
         "description": "The public keys access tokens are signed with (RFC 7517 §5). Select one by the token header's `kid`."
       },
+      "authMembership": {
+        "required": [
+          "tenantId",
+          "name",
+          "kind",
+          "roles",
+          "isOwner"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "description": "The tenant's id: send it as `X-Alvo-Tenant` to act in this tenant.",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "The tenant's name."
+          },
+          "kind": {
+            "enum": [
+              "personal",
+              "shared"
+            ],
+            "type": "string",
+            "description": "`personal`: the person's own tenant, used when no tenant is named. `shared`: one others can join."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities."
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether the person manages this tenant. Not a role."
+          }
+        },
+        "description": "One tenant the person belongs to."
+      },
       "authServerMetadata": {
         "required": [
           "issuer",
@@ -1394,6 +1895,22 @@
           }
         },
         "description": "OAuth 2.0 authorization-server metadata (RFC 8414 §2)."
+      },
+      "authTenantName": {
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string",
+            "description": "The name: trimmed, 1–100 Unicode code points, no control character."
+          }
+        },
+        "additionalProperties": false,
+        "description": "A tenant's name. No other member is accepted."
       },
       "authToken": {
         "required": [
@@ -1522,45 +2039,7 @@
           "memberships": {
             "type": "array",
             "items": {
-              "required": [
-                "tenantId",
-                "name",
-                "kind",
-                "roles",
-                "isOwner"
-              ],
-              "type": "object",
-              "properties": {
-                "tenantId": {
-                  "type": "string",
-                  "description": "The tenant's id: send it as `X-Alvo-Tenant` to act in this tenant.",
-                  "format": "uuid"
-                },
-                "name": {
-                  "type": "string",
-                  "description": "The tenant's name."
-                },
-                "kind": {
-                  "enum": [
-                    "personal",
-                    "shared"
-                  ],
-                  "type": "string",
-                  "description": "`personal`: the person's own tenant, used when no tenant is named. `shared`: one others can join."
-                },
-                "roles": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities."
-                },
-                "isOwner": {
-                  "type": "boolean",
-                  "description": "Whether the person manages this tenant. Not a role."
-                }
-              },
-              "description": "One tenant the person belongs to."
+              "$ref": "#/components/schemas/authMembership"
             },
             "description": "The tenants this person belongs to, the personal one first. Empty unless the descriptor declares `tenancy.selfService`."
           }
@@ -1616,7 +2095,10 @@
               "https://alvo.dev/errors/token-refused",
               "https://alvo.dev/errors/sign-up-refused",
               "https://alvo.dev/errors/sign-in-refused",
-              "https://alvo.dev/errors/rate-limited"
+              "https://alvo.dev/errors/rate-limited",
+              "https://alvo.dev/errors/feature-disabled",
+              "https://alvo.dev/errors/last-owner",
+              "https://alvo.dev/errors/tenant-limit"
             ],
             "type": "string",
             "description": "The classification to branch on. Every value is listed here, so a client needs no prose: the namespace is `https://alvo.dev/errors/` and the slug names the kind of refusal.",
@@ -2379,6 +2861,10 @@
     {
       "name": "auth",
       "description": "End-user sign-in: exchange an identity provider's ID token for an Alvo session, refresh it, read and name the signed-in person, sign out, and discover the issuer and its signing keys."
+    },
+    {
+      "name": "tenants",
+      "description": "Self-service tenants: a signed-in person lists their tenants, creates shared ones, renames and manages the members of those they own. Each route answers 404 `feature-disabled` naming the descriptor key that enables it while the descriptor leaves it off."
     },
     {
       "name": "time_entries"

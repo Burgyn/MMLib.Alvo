@@ -27,6 +27,10 @@ public sealed class AccountsOpenApiTests
         "/auth/v1/.well-known/jwks.json",
     ];
 
+    private static readonly string[] _tenantPaths = ["/auth/v1/tenants", "/auth/v1/tenants/{tenantId}"];
+
+    private static readonly string[] _tenantOperations = ["tenants.list", "tenants.create", "tenants.rename"];
+
     [Fact]
     public async Task The_document_with_sign_in_is_stable()
     {
@@ -43,11 +47,32 @@ public sealed class AccountsOpenApiTests
         var document = await world.Api.OpenApiDocumentAsync();
 
         var paths = document["paths"]!.AsObject().Select(path => path.Key).ToList();
-        paths.Where(path => path.Contains("auth", StringComparison.Ordinal)).ShouldBe(_authPaths, ignoreOrder: true);
+        paths.Where(path => path.Contains("auth", StringComparison.Ordinal) && !path.Contains("/tenants", StringComparison.Ordinal))
+            .ShouldBe(_authPaths, ignoreOrder: true);
         var operations = Operations(document).Where(operation => Tags(operation).Contains("auth")).ToList();
         operations.Select(operation => operation["operationId"]!.GetValue<string>()).ShouldBe(
             ["auth.token", "auth.getUser", "auth.updateUser", "auth.logout", "auth.metadata", "auth.jwks"], ignoreOrder: true);
         operations.ShouldAllBe(operation => operation["summary"] != null && Tags(operation).Count == 1);
+    }
+
+    /// <summary>
+    /// The self-service routes are mapped whatever the descriptor says (S3 plan D1) — this world's has no
+    /// <c>selfService</c> — and each is described once, tagged <c>tenants</c>, taking only the Bearer scheme.
+    /// </summary>
+    [Fact]
+    public async Task Every_tenant_route_is_in_the_document_once()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, openApi: true);
+
+        var document = await world.Api.OpenApiDocumentAsync();
+
+        var paths = document["paths"]!.AsObject().Select(path => path.Key).ToList();
+        paths.Where(path => path.StartsWith("/auth/v1/tenants", StringComparison.Ordinal)).ShouldBe(_tenantPaths, ignoreOrder: true);
+        var operations = Operations(document).Where(operation => Tags(operation).Contains("tenants")).ToList();
+        operations.Select(operation => operation["operationId"]!.GetValue<string>()).ShouldBe(_tenantOperations, ignoreOrder: true);
+        operations.ShouldAllBe(operation => operation["summary"] != null && Tags(operation).Count == 1);
+        operations.ShouldAllBe(operation => Security(operation) == "[{\"alvoBearer\":[]}]");
+        operations.ShouldAllBe(operation => operation["responses"]!["404"] != null);
     }
 
     [Fact]

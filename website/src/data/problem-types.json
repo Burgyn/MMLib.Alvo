@@ -241,11 +241,38 @@
   },
   "rate-limited": {
     "causes": [
-      "This client address sent more requests to a limited route than it admits in its window — the token endpoint, `Alvo:Api:RateLimits:Token` per minute."
+      "This client address sent more requests to a limited route than it admits in its window — the token endpoint, `Alvo:Api:RateLimits:Token` per minute, or creating a tenant (`POST /auth/v1/tenants`), `Alvo:Api:RateLimits:Create` per minute."
     ],
     "fix": "Wait the seconds `Retry-After` names, then send the same request again.",
     "violationCodes": [],
     "guides": ["guides/authentication", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "feature-disabled": {
+    "causes": [
+      "Only on a host that maps the sign-in routes. A self-service route (`/auth/v1/tenants…`) was called while the applied descriptor leaves its feature off; the document's `descriptorKey` names the key that enables it — `tenancy.selfService`, or `tenancy.selfService.createTenants` for creating a tenant."
+    ],
+    "fix": "Declare the key `descriptorKey` names in the descriptor and apply it, or stop calling the route; no request alone changes the answer.",
+    "violationCodes": [],
+    "guides": ["guides/multi-tenancy", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "last-owner": {
+    "causes": [
+      "Only on the self-service routes. The change would leave a shared tenant without an owner: its last owner tried to leave, or the last owner was to be removed or demoted."
+    ],
+    "fix": "Make another member an owner first (`PATCH /auth/v1/tenants/{tenantId}/members/{userId}` with `\"isOwner\": true`), then send the same request again.",
+    "violationCodes": [],
+    "guides": ["guides/multi-tenancy", "guides/handle-errors"],
+    "needsProblemDetails": false
+  },
+  "tenant-limit": {
+    "causes": [
+      "Only on the self-service routes. The person has already created as many shared tenants as `tenancy.selfService.createTenants.maxPerAccount` allows; the document's `maxPerAccount` carries the cap. Every shared tenant the account ever created counts, so leaving one frees nothing."
+    ],
+    "fix": "Act in a tenant the person already belongs to, or raise `maxPerAccount` in the descriptor (at most 100).",
+    "violationCodes": [],
+    "guides": ["guides/multi-tenancy", "guides/handle-errors"],
     "needsProblemDetails": false
   }
 }

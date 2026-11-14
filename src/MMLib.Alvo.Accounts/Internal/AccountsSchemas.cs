@@ -36,6 +36,12 @@ internal static class AccountsSchemas
     /// <summary>One key of the key set.</summary>
     internal const string KeyId = "authJsonWebKey";
 
+    /// <summary>One tenant a person belongs to.</summary>
+    internal const string MembershipId = "authMembership";
+
+    /// <summary>A tenant's name, as creating or renaming one sends it.</summary>
+    internal const string TenantNameId = "authTenantName";
+
     /// <summary>Registers every component, unless the document already carries them.</summary>
     /// <param name="document">The document being built.</param>
     internal static void AddTo(OpenApiDocument document)
@@ -48,7 +54,9 @@ internal static class AccountsSchemas
 
         document.AddComponent(TokenRequestId, TokenRequest());
         document.AddComponent(TokenId, Token());
-        document.AddComponent(UserId, User());
+        document.AddComponent(MembershipId, Membership());
+        document.AddComponent(UserId, User(document));
+        document.AddComponent(TenantNameId, TenantName());
         document.AddComponent(UserUpdateId, UserUpdate());
         document.AddComponent(MetadataId, Metadata());
         document.AddComponent(KeyId, Key());
@@ -75,7 +83,7 @@ internal static class AccountsSchemas
         ("expires_in", new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Description = "The access token's lifetime, in seconds." }),
         ("refresh_token", Text("The refresh token for the next refresh.")));
 
-    private static OpenApiSchema User() => Object(
+    private static OpenApiSchema User(OpenApiDocument document) => Object(
         "The signed-in person: their account, the providers it signs in with, and the tenants they belong to.",
         ["id", "email", "emailTrusted", "name", "avatarUrl", "providers", "memberships"],
         ("id", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The account id: `@user.id` in rules." }),
@@ -89,7 +97,7 @@ internal static class AccountsSchemas
             Type = JsonSchemaType.Array,
             Description = "The tenants this person belongs to, the personal one first. Empty unless the descriptor declares "
                 + "`tenancy.selfService`.",
-            Items = Membership(),
+            Items = new OpenApiSchemaReference(MembershipId, document),
         }));
 
     private static OpenApiSchema Membership() => Object(
@@ -108,6 +116,22 @@ internal static class AccountsSchemas
             MembershipResponse.SharedKind)),
         ("roles", Strings("The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities.")),
         ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the person manages this tenant. Not a role." }));
+
+    private static OpenApiSchema TenantName()
+    {
+        var schema = Object(
+            "A tenant's name. No other member is accepted.",
+            ["name"],
+            ("name", new OpenApiSchema
+            {
+                Type = JsonSchemaType.String,
+                MinLength = 1,
+                MaxLength = Tenants.SelfService.TenantName.MaxLength,
+                Description = "The name: trimmed, 1–100 Unicode code points, no control character.",
+            }));
+        schema.AdditionalPropertiesAllowed = false;
+        return schema;
+    }
 
     private static OpenApiSchema UserUpdate()
     {

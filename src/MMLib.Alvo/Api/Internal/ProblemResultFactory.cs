@@ -433,6 +433,54 @@ internal static class ProblemResultFactory
         HeaderNames.RetryAfter,
         retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
+    /// <summary>
+    /// The 404 a self-service route answers while the applied descriptor leaves its feature off (S3 plan D8), naming the
+    /// descriptor key that turns it on in a <c>descriptorKey</c> member.
+    /// </summary>
+    /// <param name="descriptorKey">The key that enables the route, e.g. <c>tenancy.selfService</c>.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey) => Problem(
+        StatusCodes.Status404NotFound,
+        AlvoProblemTypes.FeatureDisabled,
+        $"This route answers only when the applied descriptor declares {descriptorKey}.",
+        new Dictionary<string, object?>(StringComparer.Ordinal) { [DescriptorKeyMember] = descriptorKey });
+
+    /// <summary>The 409 for a person who has created as many shared tenants as the descriptor allows (S3 plan D9).</summary>
+    /// <param name="maxPerAccount">The cap, carried in a <c>maxPerAccount</c> member.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult TenantLimit(int maxPerAccount) => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.TenantLimit,
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"This account has already created {maxPerAccount} shared tenants, the most one account may create; leaving one does not free a place."),
+        new Dictionary<string, object?>(StringComparer.Ordinal) { [MaxPerAccountMember] = maxPerAccount });
+
+    /// <summary>The 409 for a change that would leave a shared tenant without an owner (spec §6.4).</summary>
+    /// <returns>The problem result.</returns>
+    internal static IResult LastOwner() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.LastOwner,
+        "A shared tenant always keeps an owner. Make another member an owner first; then this one can leave, be removed or be demoted.");
+
+    /// <summary>The 403 for a self-service change the caller may not make — not an owner, or not a person at all.</summary>
+    /// <param name="detail">The fixed sentence saying who may.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult PersonForbidden(string detail) =>
+        Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, detail);
+
+    /// <summary>The 409 for a membership change the tenant's own state refuses, e.g. a personal tenant's.</summary>
+    /// <param name="detail">The fixed sentence saying why.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult MembershipConflict(string detail) =>
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
+
+    /// <summary>The <see cref="FeatureDisabled"/> member naming the descriptor key.</summary>
+    private const string DescriptorKeyMember = "descriptorKey";
+
+    /// <summary>The <see cref="TenantLimit"/> member carrying the cap.</summary>
+    private const string MaxPerAccountMember = "maxPerAccount";
+
     /// <summary>RFC 6749 §5.2's error-code member.</summary>
     private const string OAuthErrorMember = "error";
 
