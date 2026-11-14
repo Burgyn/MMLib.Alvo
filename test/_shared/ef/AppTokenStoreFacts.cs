@@ -318,6 +318,278 @@ public abstract class AppTokenStoreFacts : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(services);
+        var (other, _, _) = await TeamAsync(services);
+        await TenantSeed.AddMemberAsync(services, other, member, ["viewer"], isOwner: false, _now);
+        var here = Personal(member, tenant);
+        var tenantless = Personal(member, null);
+        var elsewhere = Personal(member, other);
+        var owners = Personal(owner, tenant);
+        await MintAllAsync(store, here, tenantless, elsewhere, owners);
+
+        (await Tenants(services).RemoveMemberAsync(new MemberRemoval(tenant, owner, member, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.Changed);
+
+        (await RevokedAtAsync(store, here.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, tenantless.KeyId)).ShouldBeNull("a tenantless token is not the tenant's");
+        (await RevokedAtAsync(store, elsewhere.KeyId)).ShouldBeNull("another tenant's membership is untouched");
+        (await RevokedAtAsync(store, owners.KeyId)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_member_leaving_revokes_the_same()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(services);
+        var here = Personal(member, tenant);
+        var tenantless = Personal(member, null);
+        var owners = Personal(owner, tenant);
+        await MintAllAsync(store, here, tenantless, owners);
+
+        (await Tenants(services).RemoveMemberAsync(new MemberRemoval(tenant, member, member, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.Changed);
+
+        (await RevokedAtAsync(store, here.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, tenantless.KeyId)).ShouldBeNull();
+        (await RevokedAtAsync(store, owners.KeyId)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(services);
+        var coOwner = await CoOwnerAsync(services, tenant);
+        var (other, otherOwner, _) = await TeamAsync(services);
+        await TenantSeed.AddMemberAsync(services, other, coOwner, ["dispatcher"], isOwner: true, _now);
+        var theirs = Service(coOwner, tenant, ["dispatcher"]);
+        var theirPersonal = Personal(coOwner, tenant);
+        var theirsElsewhere = Service(coOwner, other, ["dispatcher"]);
+        var mine = Service(owner, tenant, ["dispatcher"]);
+        var otherOwners = Service(otherOwner, other, ["dispatcher"]);
+        await MintAllAsync(store, theirs, theirPersonal, theirsElsewhere, mine, otherOwners);
+
+        (await Tenants(services).RemoveMemberAsync(new MemberRemoval(tenant, owner, coOwner, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.Changed);
+
+        (await RevokedAtAsync(store, theirs.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, theirPersonal.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, theirsElsewhere.KeyId)).ShouldBeNull("only the tenant they left");
+        (await RevokedAtAsync(store, mine.KeyId)).ShouldBeNull("another owner's service token lives");
+        (await RevokedAtAsync(store, otherOwners.KeyId)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(services);
+        var coOwner = await CoOwnerAsync(services, tenant);
+        var theirs = Service(coOwner, tenant, ["dispatcher"]);
+        var theirPersonal = Personal(coOwner, tenant);
+        var mine = Service(owner, tenant, ["dispatcher"]);
+        await MintAllAsync(store, theirs, theirPersonal, mine);
+
+        (await Tenants(services).UpdateMemberAsync(Demotion(tenant, owner, coOwner, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.Changed);
+
+        (await RevokedAtAsync(store, theirs.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, theirPersonal.KeyId)).ShouldBeNull("a personal token's roles are the member's live ones");
+        (await RevokedAtAsync(store, mine.KeyId)).ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A demotion cannot reach <see cref="MemberChangeStatus.LastOwner"/> sequentially (an owner never changes their own
+    /// membership, and another owner's demotion leaves the actor one), so the refusals pinned are a non-owner's demotion and
+    /// the sole owner's leaving — the write the last-owner check really refuses.
+    /// </summary>
+    [Fact]
+    public async Task A_refused_demotion_revokes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(services);
+        var service = Service(owner, tenant, ["dispatcher"]);
+        var personal = Personal(owner, tenant);
+        await MintAllAsync(store, service, personal);
+
+        (await Tenants(services).UpdateMemberAsync(Demotion(tenant, member, owner, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.NotOwner);
+        (await Tenants(services).RemoveMemberAsync(new MemberRemoval(tenant, owner, owner, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.LastOwner);
+
+        (await RevokedAtAsync(store, service.KeyId)).ShouldBeNull();
+        (await RevokedAtAsync(store, personal.KeyId)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Changing_a_member_s_roles_revokes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(services);
+        var coOwner = await CoOwnerAsync(services, tenant);
+        var service = Service(coOwner, tenant, ["dispatcher"]);
+        var personal = Personal(member, tenant);
+        await MintAllAsync(store, service, personal);
+
+        (await Tenants(services).UpdateMemberAsync(
+            new MemberUpdate(tenant, owner, coOwner, ["planner"], IsOwner: true, _now.AddHours(1)), Ct)).ShouldBe(MemberChangeStatus.Changed);
+        (await Tenants(services).UpdateMemberAsync(
+            new MemberUpdate(tenant, owner, member, ["planner"], IsOwner: null, _now.AddHours(1)), Ct)).ShouldBe(MemberChangeStatus.Changed);
+
+        (await RevokedAtAsync(store, service.KeyId)).ShouldBeNull("a service token's roles are fixed at mint");
+        (await RevokedAtAsync(store, personal.KeyId)).ShouldBeNull("a personal token's roles are the member's live ones");
+    }
+
+    [Fact]
+    public async Task Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(services);
+        var tenantless = Personal(owner, null);
+        var personal = Personal(owner, tenant);
+        var service = Service(owner, tenant, ["dispatcher"]);
+        var members = Personal(member, tenant);
+        await MintAllAsync(store, tenantless, personal, service, members);
+        var accounts = services.GetRequiredService<IAccountStore>();
+
+        (await accounts.SetDisabledAsync(owner, disabled: true, _now.AddHours(1), Ct)).ShouldBeTrue();
+        (await accounts.SetDisabledAsync(owner, disabled: false, _now.AddHours(2), Ct)).ShouldBeTrue();
+
+        (await RevokedAtAsync(store, tenantless.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, personal.KeyId)).ShouldBe(_now.AddHours(1));
+        (await RevokedAtAsync(store, service.KeyId)).ShouldBe(_now.AddHours(1), "a service token dies with its minter's account");
+        (await RevokedAtAsync(store, members.KeyId)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_rejoined_member_s_old_personal_token_stays_revoked()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(services);
+        var old = Personal(member, tenant);
+        await MintAllAsync(store, old);
+
+        (await Tenants(services).RemoveMemberAsync(new MemberRemoval(tenant, owner, member, _now.AddHours(1)), Ct))
+            .ShouldBe(MemberChangeStatus.Changed);
+        await TenantSeed.AddMemberAsync(services, tenant, member, ["viewer"], isOwner: false, _now.AddHours(2));
+
+        (await RevokedAtAsync(store, old.KeyId)).ShouldBe(_now.AddHours(1));
+    }
+
+    /// <summary>
+    /// Review Focus 2: two owners, one minting a service token while the other demotes them. The mint takes the tenant's lock
+    /// before it reads the minter's membership, so it either judges the demotion (<see cref="MintTokenStatus.NotOwner"/>, no
+    /// row) or commits first and is swept by it — never a live service token of a non-owner.
+    /// </summary>
+    [Fact]
+    public async Task A_service_mint_racing_its_minter_s_demotion_never_outlives_it()
+    {
+        var (store, services) = await StoreAsync();
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (tenant, owner, _) = await TeamAsync(services);
+            var coOwner = await CoOwnerAsync(services, tenant);
+            var request = Service(coOwner, tenant, ["dispatcher"]);
+
+            var (minted, demoted) = await RaceAsync(
+                () => store.MintAsync(request, Ct),
+                () => Tenants(services).UpdateMemberAsync(Demotion(tenant, owner, coOwner, _now.AddHours(1)), Ct));
+
+            demoted.ShouldBe(MemberChangeStatus.Changed, $"iteration {iteration}");
+            await ShouldNotOutliveAsync(store, request, minted, MintTokenStatus.NotOwner, iteration);
+        }
+    }
+
+    /// <summary>Review Focus 2: a member minting a personal token for the tenant while an owner removes them.</summary>
+    [Fact]
+    public async Task A_personal_mint_racing_the_person_s_removal_never_outlives_it()
+    {
+        var (store, services) = await StoreAsync();
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (tenant, owner, member) = await TeamAsync(services);
+            var request = Personal(member, tenant);
+
+            var (minted, removed) = await RaceAsync(
+                () => store.MintAsync(request, Ct),
+                () => Tenants(services).RemoveMemberAsync(new MemberRemoval(tenant, owner, member, _now.AddHours(1)), Ct));
+
+            removed.ShouldBe(MemberChangeStatus.Changed, $"iteration {iteration}");
+            await ShouldNotOutliveAsync(store, request, minted, MintTokenStatus.NotFound, iteration);
+        }
+    }
+
+    /// <summary>Review Focus 2: a person minting while an operator disables their account — the account-row lock decides.</summary>
+    [Fact]
+    public async Task A_mint_racing_a_ban_never_outlives_it()
+    {
+        var (store, services) = await StoreAsync();
+        var accounts = services.GetRequiredService<IAccountStore>();
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (tenant, owner, _) = await TeamAsync(services);
+            var request = Service(owner, tenant, ["dispatcher"]);
+
+            var (minted, disabled) = await RaceAsync(
+                () => store.MintAsync(request, Ct),
+                () => accounts.SetDisabledAsync(owner, disabled: true, _now.AddHours(1), Ct));
+
+            disabled.ShouldBeTrue($"iteration {iteration}");
+            await ShouldNotOutliveAsync(store, request, minted, MintTokenStatus.NoAccount, iteration);
+        }
+    }
+
+    /// <summary>Runs both operations at once, released together.</summary>
+    private static async Task<(TFirst First, TSecond Second)> RaceAsync<TFirst, TSecond>(
+        Func<Task<TFirst>> first, Func<Task<TSecond>> second)
+    {
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var one = Task.Run(async () => { await start.Task; return await first(); }, Ct);
+        var two = Task.Run(async () => { await start.Task; return await second(); }, Ct);
+        start.SetResult();
+        return (await one, await two);
+    }
+
+    /// <summary>The mint either was <paramref name="refusal"/> and stored nothing, or stored a row that is already revoked.</summary>
+    private static async Task ShouldNotOutliveAsync(
+        IAppTokenStore store, MintTokenRequest request, MintTokenOutcome minted, MintTokenStatus refusal, int iteration)
+    {
+        var record = await store.FindAsync(request.KeyId, Ct);
+        if (minted.Status == refusal)
+        {
+            record.ShouldBeNull($"iteration {iteration}: a refused mint stores nothing");
+            return;
+        }
+
+        minted.Status.ShouldBe(MintTokenStatus.Minted, $"iteration {iteration}");
+        record.ShouldNotBeNull($"iteration {iteration}").RevokedAt.ShouldNotBeNull($"iteration {iteration}: the mint outlived its reason");
+    }
+
+    private static async Task MintAllAsync(IAppTokenStore store, params MintTokenRequest[] requests)
+    {
+        foreach (var request in requests)
+        {
+            (await store.MintAsync(request, Ct)).Status.ShouldBe(MintTokenStatus.Minted);
+        }
+    }
+
+    /// <summary>A fresh account, added to <paramref name="tenant"/> as an owner holding <c>dispatcher</c>.</summary>
+    private static async Task<UserId> CoOwnerAsync(IServiceProvider services, TenantId tenant)
+    {
+        var coOwner = await SignedUpAsync(services, "Grace");
+        await TenantSeed.AddMemberAsync(services, tenant, coOwner, ["dispatcher"], isOwner: true, _now);
+        return coOwner;
+    }
+
+    private static MemberUpdate Demotion(TenantId tenant, UserId actor, UserId member, DateTimeOffset now) =>
+        new(tenant, actor, member, Roles: null, IsOwner: false, now);
+
+    private static ITenantStore Tenants(IServiceProvider services) => services.GetRequiredService<ITenantStore>();
+
+    [Fact]
     public void The_api_keys_table_is_a_reserved_framework_name() =>
         AlvoFrameworkTables.NamesFor("alvo").ShouldContain("alvo_api_keys");
 

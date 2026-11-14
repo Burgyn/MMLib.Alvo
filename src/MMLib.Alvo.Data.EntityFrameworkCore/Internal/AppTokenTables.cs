@@ -132,6 +132,28 @@ internal sealed class AppTokenTables(string schemaPrefix)
              OR (kind = '{ServiceKind}' AND (minted_by = @actor OR tenant_id IN ({OwnedSharedTenants("@actor")}))))
         """;
 
+    /// <summary>
+    /// Gets the sweep of a member leaving or removed from <c>@tenant_id</c> (D10): their live personal tokens for that tenant
+    /// and the live service tokens they minted into it. Their tenantless and other tenants' tokens live on.
+    /// </summary>
+    internal string RevokeForMemberSql =>
+        $"""
+        UPDATE {ApiKeys} SET revoked_at = @now
+         WHERE tenant_id = @tenant_id AND revoked_at IS NULL
+           AND ((kind = '{PersonalKind}' AND user_id = @user_id) OR (kind = '{ServiceKind}' AND minted_by = @user_id))
+        """;
+
+    /// <summary>Gets the sweep of an owner demoted in <c>@tenant_id</c> (D10): the live service tokens they minted into it.</summary>
+    internal string RevokeMintedServiceSql =>
+        $"""
+        UPDATE {ApiKeys} SET revoked_at = @now
+         WHERE tenant_id = @tenant_id AND kind = '{ServiceKind}' AND minted_by = @user_id AND revoked_at IS NULL
+        """;
+
+    /// <summary>Gets the sweep of a disabled account (D10): every live token it minted, personal or service, in any tenant.</summary>
+    internal string RevokeMintedByAccountSql =>
+        $"UPDATE {ApiKeys} SET revoked_at = @now WHERE minted_by = @account_id AND revoked_at IS NULL";
+
     /// <summary>The stored text of <paramref name="kind"/>; only a personal or a service token is ever stored.</summary>
     /// <param name="kind">The token's kind.</param>
     internal static string KindText(ApiKeyKind kind) => kind == ApiKeyKind.Service ? ServiceKind : PersonalKind;

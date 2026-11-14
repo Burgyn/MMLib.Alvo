@@ -147,6 +147,10 @@ internal sealed partial class EfCoreAccountStore
             connection, transaction, _tables.RevokeSessionSql,
             command => Bind(command, ("@now", Instant(now)), ("@reason", reason), ("@session_id", Id(session))), ct);
 
+    /// <summary>
+    /// Stamps <paramref name="account"/> disabled and, in the same transaction, revokes its sessions, the invitations it
+    /// created and every app token it minted, personal or service (S5 plan D10). Enabling it later revives no token.
+    /// </summary>
     private async Task<bool> DisabledAsync(
         DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset now, CancellationToken ct)
     {
@@ -161,6 +165,9 @@ internal sealed partial class EfCoreAccountStore
         await ExecuteAsync(
             connection, transaction, _invitationTables.RevokeCreatedByAccountSql,
             command => Bind(command, ("@now", Instant(now)), ("@user_id", Id(account))), ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection, transaction, _appTokenTables.RevokeMintedByAccountSql,
+            command => Bind(command, ("@now", Instant(now)), ("@account_id", Id(account))), ct).ConfigureAwait(false);
         return true;
     }
 

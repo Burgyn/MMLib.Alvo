@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Secrets;
 using MMLib.Alvo.Tenants;
@@ -686,6 +687,25 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await store.SignInAsync(SignIn(session.Identity), Ct)).ShouldBe(new SignInOutcome(SignInStatus.Disabled, null));
         (await CountAsync(services, AlvoFrameworkTables.AuthSessionsSuffix)).ShouldBe(1, "a refused sign-in starts nothing");
         (await store.SetDisabledAsync(UserId.New(), disabled: true, _now, Ct)).ShouldBeFalse();
+    }
+
+    /// <summary>One ban, both effects (S5 plan D10): its sessions and every app token it minted are revoked in its transaction.</summary>
+    [Fact]
+    public async Task Disabling_revokes_sessions_and_tokens_together()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var tokens = services.GetRequiredService<IAppTokenStore>();
+        var keyId = "alvo_pat_" + Guid.NewGuid().ToString("N");
+        (await tokens.MintAsync(
+            new MintTokenRequest(
+                keyId, ApiKeyKind.Personal, InvitationHash(), "ci", account, account, null, [], ["orders:read"], _now.AddDays(30), 10, _now),
+            Ct)).Status.ShouldBe(MintTokenStatus.Minted);
+
+        (await store.SetDisabledAsync(account, disabled: true, _now.AddMinutes(1), Ct)).ShouldBeTrue();
+
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Disabled);
+        (await tokens.FindAsync(keyId, Ct)).ShouldNotBeNull().RevokedAt.ShouldBe(_now.AddMinutes(1));
     }
 
     [Fact]
