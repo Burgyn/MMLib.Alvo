@@ -35,6 +35,7 @@ internal static class AccountsEndpoints
             .AddEndpointFilter(NoStore)
             .WithName(TokenOperationId);
         UserEndpoints.Map(group);
+        DiscoveryEndpoints.Map(endpoints, group, prefix);
         return group;
     }
 

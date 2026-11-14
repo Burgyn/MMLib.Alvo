@@ -88,13 +88,15 @@ internal sealed class AccountsWorld : IAsyncDisposable
     /// <param name="api">Changes to the Data API's options.</param>
     /// <param name="services">Changes to the host's services after Alvo's and the accounts' own, e.g. a decorated store.</param>
     /// <param name="app">Routes of the host's own, mapped beside the sign-in routes.</param>
+    /// <param name="openApi">Whether the host serves an OpenAPI document at <c>/openapi/v1.json</c>.</param>
     internal static async Task<AccountsWorld> StartAsync(
         AlvoApiEngine engine,
         Action<AlvoAccountsOptions>? configure = null,
         string descriptor = "time-tracker.alvo.json",
         Action<AlvoApiOptions>? api = null,
         Action<IServiceCollection>? services = null,
-        Action<WebApplication>? app = null)
+        Action<WebApplication>? app = null,
+        bool openApi = false)
     {
         var clock = new FakeTimeProvider(Start);
         var oidc = new TestOidcIssuer(clock);
@@ -103,6 +105,7 @@ internal sealed class AccountsWorld : IAsyncDisposable
         await File.WriteAllTextAsync(keyFile, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)), TestContext.Current.CancellationToken);
         var setup = new AlvoApiWorldSetup(
             ConfigureApi: api,
+            MapOpenApiDocument: openApi,
             MapManagementApi: true,
             ConfigureServicesAfterAlvo: host =>
             {

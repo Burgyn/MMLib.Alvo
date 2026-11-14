@@ -13,7 +13,9 @@ public static class AlvoAccountsEndpointRouteBuilderExtensions
     /// Requires <c>AddAlvoAccounts</c>, and no pipeline step beyond routing. Today: <c>POST {prefix}/token</c>, signing a
     /// person in by exchanging a provider's ID token (RFC 8693) and refreshing the session (RFC 6749 §6);
     /// <c>GET</c> and <c>PATCH {prefix}/user</c>, the signed-in person and their display name; and
-    /// <c>POST {prefix}/logout</c>, ending the bearer's session.
+    /// <c>POST {prefix}/logout</c>, ending the bearer's session; and discovery — RFC 8414 metadata at
+    /// <c>{prefix}/.well-known/oauth-authorization-server</c> (and at the path-inserted
+    /// <c>/.well-known/oauth-authorization-server{prefix}</c>) and the signing keys at <c>{prefix}/.well-known/jwks.json</c>.
     /// </remarks>
     /// <exception cref="InvalidOperationException"><c>AddAlvoAccounts</c> was not called.</exception>
     /// <param name="endpoints">The route builder to map into.</param>

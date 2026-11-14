@@ -1,0 +1,2316 @@
+﻿{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Alvo API Tests Fixture",
+    "description": "Every route here is generated from the applied Alvo descriptor: an entity declared in the descriptor is the explicit decision to expose it, and a field marked `hidden` is the per-field opt-out. It appears in no response schema, and in a request schema only when the descriptor also marks it `required` — a mandatory field a caller cannot see could not be supplied at all, so the name is published only where a caller must read it to perform the write.\n\n**Default-deny.** Nothing is reachable without a policy that admits the caller for that entity and operation. An operation the descriptor configures no rule for is refused for everybody.\n\n**Refusals are RFC 9457 problem documents** (`application/problem+json`) whose `type` classifies the refusal under `https://alvo.dev/errors/`. Branch on `type`; `detail` is prose and, per RFC 9457 §3.1.1, ought not be parsed. A refusal carries every reason at once in `violations`, each with a JSON Pointer, a stable code and a fix suggestion.\n\n**Every response is `Cache-Control: no-store`**, refusals included. These representations are policy-masked per caller, and the `ETag` is minted over the row's *version* rather than over the response bytes — which is the only tag `If-Match`'s strong comparison could ever match, and the reason no intermediary may keep the body.\n\n**A 500 is not documented on any operation, and its body depends on the host.** An invariant the implementation itself relies on propagates past Alvo's endpoints untouched, so what a 500 looks like is the host's decision and not a promise this document can make. A host that opted in (`AddAlvoProblemDetails()`) answers with the same problem document as every other refusal, under `https://alvo.dev/errors/internal` — which is why that value is in `type`'s list. A host that did not composes its own.\n\n**A request the web server would not read is not documented on any operation either.** A body over the server's limit, one that arrived too slowly, or one whose framing broke never reaches the operation, so no operation can promise a status for it. A host that opted in answers it under `https://alvo.dev/errors/unreadable-request`, at the status the server chose (413, 408 or 400) — the second value in `type`'s list that no operation lists.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "http://localhost"
+    }
+  ],
+  "paths": {
+    "/auth/v1/token": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in, or refresh a session",
+        "description": "Exchanges an identity provider's ID token for an Alvo session (RFC 8693), or a refresh token for the next pair (RFC 6749 §6). Refusals carry RFC 6749's `error` and `error_description` beside the problem `type`.",
+        "operationId": "auth.token",
+        "requestBody": {
+          "description": "The token request.",
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/authTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The tokens.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`token-refused`: the request or its grant was refused — `error` is `invalid_request` (a malformed form, or an ID token that does not verify), `invalid_grant` (a refresh token that is unknown, expired or replayed), `unsupported_grant_type` or `invalid_target`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`access_denied`: `sign-up-refused` (the descriptor's `auth.signUp` admits no new account for this identity; `policy` names the rule) or `sign-in-refused` (the account cannot sign in).",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/user": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Read the signed-in person",
+        "description": "The account the access token names, with its providers and memberships.",
+        "operationId": "auth.getUser",
+        "responses": {
+          "200": {
+            "description": "The signed-in person.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authUser"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented (an API key does not reach this route), or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change the signed-in person's display name",
+        "description": "Sets the display name; later sign-ins do not overwrite it. Answers the person as changed.",
+        "operationId": "auth.updateUser",
+        "requestBody": {
+          "description": "The new display name.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/authUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The person, as changed.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authUser"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented (an API key does not reach this route), or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported-media-type`: the body is not `application/json`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation`: the name is missing, too long or not text, or the body names another member.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/auth/v1/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign out",
+        "description": "Ends the session the access token belongs to: its refresh token dies now, its access tokens when they expire. Signing out of a session that has already ended is a 204 too.",
+        "operationId": "auth.logout",
+        "responses": {
+          "204": {
+            "description": "The session has ended.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no access token was presented (an API key does not reach this route), or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              },
+              "Pragma": {
+                "description": "Always `no-cache`, for HTTP/1.0 caches.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-cache"
+              },
+              "WWW-Authenticate": {
+                "description": "The RFC 6750 Bearer challenge.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/problemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/auth/v1/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Read the authorization-server metadata",
+        "description": "RFC 8414 metadata: the issuer, the token endpoint, the key set and the grants offered. Also served at the RFC 8414 §3.1 path-inserted URL, `/.well-known/oauth-authorization-server{prefix}`.",
+        "operationId": "auth.metadata",
+        "responses": {
+          "200": {
+            "description": "The metadata.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `public, max-age=300`: the same for every caller, and a replica picks up a new key within the same five minutes.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "public, max-age=300"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authServerMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/v1/.well-known/jwks.json": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Read the keys access tokens are signed with",
+        "description": "The JWKS (RFC 7517) a resource server validates an access token against, selecting the key by `kid`.",
+        "operationId": "auth.jwks",
+        "responses": {
+          "200": {
+            "description": "The public signing keys.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `public, max-age=300`: the same for every caller, and a replica picks up a new key within the same five minutes.",
+                "schema": {
+                  "type": "string"
+                },
+                "example": "public, max-age=300"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/authKeySet"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/time_entries": {
+      "get": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "List 'time_entries' rows",
+        "description": "Reads a page of rows the caller's policy admits.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.\n\nThe response is an envelope — `{ \"items\": [ … ], \"next\": <cursor or null>, \"count\": <total or null> }` — and never a bare array. All three members are always present: `next` is the cursor for the page after this one and is null on the last, and `count` is null unless the request opted into it. `next` is the *only* place that cursor appears: there is deliberately no `Link` or `Content-Range` header, so an agent reading the body never has to parse HTTP headers to keep paging.\n\n**A caller whose rule excludes every row is answered 200 with an empty page, not 403.** A rule compiles to a row-level `USING` predicate, so a caller who fails it receives an *allow* carrying a predicate that matches nothing. A 403 here means something else entirely: the operation is unconfigured for this entity, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry.\n\n**Neither precondition header is honoured on a list.** A page has no version of its own to compare, so `If-Match` and `If-None-Match` are ignored here — not refused, as they would be on a write. Condition a single row's read or write instead.\n\n**A nullable field is a sort key like any other, and `nullslast` is what it gets if you do not say otherwise.** Where a null sorts is never left to the database: SQLite and PostgreSQL disagree on the default for a given direction, so the placement is always explicit in the statement Alvo emits and `nullsfirst`/`nullslast` are how you change it. Paging honours the same placement, so a cursor walks the null-keyed rows too — which was not true before: such a read used to be refused with 422 rather than answered, because a keyset boundary that compared the value alone dropped rows silently.\n\n**Sorting by a nullable field costs more than sorting by a required one.** The null placement is emitted as a `CASE` expression over the key, which an index on that key cannot serve. Page by a required column where latency matters.\n\n**A `Prefer: count` preference is the only thing that fills the envelope's `count`.** It is the number of rows the query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset` or `after` — so it does not shrink as you page. It is opt-in because it costs a second scan of the matching set on every request, and `count` is null on a request that did not ask. `count=planned` and `count=estimated` are accepted and degrade to an exact count: a planner estimate exists on one supported engine and not the other, and this API answers identically on both. What was applied comes back in `Preference-Applied`, and per RFC 7240 a preference this server does not recognise is ignored rather than refused — its absence from `Preference-Applied` is how that is reported.\n\nThe count is taken in a second statement over the same filtered set, not in the page's own, because the page's statement carries the cursor boundary and a count composed into it would report the rows after the cursor. So *exact* means \"not an estimate\", not \"atomically consistent with `items`\": a write landing between the two can make the number differ by one.",
+        "operationId": "time_entries.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/prefer"
+          },
+          {
+            "$ref": "#/components/parameters/select"
+          },
+          {
+            "$ref": "#/components/parameters/order"
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          },
+          {
+            "$ref": "#/components/parameters/offset"
+          },
+          {
+            "$ref": "#/components/parameters/after"
+          },
+          {
+            "$ref": "#/components/parameters/orGroup"
+          },
+          {
+            "$ref": "#/components/parameters/andGroup"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Filter on `id`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "minutes",
+            "in": "query",
+            "description": "Filter on `minutes`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_at",
+            "in": "query",
+            "description": "Filter on `created_at`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "created_by",
+            "in": "query",
+            "description": "Filter on `created_by`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updated_at",
+            "in": "query",
+            "description": "Filter on `updated_at`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updated_by",
+            "in": "query",
+            "description": "Filter on `updated_by`, as `<operator>.<operand>`. See the operation description for the operators, the `not.` prefix and how several parameters combine.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of rows the caller's policy admits.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Preference-Applied": {
+                "$ref": "#/components/headers/Preference-Applied"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entriesPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Create one 'time_entries' row",
+        "description": "Creates one row and returns it, with `Location` naming the new row and `ETag` carrying its version.\n\nThe row's `id` is assigned by the store and must not be sent. Framework-managed columns are the framework's to write and are refused in a payload — with the one exception of `tenant_id` on a tenant-scoped entity, which legitimately places the new row in a tenant and is then judged by the tenant scope. A key the entity does not declare is refused with 422 rather than ignored.\n\n**`Idempotency-Key` makes the create retry-safe.** The first request is performed and its result recorded against the key *and the caller's own scope*; a retry carrying the same key and the same body is answered with the first result and writes no second row, and the same key with a different body is 409. An anonymous caller's key is refused (422): a record's identity is the key plus the caller, and every anonymous caller shares one reserved identity, so their keys would share one space.\n\n**If your role may create this entity but not read it back, the retry is still 201, never 403.** The body then carries only `id` — the same id your original `201` and its `Location` already gave you — rather than a re-read of a row your role cannot see. A retry must not be worse than the create it replays.\n\n**A create carrying `If-Match` or `If-None-Match` is refused with 412.** There is no stored record for a version to be compared against and this API assigns the new row's id itself, so neither header can be evaluated — and the rule this feature is built on is that a precondition which cannot be evaluated is refused rather than ignored, because a 201 would tell a caller their condition held. Note what this means for a client that blanket-attaches `If-Match` to every mutating request, as several SDKs do: it will be refused here. There is no `PUT`, so create-if-absent was never on offer in the first place. Send the create unconditionally, and `If-Match` on the update that follows it.",
+        "operationId": "time_entries.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The row to write, as the entity's declared fields.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may send as 'If-Match' — so a first conditional write needs no read of its own.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entries"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/api/time_entries/query": {
+      "post": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Query 'time_entries' rows through a request body",
+        "description": "Reads a page of rows the caller's policy admits, taking the same parameters in a JSON request body.\n\n**It exists for one reason: a filter a request line cannot carry.** Alvo's own budgets are generous — 256 filter terms and 1000 `in` candidates — and a proxy's URL limit is reached first, so `?id=in.(…400 ids…)` is refused by an intermediary with a 414 carrying no `violations` array at all. Sent as a body it is answered normally.\n\n**The body is a JSON object whose members are the query parameters**, and the grammar inside each value is exactly the one the query string carries: `{\"year\": \"gte.2020\", \"or\": [\"(color.eq.red,color.eq.blue)\"], \"select\": \"id,label:make\", \"limit\": 50}`. A repeated parameter is an array of strings; the same name twice in one object is refused, because JSON leaves the order of two such members undefined. `{}` is the empty query — every readable field, the default page.\n\n**Values are not percent-encoded here, and that is the point.** A query string carries the escaping of a value; a JSON string carries the value. So `{\"make\": \"like.100%\"}` is what `?make=like.100%25` means, and `+` is a plus rather than a space. Everything else is identical: the same parser, the same refusals, the same page envelope, the same `Prefer: count` preference.\n\n**This is a read and is gated as `list`.** A caller whose `list` is unconfigured is refused here exactly as on the collection `GET`, before the body is read at all — so a refusal never arrives dressed as a complaint about the body.\n\n**`Idempotency-Key` is accepted and ignored.** There is nothing to make idempotent: no row is written, so a retry costs a second read and nothing else. It is accepted rather than refused because several SDKs attach it to every `POST`.\n\nA refusal's `pointer` tells you where to look: an empty string or one beginning with `/` is a JSON Pointer into this body, and any other value is the *role* of a query parameter — `filter`, `order`, `limit`, `offset`, `after` or `select`.\n\n**Filtering** follows PostgREST's spelling: every query parameter that is not one of the reserved names (order, limit, offset, after, select, or, and, not) names a field, and its value is `<operator>.<operand>` — `?year=gte.2020`. The operators are eq, neq, gt, gte, lt, lte, like, ilike, in, is. `in` takes a bracketed candidate list (`in.(skoda,vw)`) and `is` takes exactly `null`, `true` or `false`; `like`/`ilike` take a pattern. An unrecognised operator is refused with 422, never quietly read as equality, and an ordering operator applied to a type this API defines no total order over is refused too — so one filter means the same thing on every engine.\n\nSeveral parameters are one **conjunction** (AND), which is the only reading that keeps a filter narrowing as terms are added. `or=(…)` and `and=(…)` group terms explicitly and may nest, and prefixing any parameter name or group keyword with `not.` negates it (`not.color=eq.red`, `not.or=(…)`).\n\n**A field that is unavailable to the caller is refused exactly like one that does not exist**, in `filter`, `order` and `select` alike — the refusal names the parameter's role and never the field, so filtering, ordering or selecting cannot be used to discover a hidden field's name. The one exception is a field the descriptor also marks `required`: its name is published in the write schemas below, because a mandatory field a caller cannot see could not be supplied — see the overview.",
+        "operationId": "time_entries.query",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/prefer"
+          }
+        ],
+        "requestBody": {
+          "description": "The query parameters, as an object. An empty object reads the first page with no filter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of rows the caller's policy admits.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Preference-Applied": {
+                "$ref": "#/components/headers/Preference-Applied"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entriesPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/api/time_entries/{id}": {
+      "get": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Read one 'time_entries' row",
+        "description": "Reads one row by id.\n\nA row the caller's policy excludes reads exactly like one that was never there: 404, with the same problem `type` and the same prose, so the status cannot be used to prove a row exists.\n\n`If-None-Match` **is** honoured: a caller who already holds the current version is answered 304 with the `ETag` and no body. Comparison is RFC 9110 §13.1.2's *weak* one, so a `W/` prefix is ignored — deliberately not the strong comparison `If-Match` gets on a write.\n\n**`If-Match` is ignored on a read.** On a `GET`, RFC 9110 §13.1.1 means \"send the body only if it is still this version\", which saves a caller nothing they cannot get by comparing the `ETag` they were sent — so the header is neither honoured nor refused here. That is the read side's asymmetry with the write side, and it is safe for one reason: an unhonoured precondition on a read costs a response body the caller said they already had, where on a write it would cost somebody their change.",
+        "operationId": "time_entries.get",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The row.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entries"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The caller's 'If-None-Match' covers the current version, so the body is omitted. The 'ETag' is repeated (RFC 9110 §15.4.5) so a client need not re-read the row to get its tag back.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Update one 'time_entries' row",
+        "description": "Partially updates one row and returns it. A field the body does not mention keeps its stored value — which is what separates this from `PUT` on the same path: that one replaces the row whole, and a field it omits is written null.\n\nA write to a read-only field is refused with 422 rather than silently dropped, and so is a key the entity does not declare. `id` and the framework-managed columns can never be rewritten, `tenant_id` included: a row does not move between tenants.\n\n**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 §13.1.1's *strong* comparison. Send back one `ETag` exactly as a previous response returned it, or `*` to require only that the row still exist. Anything this API cannot turn into exactly one version it minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, never ignored. `If-None-Match` is refused with 412 as well: this API compares a row against the version a caller *holds*, and has no channel for \"act only if the row is not at this version\". That is a labelled deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a precondition that was never checked.\n\n**`Idempotency-Key` makes the retry answer the row.** The row's end state never needed it — an update assigns *absolute* values to named fields, so applying it twice leaves what applying it once leaves — but the *outcome you observe* did. Send `PATCH … If-Match: \"v1\"` with a key, lose the 200 to a dropped connection, and retry the identical request: the row is at `v2`, but the key records that `v2` is *your* write, so the retry is answered 200 with the row. Without a key the same retry is **412, and you cannot tell it apart from someone else having changed the row** — and resolving that 412 the usual way (re-read, re-merge, re-apply) would clobber a genuinely concurrent change if it *was* someone else. The key covers the whole request: the method, the entity, **the row it addresses** and the `If-Match` it carries, as well as the body. So the same key against another row, or against this row with a different `If-Match`, is 409 rather than a replay of the first — a key is a claim about one request, not a licence for the next one.",
+        "operationId": "time_entries.update",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The row to write, as the entity's declared fields.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The row as it now stands.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entries"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Create or replace one 'time_entries' row",
+        "description": "Creates or replaces the row this path names, and returns it. A row that did not exist is created under the `id` in the path and answers 201 with a `Location`; one that did is replaced and answers 200.\n\n**The row is written whole.** A field the body does not mention is written null rather than left at its stored value — that is the difference from `PATCH` on this same path, and it is why a body that omits a required field is refused with 422 naming the field rather than treated as a partial write. A field that is both required and hidden cannot be restated by a caller who cannot read it, which makes such an entity reachable only through `PATCH` for them.\n\n**The path is the only place `id` may appear.** A body naming `id` is refused exactly as it is everywhere else, and so is `tenant_id`: on a tenant-scoped entity a created row lands in the caller's own tenant, and a caller creating into another tenant uses `POST` on the collection.\n\n**The caller needs both `create` and `update`.** Which branch runs depends on stored data, so requiring only the branch's own operation would make the permission you need depend on whether the row happens to exist. An `id` already held by a row this caller cannot see answers 409: a primary key cannot collide silently, and the alternative would be writing over a row the caller's policy excludes.\n\n**`If-Match` conditions the write on the row's current version**, compared with RFC 9110 §13.1.1's *strong* comparison. Send back one `ETag` exactly as a previous response returned it, or `*` to require only that the row still exist. Anything this API cannot turn into exactly one version it minted — several tags, a weak `W/` tag, an opaque value it never issued — is 412, never ignored. `If-None-Match` is refused with 412 as well: this API compares a row against the version a caller *holds*, and has no channel for \"act only if the row is not at this version\". That is a labelled deviation from RFC 9110 §13.1.2, which would let a non-matching `If-None-Match` simply succeed — Alvo cannot evaluate the header at all, so a conforming success would be indistinguishable from a precondition that was never checked.\n\n**`Idempotency-Key` makes the retry answer the row**, and a replay always answers 200 — never 201, and with no `Location`. A 201 reports that *this* request created the row, and a replay performs no act at all: it reports the state the first request left.",
+        "operationId": "time_entries.replace",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The whole row, as the entity's declared fields. A field this body omits is written null rather than left at its stored value, so every required field must be present.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created row. 'Location' names it, and 'ETag' carries the version a later conditional write may send as 'If-Match' — so a first conditional write needs no read of its own.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entries"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The row as it now stands, when this request replaced an existing one or replayed an 'Idempotency-Key' a previous request spent.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entries"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Delete one 'time_entries' row",
+        "description": "Deletes one row and returns no body. A row the caller's policy excludes is 404, exactly as an absent one is.\n\n**`If-Match` conditions the delete** on the row's current version, and `If-None-Match` is refused with 412 — both exactly as on the update, including the wording of what cannot be compared.\n\n**`Idempotency-Key` makes the retry answer `204`.** Removing one row twice always left the same state, so nothing was ever duplicated; what a retry after a lost `204` could not tell you is whether the row was yours to have removed. Without a key that retry is a **404 (or a 412) you cannot tell apart from somebody else's delete**; with one it is `204`, because the key records that this caller already performed exactly this delete. The key covers the row and the `If-Match` too, so reusing it against another row is 409.",
+        "operationId": "time_entries.delete",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rowId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The row was deleted. No body.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/notFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    },
+    "/api/time_entries/batch": {
+      "post": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Create many 'time_entries' rows in one transaction",
+        "description": "Creates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element the object the single-row create takes.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "time_entries.batchCreate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesBatchCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Update many 'time_entries' rows in one transaction",
+        "description": "Updates many rows in one transaction. Send `{\"rows\": [ … ]}`, each element an object carrying the row's `id` plus the fields to change on it — partial, exactly as the single-row update is. There is no `If-Match` here: one version cannot condition many rows, and accepting one would check a single row while appearing to check all of them.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "time_entries.batchUpdate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesBatchUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "time_entries"
+        ],
+        "summary": "Delete many 'time_entries' rows in one transaction",
+        "description": "Deletes many rows in one transaction. Send `{\"rows\": [ … ]}`, each element a row `id`. The response is `200` with an empty `items` and a non-zero `affected`, not `204`, because it reports on many rows. **This `DELETE` carries a body**, which RFC 9110 §9.3.5 leaves undefined — an intermediary is permitted to strip it, so an empty batch is refused with `422` rather than read as \"no rows to delete\", which would be a silent success for a request that never arrived.\n\n**The batch is one transaction: every row is written, or none is.** A refusal on the last row leaves the first unwritten, so a caller repairs the rows the response names and resends the whole batch. There is no partial outcome to reconcile.\n\n**Every row is judged individually** against your own policy — the `WITH CHECK` predicate and, on a tenant-scoped entity, the tenant scope — exactly as the single-row route judges one. A batch is not a way to write rows a single call could not.\n\n**Every offending row is reported, not the first.** Each entry of `violations` carries a `/rows/{index}` pointer, so a five-hundred-row import is repaired in one round trip rather than five hundred. A row you cannot see and a row that does not exist are the *same* refusal, deliberately: telling them apart would let one request ask as many existence questions as it carries rows.\n\n**A `409` names the field and no row index.** A unique value is something you can guess, so an index would turn one collision probe into as many per request as the batch carries rows.\n\n**`Idempotency-Key` covers the whole batch**, because a batch is one request and a partial retry is not expressible. The same key with a different list of rows is a `409`, not a replay.",
+        "operationId": "time_entries.batchDelete",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The rows to write, under a 'rows' array. A batch is one transaction: every row is written, or none is.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/time_entriesBatchDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every row the batch wrote, in request order, and how many it affected. A batch delete answers an empty 'items' with a non-zero 'affected'.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/Cache-Control"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/time_entriesBatchResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "The operation is refused, or one or more rows are — and on this route a policy refusal CAN be per row, unlike every other operation. Each entry of 'violations' carries a '/rows/{index}' pointer naming a row policy refused: its 'WITH CHECK' predicate, the tenant scope, a row that is not yours or does not exist (one refusal for both, so a batch cannot be used to ask which), or a row the batch named twice. A batch is one transaction, so nothing was written — repair the rows the response names and resend the whole batch. A refusal the entity's declared SHAPE produced is a 422 instead, and carries the same pointers. The two operation-level kinds are unchanged and are still told apart by the problem 'type': 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), 'forbidden' means policy refused (change a rule, or a row).",
+            "$ref": "#/components/responses/forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/unprocessable"
+          },
+          "412": {
+            "$ref": "#/components/responses/preconditionFailed"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "415": {
+            "$ref": "#/components/responses/unsupportedMediaType"
+          }
+        },
+        "security": [
+          { },
+          {
+            "alvoApiKey": [ ]
+          },
+          {
+            "alvoBearer": [ ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "authJsonWebKey": {
+        "required": [
+          "kty",
+          "crv",
+          "x",
+          "y",
+          "kid",
+          "use",
+          "alg"
+        ],
+        "type": "object",
+        "properties": {
+          "kty": {
+            "enum": [
+              "EC"
+            ],
+            "type": "string",
+            "description": "The key type."
+          },
+          "crv": {
+            "enum": [
+              "P-256"
+            ],
+            "type": "string",
+            "description": "The curve."
+          },
+          "x": {
+            "type": "string",
+            "description": "The point's x coordinate, base64url."
+          },
+          "y": {
+            "type": "string",
+            "description": "The point's y coordinate, base64url."
+          },
+          "kid": {
+            "type": "string",
+            "description": "The key id an access token's header names: the key's RFC 7638 thumbprint."
+          },
+          "use": {
+            "enum": [
+              "sig"
+            ],
+            "type": "string",
+            "description": "What the key is for."
+          },
+          "alg": {
+            "enum": [
+              "ES256"
+            ],
+            "type": "string",
+            "description": "The algorithm."
+          }
+        },
+        "description": "One public signing key (RFC 7517 §4, RFC 7518 §6.2.1)."
+      },
+      "authKeySet": {
+        "required": [
+          "keys"
+        ],
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/authJsonWebKey"
+            },
+            "description": "Every key a live access token may name."
+          }
+        },
+        "description": "The public keys access tokens are signed with (RFC 7517 §5). Select one by the token header's `kid`."
+      },
+      "authServerMetadata": {
+        "required": [
+          "issuer",
+          "token_endpoint",
+          "jwks_uri",
+          "grant_types_supported",
+          "token_endpoint_auth_methods_supported",
+          "response_types_supported"
+        ],
+        "type": "object",
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "description": "The issuer: the `iss` of every access token.",
+            "format": "uri"
+          },
+          "token_endpoint": {
+            "type": "string",
+            "description": "Where tokens are exchanged and refreshed.",
+            "format": "uri"
+          },
+          "jwks_uri": {
+            "type": "string",
+            "description": "Where the keys access tokens are signed with are published.",
+            "format": "uri"
+          },
+          "grant_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The token exchange (RFC 8693) and refresh grants."
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`none`: the token endpoint takes no client authentication."
+          },
+          "response_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Empty: there is no authorization endpoint."
+          }
+        },
+        "description": "OAuth 2.0 authorization-server metadata (RFC 8414 §2)."
+      },
+      "authToken": {
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in",
+          "refresh_token"
+        ],
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "description": "The access token: an ES256 JWT (RFC 9068) to present as `Authorization: Bearer`."
+          },
+          "issued_token_type": {
+            "type": "string",
+            "description": "On an exchange only (RFC 8693 §2.2.1): `urn:ietf:params:oauth:token-type:access_token`."
+          },
+          "token_type": {
+            "enum": [
+              "Bearer"
+            ],
+            "type": "string",
+            "description": "Always `Bearer` (RFC 6750)."
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "The access token's lifetime, in seconds.",
+            "format": "int32"
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "The refresh token for the next refresh."
+          }
+        },
+        "description": "A successful token answer (RFC 6749 §5.1). Keep the refresh token out of reach of scripts; it is rotated on every refresh, and the one it replaced dies a few seconds later."
+      },
+      "authTokenRequest": {
+        "required": [
+          "grant_type"
+        ],
+        "type": "object",
+        "properties": {
+          "grant_type": {
+            "enum": [
+              "urn:ietf:params:oauth:grant-type:token-exchange",
+              "refresh_token"
+            ],
+            "type": "string",
+            "description": "Which grant: exchange a provider's ID token, or refresh a session."
+          },
+          "subject_token": {
+            "type": "string",
+            "description": "Exchange only: the identity provider's ID token (a JWT, e.g. from Google Identity Services)."
+          },
+          "subject_token_type": {
+            "enum": [
+              "urn:ietf:params:oauth:token-type:id_token"
+            ],
+            "type": "string",
+            "description": "Exchange only: the type of `subject_token`."
+          },
+          "requested_token_type": {
+            "enum": [
+              "urn:ietf:params:oauth:token-type:access_token"
+            ],
+            "type": "string",
+            "description": "Exchange only, optional: the token wanted back."
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "Refresh only: the refresh token the previous answer carried. It is rotated on use."
+          }
+        },
+        "description": "A token request (RFC 6749 §3.2), form-encoded. An exchange (RFC 8693) sends `subject_token` and `subject_token_type`; a refresh (RFC 6749 §6) sends `refresh_token`. Each parameter at most once."
+      },
+      "authUser": {
+        "required": [
+          "id",
+          "email",
+          "emailTrusted",
+          "name",
+          "avatarUrl",
+          "providers",
+          "memberships"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The account id: `@user.id` in rules.",
+            "format": "uuid"
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The address the provider last reported, or null."
+          },
+          "emailTrusted": {
+            "type": "boolean",
+            "description": "Whether the provider vouches for `email`."
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The display name, or null."
+          },
+          "avatarUrl": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "A picture the provider reported, or null."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The identity providers this account signs in with, e.g. `google`."
+          },
+          "memberships": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "The tenants this person belongs to. Always empty until this host offers tenants."
+          }
+        },
+        "description": "The signed-in person: their account, the providers it signs in with, and the tenants they belong to."
+      },
+      "authUserUpdate": {
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string",
+            "description": "The display name: trimmed, 1–100 Unicode code points, no control character."
+          }
+        },
+        "additionalProperties": false,
+        "description": "The one change a person makes to their own account. No other member is accepted."
+      },
+      "problemDetails": {
+        "title": "problemDetails",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "https://alvo.dev/errors/validation",
+              "https://alvo.dev/errors/malformed-query",
+              "https://alvo.dev/errors/forbidden",
+              "https://alvo.dev/errors/out-of-scope",
+              "https://alvo.dev/errors/not-found",
+              "https://alvo.dev/errors/precondition-failed",
+              "https://alvo.dev/errors/precondition-required",
+              "https://alvo.dev/errors/idempotency-conflict",
+              "https://alvo.dev/errors/conflict",
+              "https://alvo.dev/errors/destructive-change",
+              "https://alvo.dev/errors/unauthenticated",
+              "https://alvo.dev/errors/unreadable-request",
+              "https://alvo.dev/errors/unsupported-media-type",
+              "https://alvo.dev/errors/internal",
+              "https://alvo.dev/errors/function-failed",
+              "https://alvo.dev/errors/chain-depth-exceeded",
+              "https://alvo.dev/errors/hook-failed",
+              "https://alvo.dev/errors/expression-failed",
+              "https://alvo.dev/errors/token-refused",
+              "https://alvo.dev/errors/sign-up-refused",
+              "https://alvo.dev/errors/sign-in-refused",
+              "https://alvo.dev/errors/rate-limited"
+            ],
+            "type": "string",
+            "description": "The classification to branch on. Every value is listed here, so a client needs no prose: the namespace is `https://alvo.dev/errors/` and the slug names the kind of refusal.",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string",
+            "description": "The status code's standard reason phrase. Carries no Alvo-specific information."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The HTTP status code, repeated in the body as RFC 9457 §3.1.2 allows.",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string",
+            "description": "What went wrong, in prose. Built from constants and server-owned values only — it never echoes a caller-supplied field name or value, because a refusal is answered before authorization on some paths and would otherwise be the cheapest oracle in the API. The one exception is a host write hook's refusal, whose `detail` is that hook's own message."
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/problemViolation"
+            },
+            "description": "Every itemised reason the request was refused, not only the first — so one round trip is enough to repair it. Present on a refusal that has itemised reasons (a malformed query string, a body the entity's declared shape refuses) and absent on one that does not."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The host extension that refused or failed, by its id, when one did — such as a write hook's refusal answered `validation`, `conflict` or `forbidden`. Absent when no extension was involved."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Present, and `false`, on a refusal the same request can never get past — such as `chain-depth-exceeded`. Absent everywhere else; absence makes no claim either way."
+          }
+        },
+        "description": "An RFC 9457 problem document. Branch on `type`; `detail` is prose and, per §3.1.1, ought not be parsed. A `type` keys on the *kind* of refusal and never on its reason — one value covers every policy refusal, and one covers both an absent row and a row the caller may not see."
+      },
+      "problemViolation": {
+        "title": "problemViolation",
+        "required": [
+          "pointer",
+          "code",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "pointer": {
+            "type": "string",
+            "description": "An RFC 6901 JSON Pointer into the request body, or the *role* of the query-string parameter concerned (`filter`, `order`, `limit`, `offset`, `after`, `select`). A role rather than a name, because in this filter grammar a parameter's name is a field name.",
+            "example": "/name"
+          },
+          "code": {
+            "type": "string",
+            "description": "A stable kebab-case code for the kind of violation, safe to branch on.",
+            "example": "max-length"
+          },
+          "message": {
+            "type": "string",
+            "description": "One sentence, free of caller-supplied text."
+          },
+          "fixSuggestion": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "What to change. Every refusal Alvo itself raises carries one; it is nullable for a violation forwarded from a source that has none to offer, where an empty string would be indistinguishable from a blank suggestion."
+          }
+        },
+        "description": "One machine-readable reason a request was refused."
+      },
+      "time_entries": {
+        "title": "time_entries",
+        "required": [
+          "id",
+          "minutes",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "minutes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "created_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "updated_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          }
+        },
+        "description": "One row as a single read, a create or an update returns it. Every field is present, even one with no value — that field is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "time_entriesBatchCreate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/time_entriesCreate"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
+      },
+      "time_entriesBatchDelete": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "One row id per element."
+          }
+        },
+        "description": "The rows to remove, in one transaction."
+      },
+      "time_entriesBatchPatch": {
+        "title": "time_entriesBatchPatch",
+        "type": "object",
+        "allOf": [
+          {
+            "required": [
+              "id"
+            ],
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The row to change, exactly as a previous response returned it.",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/time_entriesPatch"
+          }
+        ],
+        "description": "One row of a batch update: which row, and the fields to change on it."
+      },
+      "time_entriesBatchResult": {
+        "title": "time_entriesBatchResult",
+        "required": [
+          "items",
+          "affected"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/time_entriesPageItem"
+            },
+            "description": "The rows the batch wrote, in the order you sent them. Empty for a batch delete, which produces no rows — read `affected` there."
+          },
+          "affected": {
+            "minimum": 0,
+            "type": "integer",
+            "description": "How many rows the batch wrote or removed.",
+            "format": "int32"
+          }
+        },
+        "description": "What the batch wrote. A batch is one transaction, so this is never a partial outcome."
+      },
+      "time_entriesBatchUpdate": {
+        "required": [
+          "rows"
+        ],
+        "type": "object",
+        "properties": {
+          "rows": {
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/time_entriesBatchPatch"
+            },
+            "description": "One element per row, in the order you want them reported."
+          }
+        },
+        "description": "The rows to write, in one transaction."
+      },
+      "time_entriesCreate": {
+        "title": "time_entriesCreate",
+        "required": [
+          "minutes"
+        ],
+        "type": "object",
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "description": "The row to create. A field declared `required` by the descriptor must be present; the row's `id` and the framework's own columns are assigned by Alvo and are refused if supplied."
+      },
+      "time_entriesPage": {
+        "title": "time_entriesPage",
+        "required": [
+          "items",
+          "next",
+          "count"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/time_entriesPageItem"
+            },
+            "description": "The rows in this page, in the requested order."
+          },
+          "next": {
+            "maxLength": 512,
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The opaque cursor for the next page, or null when this page is the last. Send it back verbatim as `after`; it is the provider's to interpret and must not be decoded."
+          },
+          "count": {
+            "minimum": 0,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "How many rows the query matches in total — **not** the size of this page — or null unless the request sent a recognised `Prefer: count` preference — `exact`, or `planned`/`estimated`, which degrade to an exact count. It is narrowed by the caller's policy and by the filter, and not by `limit`, `offset` or `after`, so it does not shrink as you page. Opt-in because an exact count is a second scan of the matching set on every request. **Exact means \"not an estimate\", not \"consistent with `items`\"**: it is taken in a second statement, so a write landing between the two can make it differ from the rows by one.",
+            "format": "int64"
+          }
+        },
+        "description": "One page of rows, the cursor that reads the page after it, and — when the request opted in with a `Prefer: count` preference — how many rows the query matches in total."
+      },
+      "time_entriesPageItem": {
+        "title": "time_entriesPageItem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "minutes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "created_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "example": "2026-01-31T09:30:00+00:00"
+          },
+          "updated_by": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid",
+            "readOnly": true,
+            "example": "3f8d6c1e-9b47-4a5f-8c21-0d7e5a2b6f04"
+          }
+        },
+        "description": "One row inside a list's page. Every field is present unless the request narrowed the projection with `select`; a field with no value is present and null. Fields marked read-only are written by the framework and refused in a request body."
+      },
+      "time_entriesPatch": {
+        "title": "time_entriesPatch",
+        "type": "object",
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "description": "The fields to change. A field this object does not mention keeps its stored value, so nothing here is mandatory — that is what makes the verb PATCH rather than PUT."
+      },
+      "time_entriesQuery": {
+        "type": "object",
+        "properties": {
+          "select": {
+            "type": "string"
+          },
+          "order": {
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32",
+            "default": 50
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "after": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "or": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "and": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "minutes": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "created_at": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "created_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "updated_at": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "updated_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "description": "The query parameters, as an object. A member's name is a parameter and its value is the text a query string would carry; an array repeats the parameter. See the operation description for the grammar and for what a field property accepts."
+      },
+      "time_entriesReplace": {
+        "title": "time_entriesReplace",
+        "required": [
+          "minutes"
+        ],
+        "type": "object",
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "description": "The whole row. A field this object does not mention is written `null` rather than left at its stored value, so every field the descriptor declares `required` must be present. The row's `id` comes from the path, and the framework's own columns — `tenant_id` included — are refused if supplied: a created row lands in the caller's own tenant."
+      }
+    },
+    "responses": {
+      "unauthenticated": {
+        "description": "A credential was presented and cannot be used — unknown, revoked, expired, malformed, or issued for another tenant. One wording for all of them, so key ids cannot be enumerated one request at a time. 'WWW-Authenticate' names the scheme and the header to send. Presenting no credential at all is not a 401: an anonymous caller is judged by policy like any other.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          },
+          "WWW-Authenticate": {
+            "$ref": "#/components/headers/WWW-Authenticate"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "forbidden": {
+        "description": "The operation is refused. Two kinds, told apart by the problem 'type' and never by its prose: 'out-of-scope' means the presented key's scopes do not cover this entity and operation (grant the key the scope), and 'forbidden' means policy refused it (change a rule). A policy refusal here is an operation-level one — the operation is unconfigured, the entity is unknown to the applied descriptor, the caller has no tenant on a tenant-scoped entity, or the policy reads a caller value this caller does not carry. It is never 'your rule excluded these rows'; see the 200.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "notFound": {
+        "description": "No such row — or one the caller's policy excludes. The two are indistinguishable on purpose, in the problem 'type' as much as in the prose, so a 404 cannot be used to prove a row exists.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "preconditionFailed": {
+        "description": "A precondition this API cannot evaluate, or one that did not hold. A header it cannot compare is refused rather than ignored: ignoring it would be the lost update 'If-Match' exists to prevent, and the caller would read the success as proof it did not happen.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "conflict": {
+        "description": "The request conflicts with what is already stored. Two kinds, told apart by the problem 'type': 'idempotency-conflict' means the 'Idempotency-Key' was already used by this caller for a different request — a different body, but also a different row or a different 'If-Match', because the key covers the whole request (retry the identical request to replay its result, or send a fresh key); 'conflict' means a constraint the database enforces refused the write — a value another record already holds on a field declared unique, or a delete another record still references through a 'ref' declaring onDelete: restrict. The 'violations' array names the field for the first of those and carries a fix suggestion for both.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "unprocessable": {
+        "description": "The request could not be acted on: a query string or body that is malformed, a body the entity's declared shape refuses, a header this API cannot honour, or data a hook's built-in CEL function refuses (`expression-failed`). The 'violations' array carries every reason at once — a pointer, a stable code and a fix suggestion each — never only the first, so one round trip is enough to repair the request.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      },
+      "unsupportedMediaType": {
+        "description": "The request body was not declared as JSON, or carried no 'Content-Type' at all. Send 'Content-Type: application/json', or any 'application/*+json'; a POST refusal also carries 'Accept-Post' and a PATCH refusal 'Accept-Patch' naming what the operation accepts. The requirement exists because a body-taking route with no media-type requirement is reachable as a CORS simple request, and a host with its own cross-site-request-forgery defence can turn it off.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/Cache-Control"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/problemDetails"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "rowId": {
+        "name": "id",
+        "in": "path",
+        "description": "The row's key. A value routing cannot read as a GUID is a 404 from routing itself, before the endpoint runs; a well-formed key naming a row the caller may not see is also a 404, indistinguishable from one that does not exist.",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ifMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "description": "Perform the write only if the row is still at this version. One entity tag exactly as a previous response returned it, or `*` to require only that the row still exist. Anything else — several tags, a weak `W/` tag, a value this API never minted — is 412 rather than ignored, because ignoring a precondition is the lost update the header exists to prevent.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ifNoneMatch": {
+        "name": "If-None-Match",
+        "in": "header",
+        "description": "Read the row only if it is no longer at one of these versions; otherwise 304 with no body. Compared with RFC 9110 §13.1.2's *weak* comparison, so a `W/` prefix is ignored — deliberately not the strong comparison `If-Match` gets on a write.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "idempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "Makes this write retry-safe. The result is recorded against the key and the caller's own scope, so the same key repeated replays the first result and writes nothing further: a retried create is the first row, a retried update is the row, and a retried delete is 204 rather than a 404 the caller cannot tell from somebody else's delete. The key covers **the whole request** — the method, the entity, the row it addresses, the `If-Match` it carries and the body — so the same key against another row, or with another `If-Match`, is 409 rather than a replay. An anonymous caller's key is refused, because every anonymous caller shares one identity and their keys would share one space. The bound below is a **byte** bound — at most 255 bytes once UTF-8 encoded — so a key of non-ASCII characters reaches it sooner than `maxLength` suggests; an over-long key is refused rather than shortened, because two keys differing only past the cut would become one.",
+        "schema": {
+          "maxLength": 255,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "prefer": {
+        "name": "Prefer",
+        "in": "header",
+        "description": "`count=exact` fills the page envelope's `count` with the number of rows the query matches in total. Opt-in, because it is a second scan of the matching set on every request; a request sending no recognised `count` preference gets `null` there.\n\n`count=planned` and `count=estimated` are accepted and **degrade to an exact count**, so they fill `count` too — a planner estimate exists on one supported engine and not the other, and this API answers identically on both. The response says which was applied in `Preference-Applied`, and it is always `count=exact`. Per RFC 7240 a preference this server does not recognise is ignored rather than refused, and its absence from `Preference-Applied` is how that is reported.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "count=exact"
+      },
+      "select": {
+        "name": "select",
+        "in": "query",
+        "description": "Comma-separated field names to return, in the order named, each optionally renamed as `alias:field`. It narrows the **read** as well as the response: a field the projection does not name is not read from the row. Two groups of columns are read regardless — the framework-managed ones, and any field named in `order`, because no engine can sort by a column it did not read — but neither appears in the response unless the projection named it. A field the caller may not read is refused exactly as an undeclared one is. An alias is lower snake_case, is not the name of a framework-managed column, and cannot be claimed twice; and a projection cannot name more distinct keys than there are fields this caller can read.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "label:make,model"
+      },
+      "order": {
+        "name": "order",
+        "in": "query",
+        "description": "`<field>[.asc|.desc][.nullsfirst|.nullslast]`, comma-separated for several keys, outermost first. The modifiers must appear in that order and each at most once, so one sort key has one spelling; an unrecognised modifier is refused rather than ignored. A **nullable** field is a sort key like any other and defaults to `nullslast`; paging honours the same placement — see the operation description for what it costs.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "id.desc"
+      },
+      "limit": {
+        "name": "limit",
+        "in": "query",
+        "description": "How many rows this page carries. A value past the maximum is **refused, not clamped**: a client that asked for more and silently received fewer computes its paging from a number no response ever told it. Zero is refused too — it is a read that can never return a row.",
+        "schema": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer",
+          "format": "int32",
+          "default": 50
+        }
+      },
+      "offset": {
+        "name": "offset",
+        "in": "query",
+        "description": "How many rows to skip. Prefer `after`: an offset re-scans the skipped rows and shifts under concurrent writes, where a keyset cursor does neither.",
+        "schema": {
+          "minimum": 0,
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "after": {
+        "name": "after",
+        "in": "query",
+        "description": "The keyset cursor a previous page returned as `next`, sent back verbatim. It is opaque and only the provider that issued it may interpret it, so it must not be decoded or constructed. A forged one yields an empty page rather than an error.",
+        "schema": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "orGroup": {
+        "name": "or",
+        "in": "query",
+        "description": "A bracketed, comma-separated list of terms combined as a disjunction (OR): `or=(color.eq.red,make.in.(skoda,vw))`. Groups may nest, and either the keyword or any member may carry the `not.` prefix. Repeating the parameter conjoins the groups.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "andGroup": {
+        "name": "and",
+        "in": "query",
+        "description": "A bracketed, comma-separated list of terms combined as a conjunction (AND): `and=(color.eq.red,make.in.(skoda,vw))`. Groups may nest, and either the keyword or any member may carry the `not.` prefix. Repeating the parameter conjoins the groups.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "Cache-Control": {
+        "description": "Always `no-store`. These representations are policy-masked per caller and the `ETag` is minted over the row's version rather than over the response bytes, so no cache — shared or private — may keep the body. Keeping the tag alone is not caching a representation, which is what makes a conditional write still possible.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "no-store"
+      },
+      "ETag": {
+        "description": "The row's version as a strong entity tag. Send it back verbatim as `If-Match` to make a later write conditional; it is compared octet-for-octet, so it must not be reformatted. Absent when the row has no version this caller can be given.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "\"638712345678900000\""
+      },
+      "Location": {
+        "description": "The path of the created row, under the same route prefix the create was sent to.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "WWW-Authenticate": {
+        "description": "The RFC 7235 challenge, naming the scheme and the request header a credential is read from — so an agent can discover how to authenticate rather than guess. The header name is host configuration, which is why the challenge states it rather than assuming a default.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Preference-Applied": {
+        "description": "What was done with the request's `Prefer` header (RFC 7240 §3). Present only when a preference was applied, and always `count=exact` — `count=planned` and `count=estimated` degrade to a real count, and this is where a caller who asked for an estimate learns they received the exact one. Absent means no preference was applied, which is how RFC 7240 reports one this server does not recognise.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "count=exact"
+      }
+    },
+    "securitySchemes": {
+      "alvoApiKey": {
+        "type": "apiKey",
+        "description": "An Alvo API key, presented as `<keyId>.<secret>`. A key that cannot be used — unknown, revoked, expired, malformed, or issued for another tenant — is a 401 with one wording for all of them. The header's name is host configuration; this is the name this host reads.",
+        "name": "X-Alvo-Api-Key",
+        "in": "header"
+      },
+      "alvoBearer": {
+        "type": "http",
+        "description": "An Alvo access token from `POST /auth/v1/token`, presented as `Authorization: Bearer <token>`: a short-lived ES256 JWT (RFC 9068) that names one signed-in person. A token that cannot be used — expired, revoked, signed for another audience, or naming a session that has ended — is a 401 whose `WWW-Authenticate` carries `error=\"invalid_token\"`; refresh the session and retry.",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "auth",
+      "description": "End-user sign-in: exchange an identity provider's ID token for an Alvo session, refresh it, read and name the signed-in person, sign out, and discover the issuer and its signing keys."
+    },
+    {
+      "name": "time_entries"
+    }
+  ]
+}

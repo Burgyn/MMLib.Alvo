@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -51,6 +52,7 @@ public static class AlvoAccountsServiceCollectionExtensions
         AddVerification(services);
         AddTokenEndpoint(services);
         AddPerson(services);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<OpenApiOptions>, AccountsOpenApiSetup>());
 
         return services;
     }

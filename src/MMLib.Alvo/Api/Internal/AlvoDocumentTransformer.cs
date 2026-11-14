@@ -50,11 +50,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// embedded host may have to move them out of the way of its own — so a document that spelled either as a
 /// literal would tell a client to send a header the host does not read.
 /// </param>
+/// <param name="resolvers">Says whether a person resolver is registered, which is what publishes the Bearer scheme.</param>
 internal sealed class AlvoDocumentTransformer(
     IPolicyCatalogProvider policies,
     ISchemaRegistry schema,
     IOptions<AlvoApiOptions> options,
-    IOptions<Auth.AlvoAuthOptions> auth) : IOpenApiDocumentTransformer
+    IOptions<Auth.AlvoAuthOptions> auth,
+    Auth.Internal.CallerResolvers resolvers) : IOpenApiDocumentTransformer
 {
     /// <inheritdoc/>
     public Task TransformAsync(
@@ -76,7 +78,7 @@ internal sealed class AlvoDocumentTransformer(
         Overview(document);
         Origin(document);
         ProblemComponents.AddTo(document);
-        AddCredential(document, auth.Value.HeaderName);
+        AddCredential(document, auth.Value.HeaderName, resolvers.HasPerson);
         Reusable(document, operations);
         foreach (var view in views)
         {
@@ -85,7 +87,7 @@ internal sealed class AlvoDocumentTransformer(
 
         foreach (var endpoint in generated)
         {
-            Enrich(document, views[endpoint.Marker.Entity], endpoint);
+            Enrich(document, views[endpoint.Marker.Entity], endpoint, resolvers.HasPerson);
         }
 
         return Task.CompletedTask;
@@ -412,7 +414,7 @@ internal sealed class AlvoDocumentTransformer(
             + "WithTags(entity.Name). The document and the endpoint table disagree about what was mapped.");
 
     /// <summary>Rewrites one operation into the contract its endpoint actually implements.</summary>
-    private static void Enrich(OpenApiDocument document, EntityView view, Endpoint endpoint)
+    private static void Enrich(OpenApiDocument document, EntityView view, Endpoint endpoint, bool person)
     {
         var entity = view.Schema;
         var operation = FindOperation(document, endpoint.Description);
@@ -426,7 +428,7 @@ internal sealed class AlvoDocumentTransformer(
             endpoint.Marker.Kind, entity, flags.Hidden, document);
         operation.RequestBody = RequestBody(endpoint.Marker, entity, document);
         operation.Responses = Responses(endpoint.Marker, entity, document);
-        operation.Security = SecurityOf(document);
+        operation.Security = SecurityOf(document, person);
     }
 
     /// <summary>The component id of the API-key security scheme every generated operation references.</summary>
@@ -456,32 +458,97 @@ internal sealed class AlvoDocumentTransformer(
             + "The header's name is host configuration; this is the name this host reads.",
     };
 
-    /// <summary>Publishes the API-key security scheme, unless the document already has it.</summary>
+    /// <summary>The component id of the Bearer scheme a signed-in person's access token is presented under.</summary>
+    internal const string BearerScheme = "alvoBearer";
+
+    /// <summary>
+    /// Publishes the API-key security scheme, and the Bearer scheme when a person resolver is registered — each unless the
+    /// document already has it.
+    /// </summary>
     /// <param name="document">The document being built.</param>
     /// <param name="headerName">The request header the host reads the key from.</param>
-    internal static void AddCredential(OpenApiDocument document, string headerName)
+    /// <param name="person">Whether a person resolver is registered (<c>CallerResolvers.HasPerson</c>).</param>
+    internal static void AddCredential(OpenApiDocument document, string headerName, bool person)
     {
         if (document.Components?.SecuritySchemes?.ContainsKey(CredentialScheme) != true)
         {
             document.AddComponent(CredentialScheme, CredentialFor(headerName));
         }
+
+        if (person)
+        {
+            AddBearer(document);
+        }
     }
+
+    /// <summary>
+    /// Publishes the Bearer scheme (RFC 6750) a signed-in person's access token is presented under, unless the document
+    /// already has it; given <paramref name="tokenEndpoint"/>, its description names the route that issues the token.
+    /// </summary>
+    /// <remarks>
+    /// <b>Order-independent by construction.</b> The sign-in package knows where its token endpoint is mapped and the core
+    /// does not, and either transformer may run first: the core's call never overwrites, and the sign-in package's call
+    /// always writes the description that names the route.
+    /// </remarks>
+    /// <param name="document">The document being built.</param>
+    /// <param name="tokenEndpoint">The path of the token endpoint, or <see langword="null"/> when the caller does not know it.</param>
+    internal static void AddBearer(OpenApiDocument document, string? tokenEndpoint = null)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (document.Components?.SecuritySchemes?.TryGetValue(BearerScheme, out var existing) == true)
+        {
+            if (tokenEndpoint is not null && existing is OpenApiSecurityScheme scheme)
+            {
+                scheme.Description = BearerDescription(tokenEndpoint);
+            }
+
+            return;
+        }
+
+        document.AddComponent(BearerScheme, new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            Description = BearerDescription(tokenEndpoint),
+        });
+    }
+
+    private static string BearerDescription(string? tokenEndpoint) =>
+        (tokenEndpoint is null ? "An Alvo access token" : $"An Alvo access token from `POST {tokenEndpoint}`")
+        + ", presented as `Authorization: Bearer <token>`: a short-lived ES256 JWT (RFC 9068) that names one signed-in "
+        + "person. A token that cannot be used — expired, revoked, signed for another audience, or naming a session that "
+        + "has ended — is a 401 whose `WWW-Authenticate` carries `error=\"invalid_token\"`; refresh the session and retry.";
 
     /// <summary>
     /// The security requirement each generated operation carries: this scheme, <b>or nothing</b>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The empty alternative is not a hedge. An anonymous caller is a first-class one here — a descriptor may
     /// legitimately admit <c>anon</c> — and the 401 is for a credential that was <em>presented</em> and cannot
     /// be used, never for one that was absent. Declaring the scheme as mandatory would tell a client that a key
     /// is required, which for such a descriptor is false.
+    /// </para>
+    /// <para>
+    /// <b>The Bearer alternative appears only when a person resolver is registered</b> — the same question that opens the
+    /// Bearer channel at runtime, so the document never offers a credential the host would ignore.
+    /// </para>
     /// </remarks>
     /// <param name="document">The document the scheme reference resolves against.</param>
-    internal static List<OpenApiSecurityRequirement> SecurityOf(OpenApiDocument document) =>
-    [
-        new(),
-        new() { [new OpenApiSecuritySchemeReference(CredentialScheme, document)] = [] },
-    ];
+    /// <param name="person">Whether a person resolver is registered (<c>CallerResolvers.HasPerson</c>).</param>
+    internal static List<OpenApiSecurityRequirement> SecurityOf(OpenApiDocument document, bool person) => person
+        ?
+        [
+            new(),
+            new() { [new OpenApiSecuritySchemeReference(CredentialScheme, document)] = [] },
+            new() { [new OpenApiSecuritySchemeReference(BearerScheme, document)] = [] },
+        ]
+        :
+        [
+            new(),
+            new() { [new OpenApiSecuritySchemeReference(CredentialScheme, document)] = [] },
+        ];
 
     /// <summary>
     /// The document operation the mapped endpoint produced.
