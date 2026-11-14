@@ -33,6 +33,8 @@ public sealed class AccountsOpenApiTests
         "/auth/v1/tenants/{tenantId}",
         "/auth/v1/tenants/{tenantId}/members",
         "/auth/v1/tenants/{tenantId}/members/{userId}",
+        "/auth/v1/tenants/{tenantId}/invitations",
+        "/auth/v1/tenants/{tenantId}/invitations/{invitationId}",
     ];
 
     private static readonly string[] _tenantOperations =
@@ -43,6 +45,9 @@ public sealed class AccountsOpenApiTests
         "tenants.listMembers",
         "tenants.updateMember",
         "tenants.removeMember",
+        "tenants.createInvitation",
+        "tenants.listInvitations",
+        "tenants.revokeInvitation",
     ];
 
     [Fact]

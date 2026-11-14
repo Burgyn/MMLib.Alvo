@@ -13,7 +13,7 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// Every id starts with <c>auth</c> and carries an upper-case letter, so it can collide with no component the Data API
 /// derives from an entity name (the descriptor's grammar admits only lower case).
 /// </remarks>
-internal static class AccountsSchemas
+internal static partial class AccountsSchemas
 {
     /// <summary>The token request's form.</summary>
     internal const string TokenRequestId = "authTokenRequest";
@@ -69,6 +69,7 @@ internal static class AccountsSchemas
         document.AddComponent(MetadataId, Metadata());
         document.AddComponent(KeyId, Key());
         document.AddComponent(KeySetId, KeySet(document));
+        AddInvitationComponents(document);
     }
 
     private static OpenApiSchema TokenRequest() => Object(

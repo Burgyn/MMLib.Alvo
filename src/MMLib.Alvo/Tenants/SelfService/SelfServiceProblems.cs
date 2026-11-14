@@ -57,7 +57,8 @@ internal static class SelfServiceProblems
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="status"/> is <see cref="MemberChangeStatus.Changed"/>.</exception>
     internal static IResult Refused(MemberChangeStatus status) => status switch
     {
-        MemberChangeStatus.NotFound or MemberChangeStatus.NoSuchMember => ProblemResultFactory.NotFound(),
+        MemberChangeStatus.NotFound or MemberChangeStatus.NoSuchMember or MemberChangeStatus.NoSuchInvitation =>
+            ProblemResultFactory.NotFound(),
         MemberChangeStatus.NotOwner => ProblemResultFactory.PersonForbidden(NotOwner),
         MemberChangeStatus.Self => ProblemResultFactory.PersonForbidden(Self),
         MemberChangeStatus.LastOwner => ProblemResultFactory.LastOwner(),

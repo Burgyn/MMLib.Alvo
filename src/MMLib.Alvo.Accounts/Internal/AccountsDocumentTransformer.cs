@@ -71,7 +71,7 @@ internal sealed class AccountsDocumentTransformer(IOptions<AlvoAccountsOptions> 
             document,
             SelfServiceEndpoints.Tag,
             "Self-service tenants: a signed-in person lists their tenants, creates shared ones, renames and manages the "
-            + "members of those they own. Each route answers 404 `feature-disabled` naming the descriptor key that enables it "
+            + "members of those they own, and invites people into them. Each route answers 404 `feature-disabled` naming the descriptor key that enables it "
             + "while the descriptor leaves it off.");
     }
 
