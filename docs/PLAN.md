@@ -120,7 +120,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   tenant, `/auth/v1/tenants` and its members routes, the tenant header selecting among a person's memberships in the
   session's one read, the registry as the default tenant list under `selfService`; every tenant wall proven end to end
   on SQLite and PostgreSQL (`TenancyEngineFacts`). The initiative's `← YOU ARE HERE` is **S4** — invitations (owners
-  invite people into shared tenants; `tenancy.selfService.invitations` stops being unhonoured).
+  invite people into shared tenants; `tenancy.selfService.invitations` stops being unhonoured) and `invitationOnly`
+  sign-up.
 
 ## 3a. What closed F4
 
