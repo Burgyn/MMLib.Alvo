@@ -76,6 +76,7 @@ public static class AlvoAccountsServiceCollectionExtensions
         services.TryAddSingleton<DescriptorSignIn>();
         services.TryAddSingleton<TokenIssuance>();
         services.TryAddSingleton<ExchangeGrant>();
+        services.TryAddSingleton<RefreshGrant>();
         services.TryAddSingleton<TokenEndpoint>();
     }
 

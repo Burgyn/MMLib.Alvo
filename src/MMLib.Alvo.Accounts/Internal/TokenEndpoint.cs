@@ -7,7 +7,8 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// hands it to the grant its <c>grant_type</c> names.
 /// </summary>
 /// <param name="exchange">The token-exchange grant (RFC 8693).</param>
-internal sealed class TokenEndpoint(ExchangeGrant exchange)
+/// <param name="refresh">The refresh grant (RFC 6749 §6).</param>
+internal sealed class TokenEndpoint(ExchangeGrant exchange, RefreshGrant refresh)
 {
     private const string GrantTypeParameter = "grant_type";
 
@@ -26,6 +27,7 @@ internal sealed class TokenEndpoint(ExchangeGrant exchange)
         {
             null => TokenProblems.MissingGrantType(),
             ExchangeGrant.GrantType => await exchange.ExchangeAsync(form, http.Request, ct).ConfigureAwait(false),
+            RefreshGrant.GrantType => await refresh.RefreshAsync(form, http.Request, ct).ConfigureAwait(false),
             _ => TokenProblems.UnsupportedGrantType(),
         };
     }

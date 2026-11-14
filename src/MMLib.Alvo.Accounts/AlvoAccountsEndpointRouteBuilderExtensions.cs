@@ -11,7 +11,7 @@ public static class AlvoAccountsEndpointRouteBuilderExtensions
     /// </summary>
     /// <remarks>
     /// Requires <c>AddAlvoAccounts</c>, and no pipeline step beyond routing. Today: <c>POST {prefix}/token</c>, signing a
-    /// person in by exchanging a provider's ID token (RFC 8693).
+    /// person in by exchanging a provider's ID token (RFC 8693) and refreshing the session (RFC 6749 §6).
     /// </remarks>
     /// <exception cref="InvalidOperationException"><c>AddAlvoAccounts</c> was not called.</exception>
     /// <param name="endpoints">The route builder to map into.</param>
