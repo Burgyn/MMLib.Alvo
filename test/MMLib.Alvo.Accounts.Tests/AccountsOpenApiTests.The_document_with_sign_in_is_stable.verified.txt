@@ -323,7 +323,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, too long or not text, or the body names another member.",
+            "description": "`validation`: the name is missing, too long or not text, or the body carries a property other than `name`.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
@@ -672,7 +672,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body names another member.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -858,7 +858,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body names another member.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -1124,7 +1124,7 @@
             }
           },
           "409": {
-            "description": "`last-owner`: the change would take ownership from the tenant's last owner; make another member an owner first. `conflict`: the tenant is a personal one, whose one membership never changes.",
+            "description": "`conflict`: the tenant is a personal one, whose one membership never changes.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -1162,7 +1162,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the body names neither `roles` nor `isOwner`, names another member, or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` (the detail lists them) or is named twice.",
+            "description": "`validation`: the body names neither `roles` nor `isOwner`, carries a property other than those two, or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` (the detail lists them) or is named twice.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2342,7 +2342,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other member is accepted."
+        "description": "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other property is accepted."
       },
       "authServerMetadata": {
         "required": [

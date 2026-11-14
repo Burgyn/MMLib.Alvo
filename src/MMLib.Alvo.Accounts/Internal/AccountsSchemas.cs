@@ -153,7 +153,7 @@ internal static class AccountsSchemas
     private static OpenApiSchema MemberUpdate()
     {
         var schema = Object(
-            "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other member is accepted.",
+            "A change to another member: `roles`, `isOwner`, or both. A part left out is kept; no other property is accepted.",
             [],
             ("roles", new OpenApiSchema
             {

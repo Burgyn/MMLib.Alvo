@@ -113,11 +113,11 @@ internal static partial class AccountsDocumentation
         PersonUnauthenticated(document),
         OwnersOnly(document, "the person is no owner, or named themself — nobody changes their own membership"),
         NoSuchTenant(document, " or the member is no member of it"),
-        MembershipConflict(document, "would take ownership from the tenant's last owner"),
+        MembershipConflict(document, lastOwner: null),
         Unsupported(document),
         TenantRefusal(
             "422",
-            "`validation`: the body names neither `roles` nor `isOwner`, names another member, or a role at `/roles/{i}` is "
+            "`validation`: the body names neither `roles` nor `isOwner`, carries a property other than those two, or a role at `/roles/{i}` is "
             + "not in `tenancy.selfService.assignableRoles` (the detail lists them) or is named twice.",
             document));
 
@@ -137,10 +137,10 @@ internal static partial class AccountsDocumentation
         $"`not-found`: no such tenant, the person is no member of it{member} — one answer for all. `feature-disabled`: the "
         + "descriptor does not declare `tenancy.selfService`.");
 
-    private static (string, OpenApiResponse) MembershipConflict(OpenApiDocument document, string lastOwner) => TenantRefusal(
+    private static (string, OpenApiResponse) MembershipConflict(OpenApiDocument document, string? lastOwner) => TenantRefusal(
         "409",
-        $"`last-owner`: the change {lastOwner}; make another member an owner first. `conflict`: the tenant is a personal one, "
-        + "whose one membership never changes.",
+        (lastOwner is null ? string.Empty : $"`last-owner`: the change {lastOwner}; make another member an owner first. ")
+        + "`conflict`: the tenant is a personal one, whose one membership never changes.",
         document);
 
     private static OpenApiSchema Members(OpenApiDocument document) => new()
@@ -212,7 +212,7 @@ internal static partial class AccountsDocumentation
         => TenantRefusal("415", "`unsupported-media-type`: the body is not `application/json`.", document);
 
     private static (string, OpenApiResponse) Invalid(OpenApiDocument document) => TenantRefusal(
-        "422", "`validation`: the name is missing, longer than 100 characters or not text, or the body names another member.", document);
+        "422", "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.", document);
 
     private static (string, OpenApiResponse) CreateRateLimited(OpenApiDocument document)
     {

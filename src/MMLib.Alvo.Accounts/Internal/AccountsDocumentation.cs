@@ -110,7 +110,7 @@ internal static partial class AccountsDocumentation
         Ok(document, "The person, as changed.", AccountsSchemas.UserId),
         Unauthenticated(document),
         Refusal("415", "`unsupported-media-type`: the body is not `application/json`.", document),
-        Refusal("422", "`validation`: the name is missing, too long or not text, or the body names another member.", document));
+        Refusal("422", "`validation`: the name is missing, too long or not text, or the body carries a property other than `name`.", document));
 
     private static OpenApiResponses Answers(OpenApiDocument document, params (string Status, OpenApiResponse Response)[] responses)
     {
