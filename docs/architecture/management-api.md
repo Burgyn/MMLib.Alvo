@@ -582,7 +582,10 @@ session the account still has in the same transaction: a clean slate, so a ban i
 the ban's own revocation never saw, and the person signs in afresh. The success answer is `204`; an account id that
 does not exist is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
 must not be the permissive one. The ban takes effect on the very next request, not when the access token expires:
-every Bearer request reads its session (spec §5.7's one store read), and that read sees the revocation.
+every Bearer request reads its session (spec §5.7's one store read), and that read sees the revocation. Until the
+audit component (#42) records who banned whom, each change that lands writes one Information line, category
+`MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} disabled end-user account {id}.` (or `enabled`) — ids
+only, never the person's email or a token; a refused or missed change writes none.
 
 **Its own operation, `ManageAccounts`, at `admin`.** Not `ManageUsers`: those people manage the project, these use
 the app — a deployment can have either without the other, and a later level split between them should not need a new

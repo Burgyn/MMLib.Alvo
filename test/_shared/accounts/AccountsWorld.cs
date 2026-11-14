@@ -262,10 +262,13 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
 /// </remarks>
 internal sealed class CapturedLogs : ILoggerProvider, ILogger
 {
-    private readonly ConcurrentQueue<string> _lines = new();
+    private readonly ConcurrentQueue<(LogLevel Level, string Line)> _entries = new();
 
     /// <summary>Gets every line logged so far, scopes included.</summary>
-    internal IReadOnlyList<string> Lines => [.. _lines];
+    internal IReadOnlyList<string> Lines => [.. _entries.Select(entry => entry.Line)];
+
+    /// <summary>Gets every line logged so far with its level; a scope's level is <see cref="LogLevel.None"/>.</summary>
+    internal IReadOnlyList<(LogLevel Level, string Line)> Entries => [.. _entries];
 
     /// <inheritdoc/>
     public ILogger CreateLogger(string categoryName) => this;
@@ -274,7 +277,7 @@ internal sealed class CapturedLogs : ILoggerProvider, ILogger
     public IDisposable? BeginScope<TState>(TState state)
         where TState : notnull
     {
-        _lines.Enqueue($"scope: {Values(state)}");
+        _entries.Enqueue((LogLevel.None, $"scope: {Values(state)}"));
         return null;
     }
 
@@ -286,7 +289,7 @@ internal sealed class CapturedLogs : ILoggerProvider, ILogger
         LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
         ArgumentNullException.ThrowIfNull(formatter);
-        _lines.Enqueue($"{formatter(state, exception)} {exception} {Values(state)}");
+        _entries.Enqueue((logLevel, $"{formatter(state, exception)} {exception} {Values(state)}"));
     }
 
     /// <inheritdoc/>

@@ -1,4 +1,5 @@
-﻿using Microsoft.IdentityModel.JsonWebTokens;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.JsonWebTokens;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Tests;
 using MMLib.Alvo.Tests.Accounts;
@@ -126,6 +127,29 @@ public sealed class AccountAdministrationTests
         asPerson.StatusCode.ShouldBe(anonymous.StatusCode, await asPerson.ReadTextAsync());
         asPerson.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         data.StatusCode.ShouldBe(HttpStatusCode.OK, "the person did not disable themselves");
+    }
+
+    /// <summary>
+    /// Until the audit component exists (#42), each change leaves one Information line naming the operator and the account
+    /// — and a refused or missed change leaves none. No email, no token: ids only.
+    /// </summary>
+    [Fact]
+    public async Task Each_change_is_logged_once_with_the_operator_and_the_account_only()
+    {
+        await using var world = await StartAsync();
+        var (access, _) = await world.SignInAsync("sub-1", email: "ada@gmail.com");
+        var account = AccountOf(access);
+
+        (await SetDisabledAsync(world, account, disabled: true, _developer)).Dispose();
+        (await SetDisabledAsync(world, account, disabled: true, _admin)).Dispose();
+        (await SetDisabledAsync(world, account, disabled: false, _admin)).Dispose();
+        (await SetDisabledAsync(world, Guid.NewGuid(), disabled: true, _admin)).Dispose();
+
+        var lines = world.Logs.Entries.Where(entry => entry.Line.Contains("end-user account", StringComparison.Ordinal)).ToList();
+        lines.Select(entry => entry.Level).ShouldBe([LogLevel.Information, LogLevel.Information]);
+        lines[0].Line.ShouldContain($"{_admin.KeyId}:{_admin.User} disabled end-user account {account}");
+        lines[1].Line.ShouldContain($"{_admin.KeyId}:{_admin.User} enabled end-user account {account}");
+        lines.ShouldAllBe(entry => !entry.Line.Contains("ada@gmail.com", StringComparison.Ordinal) && !entry.Line.Contains(access, StringComparison.Ordinal));
     }
 
     private static Task<AccountsWorld> StartAsync()

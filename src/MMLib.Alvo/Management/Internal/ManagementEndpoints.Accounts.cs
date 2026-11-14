@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Api.Internal;
 
@@ -13,6 +14,9 @@ internal static partial class ManagementEndpoints
     private const string AccountDisabledRequired =
         "Send whether the account should be disabled: {\"disabled\": true} disables it and ends every session it has, "
         + "{\"disabled\": false} lets the person sign in again.";
+
+    /// <summary>The category of <see cref="AccountChanged"/>.</summary>
+    private const string AccountsLogCategory = "MMLib.Alvo.Management.Accounts";
 
     /// <summary>
     /// <c>PUT {prefix}/projects/{project}/accounts/{account}/disabled</c> —
@@ -54,19 +58,24 @@ internal static partial class ManagementEndpoints
             group.MapPut(
                 "/projects/{project}/accounts/{account:guid}/disabled",
                 (string project, Guid account, ManagementAccountDisabledFlag? body,
-                    ManagementGate gate, IAlvoAccountAdministration accounts, CancellationToken ct) =>
-                        Rendered(() => SetAccountDisabledAsync(project, account, body, gate, accounts, ct))),
+                    ManagementGate gate, IAlvoAccountAdministration accounts, ILoggerFactory loggers, CancellationToken ct) =>
+                        Rendered(() => SetAccountDisabledAsync(
+                            project, account, body, gate, accounts, loggers.CreateLogger(AccountsLogCategory), ct))),
             new ManagementRoute(nameof(IAlvoAccountAdministration.SetDisabledAsync), ManagementOperation.ManageAccounts),
             qualifier: "Accounts");
     }
 
-    /// <summary>Admits the caller to the project, then disables or enables the account: 204, or a named 404.</summary>
+    /// <summary>
+    /// Admits the caller to the project, then disables or enables the account: 204, logged as <see cref="AccountChanged"/>,
+    /// or a named 404.
+    /// </summary>
     private static async Task<IResult> SetAccountDisabledAsync(
         string project,
         Guid account,
         ManagementAccountDisabledFlag? body,
         ManagementGate gate,
         IAlvoAccountAdministration accounts,
+        ILogger logger,
         CancellationToken ct)
     {
         gate.Admit(ManagementOperation.ManageAccounts, project);
@@ -75,9 +84,26 @@ internal static partial class ManagementEndpoints
             return ProblemResultFactory.ManagementValidation(AccountDisabledRequired);
         }
 
-        return await accounts.SetDisabledAsync(new UserId(account), disabled, ct).ConfigureAwait(false)
-            ? Results.NoContent()
-            : ProblemResultFactory.ManagementNotFound(
+        if (!await accounts.SetDisabledAsync(new UserId(account), disabled, ct).ConfigureAwait(false))
+        {
+            return ProblemResultFactory.ManagementNotFound(
                 $"There is no account '{account}'. Account ids are the 'sub' of the access tokens Alvo issues.");
+        }
+
+        AccountChanged(logger, gate.Actor, disabled ? "disabled" : "enabled", account);
+        return Results.NoContent();
     }
+
+    /// <summary>The one record of an operator's ban or its lifting, until the audit component (#42) keeps one.</summary>
+    /// <remarks>
+    /// Information, and ids only: the management caller as the operations audit names it (<c>keyId:user</c>) and the
+    /// account's id — never the person's email, a token, or the request. Written after the change committed, so a refused
+    /// or missed change leaves no line.
+    /// </remarks>
+    /// <param name="logger">The logger to write through.</param>
+    /// <param name="actor">The management caller.</param>
+    /// <param name="change"><c>disabled</c> or <c>enabled</c>.</param>
+    /// <param name="account">The account's id.</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "Management: {Actor} {Change} end-user account {Account}.")]
+    private static partial void AccountChanged(ILogger logger, string actor, string change, Guid account);
 }
