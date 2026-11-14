@@ -43,6 +43,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Tests.** Level 1 is proven end to end on SQLite and PostgreSQL (`AccountsEngineFacts`). A log scan at Trace finds
     no ID token, access token, refresh token or API key in any message, exception, structured value or scope.
   - **Docs.** The contributor's view is `docs/architecture/accounts.md`.
+- **Self-service tenants: `tenancy.selfService`** (accounts initiative, slice S3; levels 2 and 3 of the design, without
+  invitations). On a host with sign-in:
+  - **A personal tenant per person** (`selfService.personalTenant`). Created with the account at sign-in (or at the next
+    refresh for people who signed up before), named after the person; a request with no `X-Alvo-Tenant` acts in it, with
+    the tenant roles `personalTenant.roles` names.
+  - **Shared tenants a person creates** (`selfService.createTenants`: `creatorRoles`, `maxPerAccount` 1–100, default 5).
+    `GET`/`POST /auth/v1/tenants` and `PATCH /auth/v1/tenants/{id}` list, create and rename them; the creator is the
+    owner. `GET /auth/v1/tenants/{id}/members`, `PATCH …/members/{userId}` and `DELETE …/members/{userId}` let owners
+    give roles from `selfService.assignableRoles` and ownership, remove members, and let anyone leave. Nobody changes
+    their own membership, a tenant never loses its last owner (also when two owners act at once), and a personal tenant
+    has exactly one member. A second member joins through invitations, which arrive in S4 (`invitations` is accepted
+    and warned as unhonoured until then).
+  - **The tenant header selects among a person's memberships.** It is checked on every request in the same one store
+    read as the session; a tenant the person is not a member of refuses the whole request with 401, never a request
+    without a tenant. Tenant roles are recomputed from the applied descriptor on every request and count only on that
+    tenant's scoped rows — never on a global entity, never in a Management `access` level, and the owner flag is never
+    a role.
+  - **Apply refusals and a warning.** `selfService` needs `tenancy.enabled`; every role it names must be an application
+    role in `assignableRoles`; `invitations` needs `createTenants`; an `access` level naming an assignable role is
+    refused. With `signUp.mode: open`, each write rule of a global entity that admits `authenticated` is warned about.
+  - **New public API:** the descriptor's `Tenancy.SelfService` block (`TenancySelfService`, `SelfServicePersonalTenant`,
+    `SelfServiceCreateTenants`); `AlvoProblemTypes.FeatureDisabled`, `LastOwner`, `TenantLimit`; and
+    `AlvoRateLimitOptions.Create` (`Alvo:Api:RateLimits:Create`, default 10 tenant creations per client per minute).
+  - **Storage.** Two framework tables, `{prefix}_tenants` and `{prefix}_tenant_members`, created on every relational
+    host and empty until `selfService` is used.
+  - **Schedules and migrations per tenant.** Under `selfService`, with no `IAlvoTenantCatalog` of the host's own, an
+    `EachTenant` schedule, a per-tenant cron automation and a per-tenant data migration run once per self-service tenant.
+    **Behaviour change:** a relational host whose only problem is an `EachTenant` schedule with no catalog no longer
+    exits at a boot with no descriptor (a `selfService` descriptor could cure it); a stored-descriptor boot that cannot
+    bind it stands down not-ready instead of exiting. A file boot still exits with the same message.
+  - **Event actors** keep only tenant roles still in `assignableRoles`, and a person's delivery is narrowed to the
+    membership they still hold.
+  - **Tests.** Levels 2 and 3, and every wall between tenants, are proven end to end on SQLite and PostgreSQL
+    (`TenancyEngineFacts`). **Docs:** `docs/architecture/accounts.md`, *Tenants a person creates (S3)*.
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

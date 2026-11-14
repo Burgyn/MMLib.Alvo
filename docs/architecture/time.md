@@ -140,6 +140,18 @@ is 15 minutes. **Run now** (`POST …/schedules/{id}/run`, developer role) appen
 `manual: true` and fans it out at once; the stored next occurrence does not move. On `EachTenant` it makes one run per
 tenant and answers the first tenant's delivery (Decision 12).
 
+**Which tenants (spec §6.6; accounts S3 plan D13).** "Each tenant" means each tenant the *tenant list* names, and there
+are two: the host's own `IAlvoTenantCatalog` when it registers one — always first — or else, when the descriptor being
+judged declares `tenancy.selfService`, the self-service registry (`RegistryTenantCatalog`, every `_tenants` id). The
+registry lists **self-service tenants only**: tenants that exist only as `tenant_id` values written by API-key
+workflows are not in it, so a deployment mixing the two registers its own catalog. The choice is made per descriptor by
+one internal resolver, `TenantCatalogs`, rather than by a registration, because the descriptor arrives at run time.
+Every "is there a tenant list?" check asks it with the descriptor it is judging, so without `selfService` and without a
+host catalog an `EachTenant` schedule is refused exactly as before — at boot from a file, by standing down not-ready on
+a stored descriptor, and on apply as an unbinding once it was bound. A relational host with no descriptor at all boots
+with the schedule unbound (it registers the registry, and a `selfService` descriptor could still cure it); a host with
+no registry refuses at boot whatever comes later.
+
 ## Data migrations
 
 `SchedulePump` polls the applied revision; the first revision a round reads at or after a migration's `afterRevision`
@@ -150,13 +162,13 @@ nor re-runs it; a later re-apply finds the row and does nothing (acceptance (7))
 
 **Per tenant** (Decision 10, a deviation from §4.10's `System(null)` iterating tenants): when **the start revision's own
 schema** (`AppliedSchema.Schema`) has a scoped entity — never the process's catalog, which a replica that did not make
-the apply still holds — one run per tenant `IAlvoTenantCatalog` lists, each as the system **in that tenant**, so no run
+the apply still holds — one run per tenant the tenant list names (see *Which tenants* above; for a migration, judged at the revision it starts at), each as the system **in that tenant**, so no run
 reads another tenant's rows. A tenant created after the migration started never gets it. A scoped schema with **zero
 tenants** marks the migration started with no runs and logs `MigrationStartedWithNoTenants` at Information.
 
 **Failures (plan Decision 17).** Each migration's start fails on its own: a throwing tenant list or a rejected append is
 logged with the migration's id, nothing is marked, and that migration alone is retried after 1 min, doubling to 15 min;
-the others go on. Without a catalog the boot refuses — the process does not start — but only for migrations **not yet
+the others go on. Without a tenant list (the host's catalog, or the registry at a `selfService` revision) the boot refuses — the process does not start — but only for migrations **not yet
 started** (read from the store beside the orphaned-work check), so a finished migration's registration never refuses a
 later boot. A schema that becomes scoped by a later apply, on a host with no catalog, is held at run time — logged
 `TenantCatalogMissing`, skipped, not marked, retried each round.

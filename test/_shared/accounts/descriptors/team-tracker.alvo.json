@@ -49,6 +49,7 @@
       },
       "rules": {
         "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
         "create": "'dispatcher' in @user.roles",
         "update": "'dispatcher' in @user.roles || jobs.exists(j, true)"
       }
