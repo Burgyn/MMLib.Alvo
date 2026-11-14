@@ -32,7 +32,7 @@ namespace MMLib.Alvo.Tests.Accounts;
 /// <c>access</c> block of its own.
 /// </para>
 /// </remarks>
-internal sealed class AccountsWorld : IAsyncDisposable
+internal sealed partial class AccountsWorld : IAsyncDisposable
 {
     /// <summary>The issuer every access token is minted as.</summary>
     internal const string Issuer = "https://alvo.test/auth/v1";
@@ -84,9 +84,6 @@ internal sealed class AccountsWorld : IAsyncDisposable
 
     /// <summary>Gets every line the host logged, at every level.</summary>
     internal CapturedLogs Logs { get; }
-
-    /// <summary>Gets the account store the host signs people in through.</summary>
-    internal IAccountStore Store => Api.Services.GetRequiredService<IAccountStore>();
 
     /// <summary>Starts a world.</summary>
     /// <param name="engine">The engine the world runs on.</param>
@@ -255,12 +252,19 @@ internal sealed class AccountsWorld : IAsyncDisposable
     }
 }
 
-/// <summary>Every line a host logged: the formatted message, and the exception's text when there is one.</summary>
+/// <summary>
+/// Everything a host handed its loggers, as text a sink could write: each entry's formatted message, its exception's
+/// <c>ToString</c>, and every structured value of its state; and every scope opened, with each of its values.
+/// </summary>
+/// <remarks>
+/// A structured sink (JSON console, OpenTelemetry) writes the state's values and the scopes even when the message template
+/// does not mention them, so a secret passed as a structured value or a scope is as leaked as one in the message.
+/// </remarks>
 internal sealed class CapturedLogs : ILoggerProvider, ILogger
 {
     private readonly ConcurrentQueue<string> _lines = new();
 
-    /// <summary>Gets every line logged so far.</summary>
+    /// <summary>Gets every line logged so far, scopes included.</summary>
     internal IReadOnlyList<string> Lines => [.. _lines];
 
     /// <inheritdoc/>
@@ -268,7 +272,11 @@ internal sealed class CapturedLogs : ILoggerProvider, ILogger
 
     /// <inheritdoc/>
     public IDisposable? BeginScope<TState>(TState state)
-        where TState : notnull => null;
+        where TState : notnull
+    {
+        _lines.Enqueue($"scope: {Values(state)}");
+        return null;
+    }
 
     /// <inheritdoc/>
     public bool IsEnabled(LogLevel logLevel) => true;
@@ -278,11 +286,15 @@ internal sealed class CapturedLogs : ILoggerProvider, ILogger
         LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
         ArgumentNullException.ThrowIfNull(formatter);
-        _lines.Enqueue(exception is null ? formatter(state, exception) : $"{formatter(state, exception)} {exception}");
+        _lines.Enqueue($"{formatter(state, exception)} {exception} {Values(state)}");
     }
 
     /// <inheritdoc/>
     public void Dispose()
     {
     }
+
+    private static string Values<TState>(TState state) => state is IEnumerable<KeyValuePair<string, object?>> pairs
+        ? $"{state} {string.Join(" ", pairs.Select(pair => $"{pair.Key}={pair.Value}"))}"
+        : $"{state}";
 }
