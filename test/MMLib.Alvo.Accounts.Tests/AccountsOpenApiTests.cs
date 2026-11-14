@@ -160,6 +160,24 @@ public sealed class AccountsOpenApiTests
         Reference(Operation(document, "tenants.createInvitation")["responses"]!["201"]).ShouldBe("#/components/schemas/authNewInvitation");
     }
 
+    /// <summary>
+    /// The exchange's S4 extension parameter (RFC 8693 §2.1, RFC 6749 §8.2) is documented on the token form — a client
+    /// building an <c>invitationOnly</c> sign-up learns it from the document, not from prose elsewhere.
+    /// </summary>
+    [Fact]
+    public async Task The_token_form_documents_invitation_code()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, openApi: true);
+
+        var document = await world.Api.OpenApiDocumentAsync();
+
+        var form = document["components"]!["schemas"]!["authTokenRequest"]!;
+        var description = form["properties"]!["invitation_code"]!["description"]!.GetValue<string>();
+        description.ShouldStartWith("Exchange only, optional:");
+        description.ShouldContain("invitationOnly");
+        form["required"]!.AsArray().Select(name => name!.GetValue<string>()).ShouldNotContain("invitation_code");
+    }
+
     [Fact]
     public async Task Data_api_operations_accept_a_bearer_token()
     {

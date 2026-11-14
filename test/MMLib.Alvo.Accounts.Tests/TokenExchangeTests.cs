@@ -155,6 +155,25 @@ public sealed class TokenExchangeTests
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
     }
 
+    /// <summary>
+    /// RFC 6749 §3.2 — a parameter "MUST NOT be included more than once" — holds for the S4 extension parameter as for the
+    /// standard ones: two codes are an ambiguity, not a choice, and neither is looked up.
+    /// </summary>
+    [Fact]
+    public async Task Invitation_code_sent_twice_is_a_malformed_form()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: "team-tracker.alvo.json");
+        var idToken = world.IdToken("sub-1");
+
+        using var response = await world.TokenAsync(
+            Exchange(idToken, ("subject_token_type", IdTokenType), ("invitation_code", "alvo_inv_one"), ("invitation_code", "alvo_inv_two")));
+
+        var problem = await RefusalAsync(response, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_request");
+        problem["error_description"]!.GetValue<string>().ShouldStartWith("The token request must be one application/x-www-form-urlencoded body");
+        problem.ToJsonString().ShouldNotContain("alvo_inv_");
+        (await world.CountAsync("_auth_accounts")).ShouldBe(0);
+    }
+
     [Fact]
     public async Task Invitation_only_refuses_a_new_person_and_admits_an_existing_one()
     {

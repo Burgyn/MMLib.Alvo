@@ -3555,6 +3555,10 @@
             "type": "string",
             "description": "Exchange only, optional: the token wanted back."
           },
+          "invitation_code": {
+            "type": "string",
+            "description": "Exchange only, optional: an invitation code to accept in the same transaction (RFC 8693 extension parameter). Under `signUp.mode: invitationOnly` it is the only way a new account is created."
+          },
           "refresh_token": {
             "type": "string",
             "description": "Refresh only: the refresh token the previous answer carried. It is rotated on use."
