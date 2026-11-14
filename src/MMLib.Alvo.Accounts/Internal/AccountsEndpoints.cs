@@ -34,6 +34,7 @@ internal static class AccountsEndpoints
         group.MapPost("/token", static (HttpContext http, TokenEndpoint token) => token.HandleAsync(http))
             .AddEndpointFilter(NoStore)
             .WithName(TokenOperationId);
+        UserEndpoints.Map(group);
         return group;
     }
 

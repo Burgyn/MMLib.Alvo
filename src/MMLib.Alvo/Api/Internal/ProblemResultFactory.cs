@@ -92,6 +92,22 @@ internal static class ProblemResultFactory
         $"{BearerScheme} error=\"{error}\"");
 
     /// <summary>
+    /// The 401 for a route only a person's access token reaches, asked with no Bearer token at all — an API key, another
+    /// scheme, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// The challenge is RFC 6750 §3.1's for a request that "lacks any authentication information": the scheme alone,
+    /// with no <c>error</c> code, because nothing was presented that could have been wrong.
+    /// </remarks>
+    internal static IResult BearerRequired() => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            "This route answers a signed-in person only. Present the access token sign-in issued as "
+            + "'Authorization: Bearer <token>'; an API key does not reach it."),
+        BearerScheme);
+
+    /// <summary>
     /// The 401 for a request that presents both an API key and a Bearer token Alvo owns — refused rather than
     /// resolved by precedence, since either choice would act as a caller the request did not unambiguously name.
     /// </summary>

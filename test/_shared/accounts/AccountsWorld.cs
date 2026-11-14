@@ -86,11 +86,15 @@ internal sealed class AccountsWorld : IAsyncDisposable
     /// <param name="configure">Changes to the accounts options after the world's own.</param>
     /// <param name="descriptor">The descriptor fixture's file name under <c>descriptors/</c>.</param>
     /// <param name="api">Changes to the Data API's options.</param>
+    /// <param name="services">Changes to the host's services after Alvo's and the accounts' own, e.g. a decorated store.</param>
+    /// <param name="app">Routes of the host's own, mapped beside the sign-in routes.</param>
     internal static async Task<AccountsWorld> StartAsync(
         AlvoApiEngine engine,
         Action<AlvoAccountsOptions>? configure = null,
         string descriptor = "time-tracker.alvo.json",
-        Action<AlvoApiOptions>? api = null)
+        Action<AlvoApiOptions>? api = null,
+        Action<IServiceCollection>? services = null,
+        Action<WebApplication>? app = null)
     {
         var clock = new FakeTimeProvider(Start);
         var oidc = new TestOidcIssuer(clock);
@@ -100,8 +104,16 @@ internal sealed class AccountsWorld : IAsyncDisposable
         var setup = new AlvoApiWorldSetup(
             ConfigureApi: api,
             MapManagementApi: true,
-            ConfigureServicesAfterAlvo: services => AddAccounts(services, clock, oidc, logs, keyFile, configure),
-            ConfigureApp: app => app.MapAlvoAccounts());
+            ConfigureServicesAfterAlvo: host =>
+            {
+                AddAccounts(host, clock, oidc, logs, keyFile, configure);
+                services?.Invoke(host);
+            },
+            ConfigureApp: host =>
+            {
+                host.MapAlvoAccounts();
+                app?.Invoke(host);
+            });
         var world = await AlvoApiWorld.FromDescriptorAsync(descriptor, [Operator], setup, engine);
         return new AccountsWorld(world, oidc, clock, logs, keyFile, ProjectOf(descriptor));
     }
@@ -147,6 +159,16 @@ internal sealed class AccountsWorld : IAsyncDisposable
     /// <param name="refresh">The refresh token.</param>
     internal Task<HttpResponseMessage> RefreshAsync(string refresh)
         => TokenAsync(("grant_type", "refresh_token"), ("refresh_token", refresh));
+
+    /// <summary>Sends a request as the person <paramref name="access"/> names, presenting it as <c>Authorization: Bearer</c>.</summary>
+    /// <param name="method">The HTTP method.</param>
+    /// <param name="path">The request path.</param>
+    /// <param name="access">The access token.</param>
+    /// <param name="body">A JSON body, or none.</param>
+    /// <param name="tenant">The tenant to request, or none.</param>
+    internal Task<HttpResponseMessage> AsPersonAsync(
+        HttpMethod method, string path, string access, JsonObject? body = null, string? tenant = null)
+        => Api.SendAsync(method, path, tenant: tenant, body: body, headers: [new KeyValuePair<string, string>("Authorization", $"Bearer {access}")]);
 
     /// <summary>Applies the current descriptor with one edit, through the Management API, as the operator.</summary>
     /// <param name="edit">The edit to make to the whole descriptor.</param>

@@ -16,8 +16,6 @@ namespace MMLib.Alvo.Accounts.Tests;
 /// </summary>
 public sealed class RefreshGrantTests
 {
-    private const string NeedsTheBearerChannel = "Task 9: the person resolver turns an access token into a Data API caller.";
-
     private static readonly SqliteApiEngine _engine = SqliteApiEngine.Instance;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -55,7 +53,7 @@ public sealed class RefreshGrantTests
         }
     }
 
-    [Fact(Skip = NeedsTheBearerChannel)]
+    [Fact]
     public async Task Both_access_tokens_of_two_concurrent_refreshes_reach_the_data_api()
     {
         await using var world = await AccountsWorld.StartAsync(_engine);
@@ -85,7 +83,7 @@ public sealed class RefreshGrantTests
         await InvalidGrantAsync(childAfter);
     }
 
-    [Fact(Skip = NeedsTheBearerChannel)]
+    [Fact]
     public async Task A_reuse_after_the_window_kills_the_access_token_minted_last()
     {
         await using var world = await AccountsWorld.StartAsync(_engine);

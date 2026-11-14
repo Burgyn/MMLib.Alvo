@@ -1,9 +1,11 @@
-﻿using Microsoft.Extensions.DependencyInjection.Extensions;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Accounts.Internal;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Secrets;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -24,7 +26,8 @@ public static class AlvoAccountsServiceCollectionExtensions
     /// <remarks>
     /// <para>
     /// <b>This call is the switch.</b> A host that never makes it keeps starting without a secrets key file and leaves
-    /// the <c>Authorization</c> header to its own authentication. A host that makes it must have a relational store
+    /// the <c>Authorization</c> header to its own authentication. A host that makes it registers the person resolver, so
+    /// an Alvo access token presented as <c>Authorization: Bearer</c> on the Data API is the person it names; and it must have a relational store
     /// (<c>UseSqlite</c> or <c>UsePostgreSql</c> inside <c>AddAlvo</c>), a secrets key file
     /// (<c>Alvo:Secrets:EncryptionKeyFile</c>), an API-key header other than <c>Authorization</c>, at least one
     /// provider, and — outside Development — an issuer; the start is refused, naming each, otherwise.
@@ -47,6 +50,7 @@ public static class AlvoAccountsServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AccountsStartupWarnings>());
         AddVerification(services);
         AddTokenEndpoint(services);
+        AddPerson(services);
 
         return services;
     }
@@ -78,6 +82,17 @@ public static class AlvoAccountsServiceCollectionExtensions
         services.TryAddSingleton<ExchangeGrant>();
         services.TryAddSingleton<RefreshGrant>();
         services.TryAddSingleton<TokenEndpoint>();
+    }
+
+    /// <summary>
+    /// The person resolver, under the key that opens the Bearer channel, and what it reads a session with. Scoped, so it is
+    /// resolved from the request's own services; the request reaches it through <see cref="IHttpContextAccessor"/>.
+    /// </summary>
+    private static void AddPerson(IServiceCollection services)
+    {
+        services.AddHttpContextAccessor();
+        services.TryAddSingleton<PersonSessions>();
+        services.TryAddKeyedScoped<IAlvoContextResolver, PersonResolver>(CallerResolution.PersonResolverKey);
     }
 
     private static void AddValidatedOptions(IServiceCollection services, Action<AlvoAccountsOptions>? configure)
