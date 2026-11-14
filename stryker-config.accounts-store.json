@@ -15,6 +15,7 @@
       "EfCoreAccountStore.Keys.cs",
       "Internal/AuthTables.cs",
       "EfCoreTenantStore.cs",
+      "EfCoreTenantStore.Members.cs",
       "Internal/TenantTables.cs"
     ],
     "thresholds": {

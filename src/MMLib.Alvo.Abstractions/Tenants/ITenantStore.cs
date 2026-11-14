@@ -46,6 +46,45 @@ internal interface ITenantStore
     /// <summary>Every tenant in the registry, by creation and then id — the self-service tenants only (spec §6.6).</summary>
     /// <param name="ct">A token to cancel the operation.</param>
     Task<IReadOnlyList<TenantId>> ListTenantIdsAsync(CancellationToken ct);
+
+    /// <summary>Renames <paramref name="tenant"/> — its owner's act, a personal tenant's owner included.</summary>
+    /// <param name="tenant">The tenant.</param>
+    /// <param name="actor">The account renaming it.</param>
+    /// <param name="name">The new name.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <returns>
+    /// <see cref="MemberChangeStatus.Changed"/>, <see cref="MemberChangeStatus.NotFound"/> (no such tenant, or the actor is no
+    /// member of it) or <see cref="MemberChangeStatus.NotOwner"/>.
+    /// </returns>
+    Task<MemberChangeStatus> RenameAsync(TenantId tenant, UserId actor, string name, CancellationToken ct);
+
+    /// <summary>
+    /// The members of <paramref name="tenant"/> with their accounts' display names and avatars, by joining and then account
+    /// id — or <see langword="null"/> when <paramref name="actor"/> is no member of it, so a stranger learns nothing.
+    /// </summary>
+    /// <param name="tenant">The tenant.</param>
+    /// <param name="actor">The account asking.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<IReadOnlyList<MemberView>?> ListMembersAsync(TenantId tenant, UserId actor, CancellationToken ct);
+
+    /// <summary>
+    /// Changes another member's roles and/or ownership — an owner's act, in one transaction that first bumps the tenant's
+    /// <c>version</c>, so two owners of one tenant are serialised (D3). Nobody changes their own membership (spec §14 AC4),
+    /// a personal tenant's membership never changes, and the last owner never loses ownership. Roles are stored verbatim;
+    /// whether they are assignable is the core's check.
+    /// </summary>
+    /// <param name="update">The tenant, the actor, the member, and what changes.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<MemberChangeStatus> UpdateMemberAsync(MemberUpdate update, CancellationToken ct);
+
+    /// <summary>
+    /// Removes a member — an owner's act — or lets a member leave, in one transaction that first bumps the tenant's
+    /// <c>version</c> (D3). A personal tenant's owner never leaves it, and the last owner never leaves or is removed
+    /// (spec §6.4).
+    /// </summary>
+    /// <param name="removal">The tenant, the actor and the member.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct);
 }
 
 /// <summary>What kind of tenant a registry tenant is.</summary>
@@ -99,3 +138,55 @@ internal readonly record struct CreateTenantOutcome(CreateTenantStatus Status, S
 /// <summary>The personal tenant a sign-in or a refresh ensures for its account (S3 plan D6).</summary>
 /// <param name="Id">The id the personal tenant gets if it does not exist yet.</param>
 internal sealed record PersonalTenantRequest(TenantId Id);
+
+/// <summary>One member of a tenant, as the members list shows it (spec §6.3).</summary>
+/// <param name="User">The member's account.</param>
+/// <param name="DisplayName">The account's display name, if any — <see langword="null"/> too when the account is gone.</param>
+/// <param name="AvatarUrl">The account's avatar URL, if any.</param>
+/// <param name="Roles">The stored tenant-role names, verbatim.</param>
+/// <param name="IsOwner">Whether the member manages the tenant.</param>
+/// <param name="JoinedAt">When the membership began.</param>
+internal sealed record MemberView(
+    UserId User, string? DisplayName, string? AvatarUrl, IReadOnlyList<string> Roles, bool IsOwner, DateTimeOffset JoinedAt);
+
+/// <summary>A change to another member's membership; a <see langword="null"/> part is left as it is.</summary>
+/// <param name="Tenant">The tenant.</param>
+/// <param name="Actor">The account making the change.</param>
+/// <param name="Member">The member being changed.</param>
+/// <param name="Roles">The member's new roles, or <see langword="null"/> to keep them.</param>
+/// <param name="IsOwner">The member's new ownership, or <see langword="null"/> to keep it.</param>
+/// <param name="Now">The instant of the change.</param>
+internal sealed record MemberUpdate(
+    TenantId Tenant, UserId Actor, UserId Member, IReadOnlyList<string>? Roles, bool? IsOwner, DateTimeOffset Now);
+
+/// <summary>A member's removal by an owner, or a member leaving (<paramref name="Actor"/> is <paramref name="Member"/>).</summary>
+/// <param name="Tenant">The tenant.</param>
+/// <param name="Actor">The account removing.</param>
+/// <param name="Member">The member removed.</param>
+/// <param name="Now">The instant of the removal.</param>
+internal sealed record MemberRemoval(TenantId Tenant, UserId Actor, UserId Member, DateTimeOffset Now);
+
+/// <summary>What a tenant or membership write did; every status but <see cref="Changed"/> wrote nothing.</summary>
+internal enum MemberChangeStatus
+{
+    /// <summary>The change was written.</summary>
+    Changed,
+
+    /// <summary>No such tenant, or the actor is no member of it — the two are indistinguishable on purpose.</summary>
+    NotFound,
+
+    /// <summary>The actor is a member but not an owner, and the change is an owner's.</summary>
+    NotOwner,
+
+    /// <summary>The member to change or remove is no member of the tenant.</summary>
+    NoSuchMember,
+
+    /// <summary>The change would leave the tenant without an owner (spec §6.4).</summary>
+    LastOwner,
+
+    /// <summary>The tenant is a personal one, whose only membership never changes (spec §6.1).</summary>
+    PersonalTenant,
+
+    /// <summary>The actor aimed a membership change at themself (spec §14 AC4); leaving is a removal.</summary>
+    Self,
+}

@@ -229,6 +229,7 @@ public class ChangeTrackerReachTests
     [InlineData("EfCoreAccountStore.Keys.cs")]
     [InlineData("TenantTables.cs")]
     [InlineData("EfCoreTenantStore.cs")]
+    [InlineData("EfCoreTenantStore.Members.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);

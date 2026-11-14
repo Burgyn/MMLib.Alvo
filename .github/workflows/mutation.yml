@@ -437,8 +437,9 @@ name: Mutation
 # `mutants:` is a lower-bound estimate from code lines (comments, blanks and raw-string SQL
 # bodies dropped), at the lowest mutants-per-line ratio of the measured legs (0.16,
 # data-postgresql; commands-http is 0.48, data-ef-core 0.26): Accounts ~1593 lines -> 240,
-# the store ~466 lines -> 70. Both floors are one-sided, so an under-estimate is the safe
-# direction; the upper end of the same ratios (765 and 224) is what the budgets are sized on.
+# the store ~466 lines -> 70, and with the tenant registry (accounts S3, ~400 more) ~866 lines
+# -> 139. Both floors are one-sided, so an under-estimate is the safe direction; the upper
+# end of the same ratios (765 and 416) is what the budgets are sized on.
 #
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
@@ -977,11 +978,13 @@ jobs:
           - name: accounts-store
             config: stryker-config.accounts-store.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 70     # ESTIMATED lower bound, not a probe (code lines x 0.16); re-probe on the first run
+            mutants: 139    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
+                            # 70 + tenant registry 69); re-probe on the first run
             suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
-            timeout: 90     # ESTIMATED: two assemblies (~13 s + ~11 s a run), up to ~224 mutants at
-                            # concurrency 4 is ~28 min on a 10-core box, ~38 on a runner, and 2x that
-                            # rounded up. Cut to 2x the first run's wall clock.
+                            # (S3's tenant-store facts add to the first; a floor, so left as measured)
+            timeout: 140    # ESTIMATED: two assemblies (~13 s + ~11 s a run), up to ~416 mutants at
+                            # concurrency 4 is ~52 min on a 10-core box, ~70 on a runner, and 2x that.
+                            # Cut to 2x the first run's wall clock.
     steps:
       - name: Checkout
         uses: actions/checkout@v7

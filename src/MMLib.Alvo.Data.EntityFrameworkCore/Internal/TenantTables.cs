@@ -139,6 +139,42 @@ internal sealed class TenantTables(string schemaPrefix)
     /// <summary>Gets the statement reading every tenant's id, by creation and then id.</summary>
     internal string TenantIdsSql => $"SELECT id FROM {Tenants} ORDER BY created_at, id";
 
+    /// <summary>
+    /// Gets the statement every membership write runs first (D3): it takes the tenant's row lock, so on PostgreSQL a second
+    /// writer of one tenant waits here until the first commits and then reads what it wrote. Matching no row means there is
+    /// no such tenant.
+    /// </summary>
+    internal string BumpVersionSql => $"UPDATE {Tenants} SET version = version + 1 WHERE id = @tenant_id";
+
+    /// <summary>Gets the statement counting one tenant's owners.</summary>
+    internal string OwnersSql => $"SELECT COUNT(*) FROM {Members} WHERE tenant_id = @tenant_id AND is_owner = 1";
+
+    /// <summary>Gets the statement renaming one tenant.</summary>
+    internal string RenameSql => $"UPDATE {Tenants} SET name = @name WHERE id = @tenant_id";
+
+    /// <summary>Gets the statement replacing one member's roles.</summary>
+    internal string SetRolesSql => $"UPDATE {Members} SET roles = @roles WHERE tenant_id = @tenant_id AND user_id = @user_id";
+
+    /// <summary>Gets the statement setting or clearing one member's ownership.</summary>
+    internal string SetOwnerSql => $"UPDATE {Members} SET is_owner = @is_owner WHERE tenant_id = @tenant_id AND user_id = @user_id";
+
+    /// <summary>Gets the statement removing one membership.</summary>
+    internal string RemoveMemberSql => $"DELETE FROM {Members} WHERE tenant_id = @tenant_id AND user_id = @user_id";
+
+    /// <summary>
+    /// Gets the statement reading one tenant's members with their accounts' display names and avatars, by joining and then
+    /// account id — no row at all unless <c>@actor_id</c> is a member, so one read answers both. A left join: a membership
+    /// whose account is gone still shows.
+    /// </summary>
+    internal string MembersSql =>
+        $"""
+        SELECT m.user_id, a.display_name, a.avatar_url, m.roles, m.is_owner, m.joined_at
+          FROM {Members} m LEFT JOIN {Accounts} a ON a.id = m.user_id
+         WHERE m.tenant_id = @tenant_id
+           AND EXISTS (SELECT 1 FROM {Members} x WHERE x.tenant_id = @tenant_id AND x.user_id = @actor_id)
+         ORDER BY m.joined_at, m.user_id
+        """;
+
     /// <summary>The stored text of <paramref name="kind"/>.</summary>
     /// <param name="kind">The tenant's kind.</param>
     internal static string KindText(TenantKind kind) => kind == TenantKind.Personal ? PersonalKind : SharedKind;
@@ -160,6 +196,16 @@ internal sealed class TenantTables(string schemaPrefix)
         RolesOf(reader.GetString(first + 3)),
         Convert.ToInt64(reader.GetValue(first + 4), CultureInfo.InvariantCulture) != 0,
         StoredInstant.Of(reader.GetString(first + 5)));
+
+    /// <summary>Maps a row of <see cref="MembersSql"/>.</summary>
+    /// <param name="reader">A reader positioned on a row.</param>
+    internal static MemberView ReadMember(DbDataReader reader) => new(
+        new UserId(Guid.Parse(reader.GetString(0), CultureInfo.InvariantCulture)),
+        reader.IsDBNull(1) ? null : reader.GetString(1),
+        reader.IsDBNull(2) ? null : reader.GetString(2),
+        RolesOf(reader.GetString(3)),
+        Convert.ToInt64(reader.GetValue(4), CultureInfo.InvariantCulture) != 0,
+        StoredInstant.Of(reader.GetString(5)));
 
     private static string[] RolesOf(string text) => JsonSerializer.Deserialize<string[]>(text) ?? [];
 }

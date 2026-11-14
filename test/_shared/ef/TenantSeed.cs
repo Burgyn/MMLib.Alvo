@@ -14,7 +14,7 @@ namespace MMLib.Alvo.Tests.Ef;
 /// <summary>
 /// Test-only rows of the tenant registry that no port member writes yet (S3 plan D15): members arrive through invitations
 /// (S4) and a personal tenant through a sign-in (Task 5), so the facts seed both through <see cref="TenantTables"/>' own
-/// statements — the store's SQL, never a copy of it.
+/// statements — the store's SQL, never a copy of it — creating the tables first if no store call has yet.
 /// </summary>
 public static class TenantSeed
 {
@@ -50,6 +50,7 @@ public static class TenantSeed
         var tables = new TenantTables(services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix);
         await using var connection = services.GetRequiredService<RelationalConnectionFactory>().Create();
         await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await tables.EnsureAsync(connection, TestContext.Current.CancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = sql(tables);
         bind(command);
