@@ -107,6 +107,30 @@ public sealed class DiscoveryTests
         body["token_endpoint"]!.GetValue<string>().ShouldBe("http://api.dev.test/auth/v1/token");
     }
 
+    /// <summary>
+    /// Review of Tasks 10–11, Important 2: the cacheable discovery answers vary by <c>Origin</c> whatever the request sent —
+    /// no <c>Origin</c>, the one configured origin, or a foreign one — so a shared cache never serves a server-side fetch's
+    /// answer (no <c>Access-Control-Allow-Origin</c>) to a browser app.
+    /// </summary>
+    [Fact]
+    public async Task With_one_configured_origin_every_discovery_answer_varies_by_origin()
+    {
+        await using var world = await AccountsWorld.StartAsync(
+            _engine, api: options => options.Cors.Origins.Add("https://app.example.test"));
+
+        foreach (var path in new[] { Metadata, InsertedMetadata, Jwks })
+        {
+            foreach (var origin in new string?[] { null, "https://app.example.test", "https://evil.example.test" })
+            {
+                using var response = await world.Api.SendAsync(
+                    HttpMethod.Get, path, headers: origin is null ? null : [new KeyValuePair<string, string>("Origin", origin)]);
+
+                await CacheableAsync(response);
+                response.Headers.Vary.ToString().ShouldBe("Origin", $"{path} from origin '{origin ?? "(none)"}'");
+            }
+        }
+    }
+
     private static IHostEnvironment Environment(IServiceCollection services)
         => (IHostEnvironment)services.Last(service => service.ServiceType == typeof(IHostEnvironment)).ImplementationInstance!;
 

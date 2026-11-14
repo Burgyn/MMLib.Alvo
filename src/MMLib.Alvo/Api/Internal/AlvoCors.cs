@@ -87,14 +87,32 @@ internal sealed class AlvoCors
             .ExcludeFromDescription();
     }
 
-    /// <summary>Evaluates <see cref="Policy"/> for a request carrying <c>Origin</c> and writes what it allows.</summary>
+    /// <summary>
+    /// Evaluates <see cref="Policy"/> for a request carrying <c>Origin</c> and writes what it allows — and, whenever origins
+    /// are configured, <c>Vary: Origin</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b><c>Vary: Origin</c> on every answer, with or without an <c>Origin</c>, allowed or not.</b> The framework's
+    /// evaluator adds it only when more than one origin is configured and the request's is allowed, so with one origin,
+    /// or a request without one, a response carried no <c>Vary</c>. On a cacheable answer — the auth metadata and the
+    /// JWKS are <c>public, max-age=300</c> — a shared cache would then store a server-side fetch's answer, which has no
+    /// <c>Access-Control-Allow-Origin</c>, and serve it to a browser app, which is blocked until it expires. The headers
+    /// differ by <c>Origin</c>, so every answer says so (Fetch standard, *CORS protocol and HTTP caches*).
+    /// </remarks>
     /// <param name="http">The request's context, before its response has started.</param>
     internal void Apply(HttpContext http)
     {
-        if (Enabled && http.Request.Headers.ContainsKey(HeaderNames.Origin))
+        if (!Enabled)
+        {
+            return;
+        }
+
+        if (http.Request.Headers.ContainsKey(HeaderNames.Origin))
         {
             _cors.ApplyResult(_cors.EvaluatePolicy(http, Policy), http.Response);
         }
+
+        VaryByOrigin(http.Response);
     }
 
     /// <summary>
@@ -104,6 +122,19 @@ internal sealed class AlvoCors
     /// <param name="origin">A configured origin, already validated.</param>
     internal static string Normalize(string origin)
         => new Uri(origin, UriKind.Absolute).GetLeftPart(UriPartial.Authority).ToLowerInvariant();
+
+    /// <summary>Adds <c>Origin</c> to the response's <c>Vary</c> unless the evaluator already did.</summary>
+    /// <param name="response">The response being answered.</param>
+    private static void VaryByOrigin(HttpResponse response)
+    {
+        var named = response.Headers.Vary.Any(value => value is not null && value
+            .Split(',', StringSplitOptions.TrimEntries)
+            .Contains(HeaderNames.Origin, StringComparer.OrdinalIgnoreCase));
+        if (!named)
+        {
+            response.Headers.Append(HeaderNames.Vary, HeaderNames.Origin);
+        }
+    }
 
     private static CorsPolicy Build(IEnumerable<string> origins, AlvoAuthOptions auth) => new CorsPolicyBuilder()
         .WithOrigins([.. origins.Select(Normalize)])

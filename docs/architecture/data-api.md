@@ -1056,6 +1056,10 @@ and a host without origins answers it 405 exactly as before. No origins means no
   `WWW-Authenticate`, `Retry-After`, `Preference-Applied`; preflight max age 10 minutes. `If-None-Match`, `Prefer` and
   `Preference-Applied` go beyond the S2 plan's list: the Data API reads and answers them, and a browser client could not
   make a conditional read or ask for a count without them.
+- With origins configured, **every** answer of a covered route carries `Vary: Origin` — with or without an `Origin`,
+  allowed or not, and with a single configured origin, where the framework's evaluator adds none. The auth metadata and
+  the JWKS are `public, max-age=300`, and without it a shared cache would hand a server-side fetch's answer (no
+  `Access-Control-Allow-Origin`) to a browser app. Without origins nothing is added.
 - **Not covered:** host-mapped commands (`MapAlvoCommand`). The host picks their path, so there is no Alvo group to own
   a preflight; a host that serves commands to a browser on another origin adds its own CORS for them. The Management
   API is not covered either — it is an operator surface, not a browser app's.

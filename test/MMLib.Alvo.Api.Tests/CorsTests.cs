@@ -84,6 +84,32 @@ public sealed class CorsTests
         CorsHeaders(preflight).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// With origins configured, every answer says it varies by <c>Origin</c> — once, whether the request sent none, an
+    /// allowed one or a foreign one, and with one origin configured, where the framework's evaluator would add nothing.
+    /// Without origins no answer carries it.
+    /// </summary>
+    [Fact]
+    public async Task With_origins_every_answer_varies_by_origin_once_and_without_none_does()
+    {
+        await using var world = await WithOriginsAsync();
+        await using var closed = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+
+        foreach (var origin in new string?[] { null, Allowed, "https://evil.example.test" })
+        {
+            using var get = await world.SendAsync(HttpMethod.Get, Owners, _admin, headers: origin is null ? null : [Origin(origin)]);
+
+            get.StatusCode.ShouldBe(HttpStatusCode.OK);
+            get.Headers.Vary.ToString().ShouldBe("Origin", $"from origin '{origin ?? "(none)"}'");
+        }
+
+        using var preflight = await PreflightAsync(world, Allowed);
+        using var unconfigured = await closed.SendAsync(HttpMethod.Get, Owners, _admin, headers: [Origin(Allowed)]);
+
+        preflight.Headers.Vary.ToString().ShouldBe("Origin");
+        unconfigured.Headers.Vary.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Credentials_are_never_allowed()
     {
