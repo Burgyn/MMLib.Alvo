@@ -143,7 +143,8 @@ RFC 6750 (the Bearer challenge on the self-service routes), RFC 9110 §15.5.10 (
    `personalTenant.roles` takes effect on the next request; nothing is cached across requests. Pinned by Task 6
    (resolver) and Task 11 (both engines).
 2. **Two owners demote or remove each other at the same instant** — exactly one change commits and the tenant is never
-   left without an owner. Pinned by Task 4 (store, concurrent, 20 iterations, both engines).
+   left without an owner; the loser is told it is no longer an owner (403) or no longer a member (404), never
+   `last-owner` (Task 4's recorded deviation). Pinned by Task 4 (store, concurrent, 20 iterations, both engines).
 3. **A person fires `POST /tenants` in parallel at the cap** — never more than `maxPerAccount` shared tenants. Pinned by
    Task 3 (store, both engines).
 4. **Two devices sign a new person in at once at level 2** — one account, one personal tenant, one owner membership.
@@ -350,14 +351,21 @@ enum MemberChangeStatus { Changed, NotFound, NotOwner, NoSuchMember, LastOwner, 
 - [ ] **Step 1: Write the failing facts** (members seeded with `TenantSeed`):
   `An_owner_renames_and_a_member_cannot`; `A_non_member_gets_not_found_for_every_write_and_null_for_the_list`;
   `An_owner_changes_a_member_s_roles_and_ownership`; `Nobody_changes_their_own_membership`;
-  `The_last_owner_cannot_be_demoted_removed_or_leave` (three statuses `LastOwner`, rows unchanged);
+  `The_last_owner_cannot_be_demoted_removed_or_leave` (rows unchanged; **recorded deviation, as implemented**: only
+  leaving answers `LastOwner` — demoting oneself is `Self`, judged first per AC4, and demoting or removing the sole owner
+  can come only from a non-owner, `NotOwner`; the last-owner check still runs on every demotion and removal, as a second
+  line of defence);
   `A_second_owner_makes_leaving_possible`; `A_member_leaves_and_a_non_owner_cannot_remove_another`;
   `A_personal_tenant_refuses_every_member_change` (update another id → `PersonalTenant`, remove self → `PersonalTenant`);
   `Members_list_display_names_and_avatars_from_the_accounts`;
   `Two_owners_demoting_each_other_at_once_leave_exactly_one_owner` (**Review Focus 2**: two owners, two
   `UpdateMemberAsync(IsOwner: false)` aimed at each other via `Task.WhenAll`, 20 iterations → statuses
-  `{Changed, LastOwner}`, one owner remains);
-  `Two_owners_removing_each_other_at_once_leave_exactly_one_owner` (same shape with `RemoveMemberAsync`).
+  `{Changed, NotOwner}`, one owner remains);
+  `Two_owners_removing_each_other_at_once_leave_exactly_one_owner` (same shape with `RemoveMemberAsync` → statuses
+  `{Changed, NotFound}`). **Recorded deviation, as implemented:** the plan first wrote `{Changed, LastOwner}` for both;
+  under this task's own judgment order the serialised loser re-reads its actor after the winner committed — demoted, it
+  is no longer an owner (`NotOwner`, 403); removed, it is no longer a member (`NotFound`, 404) — so `LastOwner` is never
+  the loser's answer. The invariant (exactly one owner remains) is what both facts assert.
 - [ ] **Step 2: Run to see them fail** — the Task 3 SQLite command; Expected: FAIL (compile).
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** the SQLite and PostgreSQL commands of Task 3; Expected: PASS. **Prove the bump matters:** drop
@@ -578,7 +586,9 @@ internal static class MembershipRules
   `A_member_cannot_change_another_member` (403);
   `Removing_a_member_refuses_their_next_request_in_that_tenant` (204; their next request with the header → 401; without
   it → their personal tenant);
-  `A_member_leaves_by_deleting_themself`; `The_last_owner_cannot_leave_be_removed_or_be_demoted` (409 `last-owner` ×3);
+  `A_member_leaves_by_deleting_themself`; `The_last_owner_cannot_leave_be_removed_or_be_demoted` (leaving → 409
+  `last-owner`; demoting oneself and a member removing or demoting the owner → 403 — Task 4's recorded deviation at the
+  route);
   `Promoting_a_second_owner_lets_the_first_leave`;
   `A_personal_tenant_lists_one_member_and_refuses_changes` (GET → one row; DELETE self → 409 `conflict`; PATCH another
   id → 404);
