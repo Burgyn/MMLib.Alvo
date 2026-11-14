@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Accounts.Internal;
 
 /// <summary>
 /// Reads the body of <c>PATCH {prefix}/user</c>: <c>{ "name": string }</c>, trimmed, 1–<see cref="MaxLength"/> characters,
-/// no control character — and nothing else, because the display name is the only thing a person changes there (S2 D8).
+/// no control character, no half of a surrogate pair — and nothing else, because the display name is the only thing a person changes there (S2 D8).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,7 +44,8 @@ internal static class DisplayName
             return (null, [PayloadViolations.Body(refused, options)]);
         }
 
-        using var document = JsonDocument.Parse(body.GetBuffer().AsMemory(0, (int)body.Length));
+        using var document = JsonDocument.Parse(
+            body.GetBuffer().AsMemory(0, (int)body.Length), new JsonDocumentOptions { MaxDepth = options.MaxPayloadDepth });
         return Validate(document.RootElement);
     }
 
@@ -70,7 +71,12 @@ internal static class DisplayName
             return (null, value.ValueKind == JsonValueKind.Null ? Required() : NotText());
         }
 
-        var name = value.GetString()!.Trim();
+        if (TextOf(value) is not { } text)
+        {
+            return (null, NotText());
+        }
+
+        var name = text.Trim();
         return name switch
         {
             { Length: 0 } => (null, Required()),
@@ -78,6 +84,23 @@ internal static class DisplayName
             _ when name.EnumerateRunes().Count() > MaxLength => (null, TooLong()),
             _ => (name, null),
         };
+    }
+
+    /// <summary>
+    /// A string's text, or <see langword="null"/> when it holds half a surrogate pair: legal JSON escape text no .NET string
+    /// can hold, so reading it throws. A member <em>name</em> holding one never gets here — the body reader refuses it as
+    /// malformed.
+    /// </summary>
+    private static string? TextOf(JsonElement value)
+    {
+        try
+        {
+            return value.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static AlvoViolation Required() => new(

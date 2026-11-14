@@ -77,6 +77,27 @@ public sealed class UserEndpointsTests
         problem["violations"]!.AsArray().Select(violation => violation!["pointer"]!.GetValue<string>()).ShouldBe(["/name"]);
     }
 
+    [Theory]
+    [InlineData("{\"name\":\"a\\ud800\"}", "/name", "invalid-value")]
+    [InlineData("{\"name\":\"\\udc00b\"}", "/name", "invalid-value")]
+    [InlineData("{\"name\":\"Ada\",\"\\ud800\":1}", "", "malformed-json")]
+    public async Task Half_a_surrogate_pair_is_a_validation_problem_not_a_500(string json, string at, string code)
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine);
+        var (access, _) = await world.SignInAsync("sub-1");
+
+        using var response = await world.Api.SendRawAsync(
+            HttpMethod.Patch,
+            User,
+            content: new StringContent(json, Encoding.UTF8, "application/json"),
+            headers: [new KeyValuePair<string, string>("Authorization", $"Bearer {access}")]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.ReadTextAsync());
+        var violation = (await response.ReadJsonObjectAsync())["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        violation["pointer"]!.GetValue<string>().ShouldBe(at);
+        violation["code"]!.GetValue<string>().ShouldBe(code);
+    }
+
     [Fact]
     public async Task A_patch_that_is_not_json_is_unsupported()
     {

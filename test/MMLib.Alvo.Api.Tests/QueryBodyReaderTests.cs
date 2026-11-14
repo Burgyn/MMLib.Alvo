@@ -128,6 +128,7 @@ public sealed class QueryBodyReaderTests
     [Theory]
     [InlineData("[1,2,3]", "not-an-object")]
     [InlineData("{", "malformed-json")]
+    [InlineData("""{"\ud800":1}""", "malformed-json")]
     [InlineData("""{"or":"(a.eq.1)","or":"(b.eq.2)"}""", "duplicate-field")]
     public async Task A_body_that_is_not_a_bindable_object_is_refused_with_the_reads_own_wording(
         string body, string code)

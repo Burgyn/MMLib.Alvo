@@ -201,6 +201,11 @@ internal static class BoundedJsonBody
     /// the named message was unreachable — measured, not reasoned. The reader remains a hard backstop; it is
     /// simply never the first to speak.
     /// </para>
+    /// <para>
+    /// <b>A member name holding half a surrogate pair is malformed too.</b> <c>"\ud800"</c> is legal JSON escape text no
+    /// .NET string can hold, so reading the name throws <see cref="InvalidOperationException"/> rather than
+    /// <see cref="JsonException"/> — and was a 500 on every route that reads a body through here.
+    /// </para>
     /// </remarks>
     private static BodyRefusal? EnsureWithinShapeBounds(
         ReadOnlySpan<byte> utf8Body, AlvoApiOptions options, string? rowsMember)
@@ -219,6 +224,10 @@ internal static class BoundedJsonBody
             return ScanShape(ref reader, options, rowsMember);
         }
         catch (JsonException)
+        {
+            return BodyRefusal.MalformedJson;
+        }
+        catch (InvalidOperationException)
         {
             return BodyRefusal.MalformedJson;
         }
