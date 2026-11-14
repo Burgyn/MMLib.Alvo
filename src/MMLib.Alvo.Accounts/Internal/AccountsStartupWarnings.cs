@@ -9,8 +9,9 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// </summary>
 /// <remarks>
 /// <b>Every start, not once.</b> <see cref="AlvoOidcProviderOptions.AllowHttpMetadata"/> exists for an end-to-end
-/// stack's test issuer; a deployment that carries it into production must see it in every start's log, because the
-/// one start someone happened to read is not the one that went live.
+/// stack's test issuer. Outside Development the start is refused before this runs (<c>AlvoAccountsOptionsValidation</c>);
+/// in Development — the one environment it may run in — every start's log still says so, because the one start someone
+/// happened to read is not the one a mislabelled environment went live with.
 /// </remarks>
 /// <param name="options">The accounts options.</param>
 /// <param name="logger">Where the warning goes.</param>

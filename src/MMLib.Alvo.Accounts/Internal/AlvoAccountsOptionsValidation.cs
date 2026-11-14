@@ -117,7 +117,7 @@ internal sealed class AlvoAccountsOptionsValidation(
         }
     }
 
-    private static IEnumerable<string> ProviderFailures(AlvoAccountsOptions options)
+    private IEnumerable<string> ProviderFailures(AlvoAccountsOptions options)
     {
         if (options.Providers.Count is 0)
         {
@@ -128,7 +128,7 @@ internal sealed class AlvoAccountsOptionsValidation(
         return options.Providers.SelectMany(provider => ProviderFailures(provider.Key, provider.Value));
     }
 
-    private static IEnumerable<string> ProviderFailures(string name, AlvoOidcProviderOptions provider)
+    private IEnumerable<string> ProviderFailures(string name, AlvoOidcProviderOptions provider)
     {
         var key = $"{ProvidersKey}:{name}";
         if (!_availableProviders.Contains(name))
@@ -137,7 +137,8 @@ internal sealed class AlvoAccountsOptionsValidation(
                 + $"{string.Join(", ", _availableProviders)}."];
         }
 
-        return [.. ClientIdFailures(key, provider), .. AuthorityFailures(key, provider)];
+        return [.. ClientIdFailures(key, provider), .. HttpMetadataFailures(key, provider),
+            .. AuthorityFailures(key, provider)];
     }
 
     private static IEnumerable<string> ClientIdFailures(string key, AlvoOidcProviderOptions provider)
@@ -149,7 +150,23 @@ internal sealed class AlvoAccountsOptionsValidation(
         }
     }
 
-    private static IEnumerable<string> AuthorityFailures(string key, AlvoOidcProviderOptions provider)
+    /// <summary>
+    /// Refuses <see cref="AlvoOidcProviderOptions.AllowHttpMetadata"/> outside Development, exactly as an unset issuer
+    /// is: it switches off the https check on the keys every identity this provider asserts is verified with.
+    /// </summary>
+    private IEnumerable<string> HttpMetadataFailures(string key, AlvoOidcProviderOptions provider)
+    {
+        if (provider.AllowHttpMetadata && !IsDevelopment)
+        {
+            yield return $"{key}:{nameof(AlvoOidcProviderOptions.AllowHttpMetadata)} is true outside the Development "
+                + "environment. It lets this provider's discovery document and signing keys be fetched over plain HTTP, "
+                + "where anyone on the network path can replace them — and with them every identity the provider "
+                + "asserts. It exists for an end-to-end stack's test issuer only: remove it and use an https "
+                + $"{key}:{nameof(AlvoOidcProviderOptions.Authority)}, or run that test stack in Development.";
+        }
+    }
+
+    private IEnumerable<string> AuthorityFailures(string key, AlvoOidcProviderOptions provider)
     {
         if (provider.Authority is not { } authority)
         {
@@ -166,8 +183,11 @@ internal sealed class AlvoAccountsOptionsValidation(
         else if (uri.Scheme == Uri.UriSchemeHttp && !provider.AllowHttpMetadata)
         {
             yield return $"{authorityKey} is '{authority}', an http:// authority: its signing keys could be replaced by "
-                + "anyone on the network path. Use https, or — for a test issuer only — set "
-                + $"{key}:{nameof(AlvoOidcProviderOptions.AllowHttpMetadata)}=true.";
+                + "anyone on the network path. Use https"
+                + (IsDevelopment
+                    ? $", or — for a test issuer only — set {key}:{nameof(AlvoOidcProviderOptions.AllowHttpMetadata)}=true."
+                    : $" (only a test issuer in the Development environment may set {key}:"
+                        + $"{nameof(AlvoOidcProviderOptions.AllowHttpMetadata)}=true).");
         }
     }
 

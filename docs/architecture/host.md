@@ -145,7 +145,8 @@ mapped, the OpenAPI document gains no path and no `alvoBearer` scheme, and an `A
 credential (`HostAccountsTests`). On, `AddAlvoAccounts`' own startup validation refuses the start, naming each key,
 without `Alvo:Secrets:EncryptionKeyFile`, with an `Alvo:Auth:HeaderName` of `Authorization`, or — outside
 Development — without `Alvo:Accounts:Issuer`, the absolute `https` URL of the auth prefix (default `/auth/v1`) as
-clients reach it. **In Development an unset issuer is the URL each request reached the sign-in routes at** (scheme,
+clients reach it, or with any provider's `AllowHttpMetadata` set (the test-issuer switch that accepts an `http://`
+authority; in Development it starts, with a warning on every start). **In Development an unset issuer is the URL each request reached the sign-in routes at** (scheme,
 host, path base and prefix — `http://localhost:5000/auth/v1` on a local run), read per request; set, it must be
 `https` in every environment, so a local `http` issuer is spelled by leaving it unset. An operator disables a person
 with `PUT /management/projects/{project}/accounts/{account}/disabled` (`admin`; see `management-api.md`, *Disabling an

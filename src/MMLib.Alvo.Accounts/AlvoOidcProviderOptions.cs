@@ -22,7 +22,8 @@ public sealed class AlvoOidcProviderOptions
     /// <summary>Gets or sets a value indicating whether an <c>http://</c> <see cref="Authority"/> is accepted.</summary>
     /// <remarks>
     /// For an end-to-end stack's test issuer only: keys fetched over plain HTTP can be replaced by anyone on the path,
-    /// and with them every identity the provider asserts. Setting it logs a warning on every start.
+    /// and with them every identity the provider asserts. Outside the Development environment the host refuses to
+    /// start while it is set; in Development it logs a warning on every start.
     /// </remarks>
     public bool AllowHttpMetadata { get; set; }
 }

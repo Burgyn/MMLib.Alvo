@@ -695,7 +695,11 @@ only for a slice that changes routes or the demo.
 ```
 
 An `http://` authority is refused at startup unless that provider sets `AllowHttpMetadata: true`, which
-logs a warning on every start — it exists for the end-to-end stack's test issuer only.
+logs a warning on every start — it exists for the end-to-end stack's test issuer only. **`AllowHttpMetadata` itself
+is refused at startup outside the Development environment**, exactly as an unset `Issuer` is, with a message naming
+the setting and why (S2 plan-guard ruling): a public switch that turns a security control off must not be reachable
+from a production configuration by one stray key. Only the accounts package reads the host environment, so the
+end-to-end stack (§12) runs Development without changing any other behaviour.
 
 ## 12. The demo: field-service gets self-service
 
@@ -709,7 +713,7 @@ existing test**: API keys keep working beside sign-in, which is itself a propert
 - The compose stack gains a **test OIDC issuer**: the WireMock `sink` serves a discovery document and a
   static JWKS; the TeaPie suite mints ID tokens in a `.csx` script with the matching test private key
   (committed under `test/`, labelled test-only). Alvo's Google provider points at it through `Authority`
-  + `AllowHttpMetadata`.
+  + `AllowHttpMetadata`, so the stack's Alvo runs in the Development environment (§11.2).
 - A new TeaPie collection, **`170-SelfService`**: a dispatcher signs in → creates *Acme Repairs* →
   invites a technician → the technician accepts and sees only the work orders assigned to them → the
   dispatcher mints a service token for billing, which reads completed jobs → the dispatcher removes the

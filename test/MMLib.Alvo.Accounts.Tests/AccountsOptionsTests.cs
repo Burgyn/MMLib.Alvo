@@ -89,12 +89,13 @@ public sealed class AccountsOptionsTests : IDisposable
     }
 
     [Fact]
-    public async Task An_http_authority_is_refused_unless_allowed_and_then_warned_on_every_start()
+    public async Task An_http_authority_is_refused_unless_allowed_in_development_and_then_warned_on_every_start()
     {
         const string authority = "http://issuer.test";
-        var refused = await RefusalAsync(Composition.Valid(_keyFile, options => Google(options).Authority = authority));
+        var development = Composition.Valid(_keyFile) with { Environment = Environments.Development };
+        var refused = await RefusalAsync(development with { Tweak = options => Google(options).Authority = authority });
         var log = new HttpMetadataWarnings();
-        var allowed = Composition.Valid(_keyFile, options => AllowHttp(Google(options), authority)) with { Log = log };
+        var allowed = development with { Tweak = options => AllowHttp(Google(options), authority), Log = log };
 
         var first = await RefusalAsync(allowed);
         var second = await RefusalAsync(allowed);
@@ -105,6 +106,35 @@ public sealed class AccountsOptionsTests : IDisposable
         (first, second).ShouldBe((null, null));
         log.Lines.Count.ShouldBe(2, "one warning per provider on every start");
         log.Lines.ShouldAllBe(line => line.Contains("Google") && line.Contains(authority));
+    }
+
+    /// <summary>
+    /// The switch that turns the https check off is refused outside Development, exactly as an unset issuer is —
+    /// whatever the authority, since with it a discovery document may also point its keys at an http:// URL.
+    /// </summary>
+    [Theory]
+    [InlineData("http://issuer.test")]
+    [InlineData("https://issuer.test")]
+    [InlineData(null)]
+    public async Task Allowing_http_metadata_is_refused_outside_development_naming_the_setting(string? authority)
+    {
+        var production = Composition.Valid(_keyFile, options => AllowHttp(Google(options), authority));
+
+        var refusal = await RefusalAsync(production);
+
+        refusal.ShouldNotBeNull().Failures.ShouldHaveSingleItem().ShouldStartWith(
+            "Alvo:Accounts:Providers:Google:AllowHttpMetadata is true outside the Development environment.");
+        refusal.Message.ShouldContain("plain HTTP");
+    }
+
+    [Fact]
+    public async Task An_http_authority_outside_development_names_development_as_the_only_place_to_allow_it()
+    {
+        var refusal = await RefusalAsync(Composition.Valid(_keyFile, options => Google(options).Authority = "http://issuer.test"));
+
+        refusal.ShouldNotBeNull().Failures.ShouldHaveSingleItem().ShouldEndWith(
+            "(only a test issuer in the Development environment may set "
+            + "Alvo:Accounts:Providers:Google:AllowHttpMetadata=true).");
     }
 
     [Fact]
@@ -123,11 +153,15 @@ public sealed class AccountsOptionsTests : IDisposable
     [InlineData(true, "which is not an absolute http or https URI.")]
     public async Task An_authority_that_is_not_absolute_names_the_schemes_this_provider_may_use(bool allowHttp, string expected)
     {
-        var refusal = await RefusalAsync(Composition.Valid(_keyFile, options =>
+        var development = Composition.Valid(_keyFile) with { Environment = Environments.Development };
+        var refusal = await RefusalAsync(development with
         {
-            Google(options).Authority = "issuer.test";
-            Google(options).AllowHttpMetadata = allowHttp;
-        }));
+            Tweak = options =>
+            {
+                Google(options).Authority = "issuer.test";
+                Google(options).AllowHttpMetadata = allowHttp;
+            },
+        });
 
         refusal.ShouldNotBeNull().Message.ShouldContain($"Alvo:Accounts:Providers:Google:Authority is 'issuer.test', {expected}");
     }
@@ -276,7 +310,7 @@ public sealed class AccountsOptionsTests : IDisposable
 
     private static AlvoOidcProviderOptions Google(AlvoAccountsOptions options) => options.Providers["Google"];
 
-    private static void AllowHttp(AlvoOidcProviderOptions provider, string authority)
+    private static void AllowHttp(AlvoOidcProviderOptions provider, string? authority)
     {
         provider.Authority = authority;
         provider.AllowHttpMetadata = true;
