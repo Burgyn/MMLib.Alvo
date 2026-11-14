@@ -123,7 +123,10 @@ export const SCHEMA_FACETS = {
       "TokenRefused": "token-refused",
       "SignUpRefused": "sign-up-refused",
       "SignInRefused": "sign-in-refused",
-      "RateLimited": "rate-limited"
+      "RateLimited": "rate-limited",
+      "FeatureDisabled": "feature-disabled",
+      "LastOwner": "last-owner",
+      "TenantLimit": "tenant-limit"
     }
   }
 };
