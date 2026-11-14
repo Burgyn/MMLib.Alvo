@@ -145,9 +145,10 @@ internal sealed partial class EfCoreAccountStore
     }
 
     /// <summary>
-    /// Clears the stamp, then revokes every session the account still has — a clean slate, so a session that reached the
-    /// table after the ban's revocation never comes back with the account. The stamp's update takes the account's row
-    /// lock first, so a sign-in that waited on it inserts its session after this revocation and keeps it.
+    /// Clears the stamp of a disabled account, then revokes every session it still has — a clean slate, so a session that
+    /// reached the table after the ban's revocation never comes back with the account. The stamp's update takes the
+    /// account's row lock first, so a sign-in that waited on it inserts its session after this revocation and keeps it.
+    /// An account that is not disabled is left alone: enabling it changes nothing and logs nobody out.
     /// </summary>
     private async Task<bool> EnabledAsync(
         DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset now, CancellationToken ct)
@@ -156,12 +157,17 @@ internal sealed partial class EfCoreAccountStore
             connection, transaction, _tables.EnableAccountSql,
             command => Bind(command, ("@account_id", Id(account))), ct).ConfigureAwait(false) != 1)
         {
-            return false;
+            return await ExistsAsync(connection, transaction, account, ct).ConfigureAwait(false);
         }
 
         await RevokeAccountSessionsAsync(connection, transaction, account, now, ct).ConfigureAwait(false);
         return true;
     }
+
+    private async Task<bool> ExistsAsync(DbConnection connection, DbTransaction transaction, UserId account, CancellationToken ct) =>
+        (await RelationalSqlBatch.ReadRowsAsync(
+            connection, transaction, _tables.AccountExistsSql,
+            command => Bind(command, ("@account_id", Id(account))), static _ => true, ct).ConfigureAwait(false)).Count is 1;
 
     /// <summary>Revokes every live session of <paramref name="account"/> as the ban's (<see cref="SessionRevocations.Disabled"/>).</summary>
     private Task<int> RevokeAccountSessionsAsync(

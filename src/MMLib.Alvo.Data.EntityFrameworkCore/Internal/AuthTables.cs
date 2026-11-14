@@ -241,8 +241,12 @@ internal sealed class AuthTables(string schemaPrefix)
     /// <summary>Gets the statement disabling an account; a disabled one keeps its first instant.</summary>
     internal string DisableAccountSql => $"UPDATE {Accounts} SET disabled_at = COALESCE(disabled_at, @now) WHERE id = @account_id";
 
-    /// <summary>Gets the statement enabling an account.</summary>
-    internal string EnableAccountSql => $"UPDATE {Accounts} SET disabled_at = NULL WHERE id = @account_id";
+    /// <summary>Gets the statement enabling a disabled account; it matches no row for one that is not disabled.</summary>
+    internal string EnableAccountSql =>
+        $"UPDATE {Accounts} SET disabled_at = NULL WHERE id = @account_id AND disabled_at IS NOT NULL";
+
+    /// <summary>Gets the statement reading whether an account exists.</summary>
+    internal string AccountExistsSql => $"SELECT 1 FROM {Accounts} WHERE id = @account_id";
 
     /// <summary>Gets the statement storing a key unless its purpose and generation already has one.</summary>
     internal string InsertKeySql =>

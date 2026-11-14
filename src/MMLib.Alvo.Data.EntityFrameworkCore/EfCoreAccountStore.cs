@@ -23,9 +23,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// before the session is inserted. A deviation in order from the plan's step list, which refreshes the profile last: a
 /// read of <c>disabled_at</c> followed by an insert would let an operator's concurrent disable commit between the two and
 /// leave a session it never saw. The update takes the account's row lock, so a disable either waits for the sign-in and
-/// then revokes its session, or commits first and the sign-in matches no row. An enable revokes every session the account
-/// still has as well (a clean slate), so a session that ever slipped past a ban still could not come back with the
-/// account; this order is what makes the ban's own revocation complete.
+/// then revokes its session, or commits first and the sign-in matches no row. Enabling a disabled account revokes every
+/// session it still has as well (a clean slate), so a session that ever slipped past a ban still could not come back with
+/// the account; this order is what makes the ban's own revocation complete. Enabling an account that is not disabled
+/// matches no row, revokes nothing, and still answers that the account exists.
 /// </para>
 /// <para>
 /// The tables are created once per process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted;

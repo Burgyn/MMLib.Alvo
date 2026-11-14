@@ -25,7 +25,7 @@ internal interface IAlvoAccountAdministration
     /// <summary>
     /// Disables <paramref name="account"/> and revokes every session it has, in one transaction — so its next request and
     /// its next refresh are refused — or enables it again, which revokes every session it still has too: the person signs
-    /// in afresh, and no session from before the enable comes back.
+    /// in afresh, and no session from before the enable comes back. Enabling an account that is not disabled is a no-op.
     /// </summary>
     /// <param name="account">The account's id.</param>
     /// <param name="disabled">Whether the account is to be disabled.</param>

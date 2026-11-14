@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     descriptor lists *and* the host configures signs anyone in. Dropping it ends live sessions on their next request.
   - **Disabling a person.** An operator disables a person with `PUT {management}/projects/{project}/accounts/{id}/disabled`
     (the new `ManageAccounts` operation, `admin`). The person is refused from their next request. Enabling them again
-    ends every session the account still has, so they sign in afresh.
+    ends every session the account still has, so they sign in afresh; enabling an account that is not disabled is a
+    no-op that logs nobody out.
   - **Storage.** Five new framework tables (`{prefix}_auth_*`) hold accounts, identities, sessions, refresh tokens and
     keys. The keys are encrypted with `Alvo:Secrets:EncryptionKeyFile`, which an accounts host must configure.
   - **CORS and rate limits.** `Alvo:Api:Cors:Origins` and `Alvo:Api:RateLimits:Token` (default 30 per minute per client

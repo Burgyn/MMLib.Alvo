@@ -371,6 +371,25 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await RevokedReasonAsync(services, late)).ShouldBe(SessionRevocations.Disabled, "it ends as the ban's");
     }
 
+    /// <summary>
+    /// The clean slate is the end of a ban, not a side effect of the operation: <c>{"disabled": false}</c> on an account
+    /// that was never disabled (or was enabled already) changes nothing and logs nobody out — and is still not a 404.
+    /// </summary>
+    [Fact]
+    public async Task Enabling_an_account_that_is_not_disabled_keeps_its_sessions()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+
+        (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(1), Ct)).ShouldBeTrue();
+        (await store.SetDisabledAsync(account, disabled: false, _now.AddMinutes(2), Ct)).ShouldBeTrue();
+
+        (await store.IsSessionLiveAsync(account, session.SessionId, _now.AddMinutes(3), Ct)).ShouldBeTrue();
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBeNull();
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(3)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        (await store.SetDisabledAsync(UserId.New(), disabled: false, _now, Ct)).ShouldBeFalse("an unknown account is still unknown");
+    }
+
     [Fact]
     public async Task Signing_out_twice_is_the_same_as_once()
     {
