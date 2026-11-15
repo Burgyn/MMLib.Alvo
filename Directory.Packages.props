@@ -104,8 +104,8 @@
          satisfies: MMLib.Alvo.Schema.Tests through Corvus.Json.Validator (>= 5.3.0) and the EF suites through
          Microsoft.EntityFrameworkCore.Design (Workspaces, = 4.14.0). An unscoped pin fails one of them with NU1109 or
          NU1107; scoped, every other project resolves exactly what it did before the analyzer existed. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.12.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0" Condition="'$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers' Or '$(MSBuildProjectName)' == 'MMLib.Alvo.Analyzers.Tests'" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
     <!-- Microsoft.EntityFrameworkCore.Sqlite 10.0.10 transitively brings Microsoft.Data.Sqlite.Core 10.0.10, whose pool
