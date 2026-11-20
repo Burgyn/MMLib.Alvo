@@ -1359,7 +1359,8 @@ defects that no slice could see, because each sits where two slices meet. Each f
   refuse descriptors that cannot work at all (invitations with no shared tenant to invite into), while this one is a
   legitimate "registration closed" state in which existing accounts keep signing in. `examples/complex-crm`, the
   schema showcase, had exactly this shape (S2 added `invitationOnly` before invitations existed), so it now declares
-  `tenancy.selfService` with `invitations: true`; its canonical snapshot moved by that block alone.
+  `tenancy.selfService` with `invitations: true`. Its one tenant role is a role of its own, `member`, because every
+  other role it declares is named in an `access` level, and a tenant role there is refused.
 
 Still open after these fixes, each filed: the HTTP contract's coherence before v0.1
 ([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
