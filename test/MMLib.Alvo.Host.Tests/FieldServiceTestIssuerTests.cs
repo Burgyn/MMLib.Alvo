@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -92,24 +93,38 @@ public sealed partial class FieldServiceTestIssuerTests
     }
 
     /// <summary>
-    /// No PEM private key block exists in any source the repository ships, documents or tests with — the suite makes
-    /// its key where it runs, so a committed one is a mistake wherever it is.
+    /// No PEM private key block exists in any file the repository tracks — the suite makes its key where it runs, so a
+    /// committed one is a mistake wherever it is. Tracked files only (<c>git ls-files</c>, which includes what is
+    /// staged): a contributor's own untracked key file is not the repository's.
     /// </summary>
     [Fact]
     public void No_private_key_is_committed()
     {
-        string[] roots = ["src", "samples", "examples", "schema", "plugins", "tools", "docs", Path.Combine("website", "src"), "test", "scripts", "eval"];
-
-        var offenders = roots
-            .Select(root => Path.Combine(Root, root))
-            .Where(Directory.Exists)
-            .SelectMany(root => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            .Where(file => !IsBuildOutput(file))
+        var offenders = TrackedFiles()
+            .Select(file => Path.Combine(Root, file))
+            .Where(File.Exists)
             .Where(file => PemPrivateKey().IsMatch(File.ReadAllText(file)))
             .Select(file => Path.GetRelativePath(Root, file))
             .ToList();
 
         offenders.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The load stack composes the demo's file, so every demo-only setting the demo adds for sign-in — the environment,
+    /// the issuer, the secrets key, the rate budgets — is reset in <c>test/load/docker-compose.load.yml</c>, along with
+    /// the secret's mount: the load baselines describe a host without them.
+    /// </summary>
+    [Fact]
+    public void The_load_stack_resets_the_demos_sign_in()
+    {
+        var demoOnly = DemoOnlySetting().Matches(Stack).Select(match => match.Groups["name"].Value).ToList();
+        demoOnly.ShouldNotBeEmpty("the demo stack no longer configures sign-in, so this fact would check nothing");
+
+        var load = Read("test", "load", "docker-compose.load.yml");
+        demoOnly.Where(name => !load.Contains($"\n      {name}: !reset null\n", StringComparison.Ordinal))
+            .ShouldBeEmpty("the load stack would measure a host its baselines do not describe");
+        load.ShouldContain("\n    secrets: !reset []\n");
     }
 
     /// <summary>
@@ -171,8 +186,17 @@ public sealed partial class FieldServiceTestIssuerTests
         _ => [],
     };
 
-    private static bool IsBuildOutput(string file)
-        => file.Split(Path.DirectorySeparatorChar).Any(part => part is "bin" or "obj" or "node_modules");
+    private static string[] TrackedFiles()
+    {
+        var start = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardOutput = true, UseShellExecute = false };
+        start.ArgumentList.Add("ls-files");
+        start.ArgumentList.Add("-z");
+        using var git = Process.Start(start)!;
+        var output = git.StandardOutput.ReadToEnd();
+        git.WaitForExit();
+        git.ExitCode.ShouldBe(0, "git ls-files failed, so this fact would check nothing");
+        return output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+    }
 
     [GeneratedRegex(@"^ +Alvo__Accounts__Providers__Google__Authority: (?<url>\S+)$", RegexOptions.Multiline)]
     private static partial Regex Authority();
@@ -185,6 +209,9 @@ public sealed partial class FieldServiceTestIssuerTests
 
     [GeneratedRegex(@"^  (?<name>[a-z][a-z0-9-]*):\n(?:(?: {4}.*)?\n)+", RegexOptions.Multiline)]
     private static partial Regex Service();
+
+    [GeneratedRegex(@"^      (?<name>ASPNETCORE_ENVIRONMENT|Alvo__Accounts__\S+|Alvo__Secrets__\S+|Alvo__Api__RateLimits__\S+):", RegexOptions.Multiline)]
+    private static partial Regex DemoOnlySetting();
 
     [GeneratedRegex(@"^ +Alvo__Accounts__Providers__\w+__AllowHttpMetadata: ""true""$", RegexOptions.Multiline)]
     private static partial Regex AllowHttpMetadata();
