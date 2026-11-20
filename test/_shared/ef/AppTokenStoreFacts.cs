@@ -168,6 +168,19 @@ public abstract class AppTokenStoreFacts : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_mint_that_would_act_as_someone_other_than_its_minter_is_refused()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(services);
+        var stranger = UserId.New();
+
+        await Should.ThrowAsync<ArgumentException>(async () => await store.MintAsync(Personal(owner, tenant) with { Actor = stranger }, Ct));
+        await Should.ThrowAsync<ArgumentException>(async () => await store.MintAsync(Personal(owner, tenant) with { Roles = ["dispatcher"] }, Ct));
+        await Should.ThrowAsync<ArgumentException>(async () => await store.MintAsync(Service(owner, tenant, ["dispatcher"]) with { Actor = owner }, Ct));
+        (await KeysAsync(store, owner)).ShouldBeEmpty("a refused request writes nothing");
+    }
+
+    [Fact]
     public async Task Only_a_personal_token_or_a_service_token_with_a_tenant_is_minted()
     {
         var (store, services) = await StoreAsync();

@@ -83,10 +83,30 @@ internal sealed class EfCoreAppTokenStore : IAppTokenStore
             throw new ArgumentException("Only a personal token, or a service token with a tenant, is minted.", nameof(request));
         }
 
+        EnsureActsAsItsOwn(request);
+
         return InTransactionAsync(
             (connection, transaction, token) => MintedAsync(connection, transaction, request, token),
             outcome => outcome.Status == MintTokenStatus.Minted,
             ct);
+    }
+
+    /// <summary>
+    /// Defence in depth for the one thing a token must never do — act as a user it was not minted for (S5 plan D5): a
+    /// personal token acts as its minter and carries no roles of its own; a service token acts as itself, never as its minter.
+    /// </summary>
+    private static void EnsureActsAsItsOwn(MintTokenRequest request)
+    {
+        var personal = request.Kind == ApiKeyKind.Personal;
+        if (personal && (request.Actor != request.Minter || request.Roles.Count > 0))
+        {
+            throw new ArgumentException("A personal token acts as its minter and carries no roles of its own.", nameof(request));
+        }
+
+        if (!personal && request.Actor == request.Minter)
+        {
+            throw new ArgumentException("A service token acts as itself, never as the person who minted it.", nameof(request));
+        }
     }
 
     /// <inheritdoc/>
