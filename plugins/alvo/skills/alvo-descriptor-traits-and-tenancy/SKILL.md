@@ -25,6 +25,8 @@ shared reference data every tenant sees.
 - A `POST` create on a scoped entity must **echo** the caller's `tenant_id` in the body: the server checks it
   rather than filling it in. A replace, an upsert or an update must not send it; the upsert fills it in.
 - A `unique` field or unique index on a scoped entity is unique per tenant: two tenants may hold the same value.
+- Signed-in people running tenants of their own, and the tenant roles they hold there, are `tenancy.selfService`:
+  load `alvo-descriptor-accounts`.
 
 ## Audit, soft delete, storage, realtime
 
