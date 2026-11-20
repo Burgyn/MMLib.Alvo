@@ -1334,7 +1334,8 @@ defects that no slice could see, because each sits where two slices meet. Each f
   `MemberChangeStatus.SessionEnded`, answered as the dead session's own `401 invalid_token`. SQLite's write gate
   serialises the two outright. **Lock order**: a mint takes the account row, then the session, then the tenant; an
   invitation's creation takes the session, then the tenant (before its version bump); a refresh takes the session, then
-  the personal tenant it ensures; reuse and ban take the session, then invitations, then `_api_keys`. No pair takes two
+  the personal tenant it ensures; reuse takes the session, then invitations, then `_api_keys`; a ban takes the account
+  row first, then the same three in the same order. No pair takes two
   of these rows in opposite orders. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
   `…A_mint_racing_a_reuse_of_its_session_never_outlives_it`, `…An_invitation_racing_a_reuse_of_its_session_never_outlives_it`
   (20 iterations; red on both engines without the re-read), and over HTTP `CredentialWritesMidReuseTests` (the store
@@ -1366,4 +1367,5 @@ Still open after these fixes, each filed: the HTTP contract's coherence before v
 ([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
 lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
 sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
-race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)).
+race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).

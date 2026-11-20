@@ -202,7 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     schedule or cron rule needs a host `IAlvoTenantCatalog` (with `tenancy.selfService` the registry is the default).
   - **Open before v0.1:** the `/auth/v1` HTTP contract's names, credential errors, rate-limit keys and idempotency
     (#542); recovering a tenant whose only owner is banned, and the owner-removal × ban lock order (#543); signing-key
-    rotation, an emergency procedure, and checking Google's `azp` (#544).
+    rotation, an emergency procedure, and checking Google's `azp` (#544); undoing the ownership a stolen session
+    already granted before its reuse ended it (#546).
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms
