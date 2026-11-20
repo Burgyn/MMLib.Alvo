@@ -69,10 +69,9 @@ internal static class TokenRoutes
         }
 
         var tokens = await TokenStore(http).ListAsync(call.Person, call.Ct).ConfigureAwait(false);
-        var honoured = MembershipRules.Honours(TenantKind.Shared, call.Policy);
         var now = call.Now;
         return SelfServiceCall.Json(
-            tokens.Where(token => honoured || token.Kind != ApiKeyKind.Service).Select(token => AppTokenListItem.From(token, now)).ToList());
+            tokens.Where(token => Honoured(call, token.Kind)).Select(token => AppTokenListItem.From(token, now)).ToList());
     }
 
     /// <summary><c>DELETE {prefix}/tokens/{keyId}</c>: revokes a token its caller answers for; a second revocation is 204 too.</summary>
@@ -86,9 +85,21 @@ internal static class TokenRoutes
             return refusal!;
         }
 
+        if (!Honoured(call, AppTokenSecret.KindOf(keyId)))
+        {
+            return ProblemResultFactory.NotFound();
+        }
+
         var status = await TokenStore(http).RevokeAsync(new TokenRevocation(keyId, call.Person, call.Now), call.Ct).ConfigureAwait(false);
         return status == RevokeTokenStatus.Revoked ? Results.NoContent() : ProblemResultFactory.NotFound();
     }
+
+    /// <summary>
+    /// Whether a token of <paramref name="kind"/> is one the applied descriptor honours: a service token acts in a shared
+    /// tenant, so it counts only while that membership does — the one rule the list and the revocation share.
+    /// </summary>
+    private static bool Honoured(SelfServiceCall call, ApiKeyKind kind) =>
+        kind != ApiKeyKind.Service || MembershipRules.Honours(TenantKind.Shared, call.Policy);
 
     private static ValueTask<(SelfServiceCall? Call, IResult? Refusal)> EnterAsync(HttpContext http)
     {

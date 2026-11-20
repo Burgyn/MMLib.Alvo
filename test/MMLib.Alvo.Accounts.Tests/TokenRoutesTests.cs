@@ -318,6 +318,7 @@ public sealed class TokenRoutesTests
         first.Select(pair => pair.Key).ShouldBe(_listedKeys);
         first["mintedBy"]!.AsObject().Select(pair => pair.Key).ShouldBe(["id", "displayName"]);
         first["mintedBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
+        first["mintedBy"]!["displayName"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
         first["lastUsedAt"].ShouldBeNull();
         first["revokedAt"].ShouldBeNull();
         var text = new JsonArray([.. ada.Select(item => item!.DeepClone())]).ToJsonString();
@@ -445,6 +446,46 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
+    public async Task A_service_token_the_descriptor_no_longer_honours_cannot_be_revoked()
+    {
+        await using var team = await TeamAsync();
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        JsonNode? selfService = null;
+        await team.World.ReapplyAsync(descriptor =>
+        {
+            selfService = descriptor["tenancy"]!["selfService"]!.DeepClone();
+            AccountsWorld.WithoutSelfService(descriptor);
+        });
+        using var unknown = await RevokeAsync(team, team.Ada, "alvo_svc_nosuchkey");
+
+        using var refused = await RevokeAsync(team, team.Ada, KeyOf(service));
+        await team.World.ReapplyAsync(descriptor =>
+        {
+            descriptor["tenancy"]!["selfService"] = selfService;
+            descriptor["auth"]!["accessTokens"]!["service"] = true;
+        });
+        var (list, _) = await ListAsync(team, team.Ada);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.NotFound, await refused.ReadTextAsync());
+        (await refused.Content.ReadAsByteArrayAsync(Ct)).ShouldBe(await unknown.Content.ReadAsByteArrayAsync(Ct));
+        StatusesOf(list)[KeyOf(service)].ShouldBe("active", "the refused revoke wrote nothing");
+    }
+
+    [Fact]
+    public async Task A_plain_member_revoking_a_service_token_is_the_same_404_as_an_unknown_id()
+    {
+        await using var team = await TeamAsync();
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+
+        using var plain = await RevokeAsync(team, team.Bob, KeyOf(service));
+        using var unknown = await RevokeAsync(team, team.Bob, "alvo_svc_nosuchkey");
+
+        plain.StatusCode.ShouldBe(HttpStatusCode.NotFound, await plain.ReadTextAsync());
+        (await plain.Content.ReadAsByteArrayAsync(Ct)).ShouldBe(await unknown.Content.ReadAsByteArrayAsync(Ct));
+        (await ListAsync(team, team.Ada)).Items.Single()["status"]!.GetValue<string>().ShouldBe("active");
+    }
+
+    [Fact]
     public async Task Without_access_tokens_list_and_revoke_are_404_naming_its_key()
     {
         await using var team = await TeamAsync();
@@ -470,6 +511,12 @@ public sealed class TokenRoutesTests
         revoke.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await revoke.ReadTextAsync());
         using var still = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
         still.StatusCode.ShouldBe(HttpStatusCode.OK, "a refused revoke revoked nothing");
+    }
+
+    private static async Task<string> DisplayNameAsync(Team team, string access)
+    {
+        using var user = await team.World.AsPersonAsync(HttpMethod.Get, "/auth/v1/user", access);
+        return (await user.ReadJsonObjectAsync())["name"]!.GetValue<string>();
     }
 
     private static string KeyOf(string token) => token[..token.IndexOf('.', StringComparison.Ordinal)];
