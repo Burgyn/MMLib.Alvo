@@ -21,8 +21,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <b><c>personal_owner</c> is the constraint, not decoration</b> (D6): the account id of a personal tenant and
 /// <c>NULL</c> for a shared one, under a <c>UNIQUE</c> that both engines satisfy with many <c>NULL</c>s — so a person has
 /// at most one personal tenant however many sign-ins race to create it. <c>version</c> is the row every membership write
-/// bumps first (D3), which is what serialises two owners of one tenant. <c>invitation_id</c> stays <c>NULL</c> until
-/// invitations exist (spec D9's provenance column).
+/// bumps first (D3), which is what serialises two owners of one tenant. <c>invitation_id</c> is spec D9's provenance
+/// column: <c>NULL</c> for a creator or a personal owner, the invitation's id for a member who accepted one (S4 plan D15).
 /// </para>
 /// <para>
 /// The bind-parameter names are not in <see cref="PolicyParameterPrefix"/> for the reason <see cref="OutboxTable"/>
@@ -110,7 +110,7 @@ internal sealed class TenantTables(string schemaPrefix)
         VALUES (@tenant_id, @kind, @name, @created_by, @now, @personal_owner, 0)
         """;
 
-    /// <summary>Gets the statement inserting a membership; its <c>invitation_id</c> is <c>NULL</c> until invitations exist.</summary>
+    /// <summary>Gets the statement inserting a creator's membership, whose <c>invitation_id</c> is <c>NULL</c> (S4 plan D15).</summary>
     internal string InsertMemberSql =>
         $"""
         INSERT INTO {Members} (tenant_id, user_id, roles, is_owner, joined_at, invitation_id)
@@ -138,6 +138,23 @@ internal sealed class TenantTables(string schemaPrefix)
         SELECT {MembershipColumns} FROM {Members} m JOIN {Tenants} t ON t.id = m.tenant_id
          WHERE m.user_id = @user_id AND t.personal_owner = @user_id
         """;
+
+    /// <summary>
+    /// Gets <see cref="MembershipSql"/> for a membership that is honoured — its account not disabled — the registry read of
+    /// a caller with no session to prove the account live: an <c>EventActor</c> delivery, a personal token (stack review
+    /// B-M1). A ban leaves the membership rows in place, so without this a banned person's queued work kept their tenant
+    /// roles. <c>NOT EXISTS … disabled</c> rather than a join, so a member without an account row stays a member, as in
+    /// <see cref="InvitationTables"/>' liveness read. The writes that judge a <em>target</em> member keep
+    /// <see cref="MembershipSql"/>, so an owner still demotes and removes a banned member.
+    /// </summary>
+    internal string HonouredMembershipSql => MembershipSql + HonouredAccount;
+
+    /// <summary>Gets <see cref="PersonalMembershipSql"/> for a membership that is honoured, as <see cref="HonouredMembershipSql"/>.</summary>
+    internal string HonouredPersonalMembershipSql => PersonalMembershipSql + HonouredAccount;
+
+    /// <summary>The condition, appended to a membership read over <c>m</c>, that the member's account is not disabled.</summary>
+    private string HonouredAccount =>
+        $"\n   AND NOT EXISTS (SELECT 1 FROM {Accounts} d WHERE d.id = m.user_id AND d.disabled_at IS NOT NULL)";
 
     /// <summary>
     /// Gets the statement ensuring an account's personal tenant (D6): named after the account's display name, else
@@ -255,5 +272,7 @@ internal sealed class TenantTables(string schemaPrefix)
         Convert.ToInt64(reader.GetValue(4), CultureInfo.InvariantCulture) != 0,
         StoredInstant.Of(reader.GetString(5)));
 
-    private static string[] RolesOf(string text) => JsonSerializer.Deserialize<string[]>(text) ?? [];
+    /// <summary>The role names a stored JSON array holds.</summary>
+    /// <param name="text">The stored <c>roles</c>.</param>
+    internal static string[] RolesOf(string text) => JsonSerializer.Deserialize<string[]>(text) ?? [];
 }

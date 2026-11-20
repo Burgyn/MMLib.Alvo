@@ -28,6 +28,25 @@ public sealed class SkillAreasTests
     public void A_violations_pointer_names_its_skills_area(string path, string? area) =>
         SkillAreas.ForViolation(path).ShouldBe(area);
 
+    /// <summary>
+    /// Sign-in, sign-up, app tokens and self-service tenants are the accounts skill's (D14); <c>auth.roles</c> stays
+    /// unmapped, and project tenancy itself stays with the traits.
+    /// </summary>
+    [Theory]
+    [InlineData("/auth/signUp", "accounts")]
+    [InlineData("/auth/providers/1", "accounts")]
+    [InlineData("/auth/accessTokens/service", "accounts")]
+    [InlineData("/tenancy/selfService/invitations", "accounts")]
+    [InlineData("/auth/roles", null)]
+    [InlineData("/tenancy", "traits-and-tenancy")]
+    [InlineData("/tenancy/enabled", "traits-and-tenancy")]
+    public void The_accounts_paths_belong_to_the_accounts_skill(string path, string? area) =>
+        SkillAreas.AreaOf(path, proposed: null).ShouldBe(area);
+
+    [Fact]
+    public void A_violation_at_sign_up_points_at_the_accounts_skill() =>
+        SkillAreas.ForViolation("/auth/signUp").ShouldBe("accounts");
+
     /// <summary>A declared managed column is a traits question, whichever trait adds it — never an ordinary field.</summary>
     [Theory]
     [MemberData(nameof(ManagedColumns))]

@@ -15,8 +15,20 @@ public sealed class AlvoRateLimitOptions
     public int Token { get; set; } = 30;
 
     /// <summary>
-    /// Gets or sets the tenant-creation budget (<c>POST {prefix}/tenants</c> on a host that maps the sign-in routes), per
-    /// minute. Default 10.
+    /// Gets or sets the provisioning budget, per minute, on a host that maps the sign-in routes: one budget shared by tenant
+    /// creation (<c>POST {prefix}/tenants</c>) and token minting (<c>POST {prefix}/tokens</c>). Listing and revoking tokens
+    /// are not charged. Default 10.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Token"/> is the OAuth token endpoint's budget (<c>POST {prefix}/token</c>), not this one. The names are
+    /// settled before v0.1 (<see href="https://github.com/Burgyn/MMLib.Alvo/issues/542">#542</see>).
+    /// </remarks>
     public int Create { get; set; } = 10;
+
+    /// <summary>
+    /// Gets or sets the invitations budget, per minute, charged on every invitation route on a host that maps the sign-in
+    /// routes (<c>{prefix}/tenants/{id}/invitations</c>, <c>{prefix}/invitations/preview</c> and
+    /// <c>{prefix}/invitations/accept</c>). Default 20.
+    /// </summary>
+    public int Invitations { get; set; } = 20;
 }

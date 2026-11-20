@@ -1,0 +1,38 @@
+### Before: Theo's personal token, as the earlier case captured it, reads his job — so the 401 below is the removal,
+### not a token that never worked
+# @name TheosTokenBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+X-Alvo-Api-Key: {{TheoToken}}
+
+### Dana removes Theo from Acme
+# @name DanaRemovesTheo
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/auth/v1/tenants/{{AcmeId}}/members/{{TheoId}}
+Authorization: Bearer {{DanaAccess}}
+
+### Theo's very next request in Acme, with an access token minted while he was a member. Naming a tenant he no longer
+### belongs to refuses the whole principal — never a quieter, tenantless one.
+# @name TheoInAcmeAfter
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/api/work_orders
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+
+### His personal token acts in Acme as him; he is no longer there, so it is no longer anything
+# @name TheosTokenAfter
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{TheoToken}}
+
+### But he is still signed in: only the membership ended
+# @name TheoUserAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{TheoAccess}}
+
+### Billing still reads: a service token stands on its minter's power, and Dana is still Acme's owner
+# @name BillingStillReads
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?status=eq.completed&order=reference.asc
+X-Alvo-Api-Key: {{BillingToken}}

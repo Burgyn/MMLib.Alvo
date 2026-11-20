@@ -1,0 +1,17 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "service-tokens-without-shared-tenants",
+  "auth": {
+    "providers": ["google"],
+    "signUp": { "mode": "open" },
+    "accessTokens": { "personal": true, "service": true }
+  },
+  "tenancy": { "enabled": true, "selfService": { "personalTenant": { "roles": [] } } },
+  "entities": {
+    "notes": {
+      "fields": {
+        "title": { "type": "string", "required": true }
+      }
+    }
+  }
+}

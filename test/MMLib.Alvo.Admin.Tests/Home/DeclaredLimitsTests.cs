@@ -19,7 +19,6 @@ public class DeclaredLimitsTests
             new ManagementWarnedBlock("auth.providers", "only local credentials exist"),
             new ManagementWarnedBlock("entity.storage", "a dynamic entity is not created"),
             new ManagementWarnedBlock("entity.realtime", "no change is published"),
-            new ManagementWarnedBlock("tenancy.selfService.invitations", "owners cannot invite anyone in this build"),
         ],
         []);
 
@@ -116,22 +115,26 @@ public class DeclaredLimitsTests
             .ShouldBeNull();
 
     /// <summary>
-    /// <c>invitations</c> is listed only where <c>tenancy.selfService</c> says <c>true</c> — accepted and unhonoured
-    /// until S4 (plan D11) — and <c>false</c> is a key declined by value.
+    /// <c>invitations</c> is honoured (S4 plan D14), so the Overview never lists it — not even where an older build still
+    /// reports it as warned, because a qualified slot this screen does not detect has no fallback.
     /// </summary>
     [Theory]
-    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": true } } }""", true)]
-    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": false } } }""", false)]
-    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {} } } }""", false)]
-    [InlineData("""{ "tenancy": { "enabled": true } }""", false)]
-    public void Invitations_are_listed_only_where_self_service_says_true(string descriptor, bool listed)
-        => Slots(descriptor).Contains("tenancy.selfService.invitations").ShouldBe(listed);
+    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": true } } }""")]
+    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": false } } }""")]
+    public void Invitations_are_never_listed(string descriptor)
+    {
+        var invitations = new ManagementWarnedBlock("tenancy.selfService.invitations", "owners cannot invite anyone in this build");
+        var older = new ManagementCapabilities(["entities"], [invitations], []);
+        var olderBesideTheRest = _capabilities with { Warned = [.. _capabilities.Warned, invitations] };
+
+        DeclaredLimits.Of(descriptor, older).ShouldBeEmpty();
+        DeclaredLimits.Of(descriptor, olderBesideTheRest).Select(block => block.Block).ShouldNotContain(invitations.Block);
+    }
 
     /// <summary>Every qualified slot this screen detects, which a Host test holds against the real build's report.</summary>
     [Fact]
-    public void The_qualified_slots_are_the_four_the_build_reports()
-        => DeclaredSlots.Qualified.ShouldBe(
-            ["auth.providers", "entity.storage", "entity.realtime", "tenancy.selfService.invitations"], ignoreOrder: true);
+    public void The_qualified_slots_are_the_three_the_build_reports()
+        => DeclaredSlots.Qualified.ShouldBe(["auth.providers", "entity.storage", "entity.realtime"], ignoreOrder: true);
 
     [Fact]
     public void A_descriptor_that_does_not_parse_declares_nothing()

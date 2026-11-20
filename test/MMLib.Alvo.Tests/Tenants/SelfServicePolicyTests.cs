@@ -84,6 +84,19 @@ public sealed class SelfServicePolicyTests
         policy.Effective([]).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// <b>Invitations are on only where <c>invitations: true</c> rides with <c>createTenants</c></b> (S4 plan D14): without a
+    /// shared tenant there is nothing to invite into, which the apply refuses and the policy never grants regardless.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "createTenants": {}, "invitations": true }""", true)]
+    [InlineData("""{ "createTenants": {}, "invitations": false }""", false)]
+    [InlineData("""{ "createTenants": {} }""", false)]
+    [InlineData("""{ "invitations": true }""", false)]
+    [InlineData(null, false)]
+    public void Invitations_are_on_only_with_create_tenants_and_the_key(string? selfService, bool invitations)
+        => Compile(selfService).SelfService.Invitations.ShouldBe(invitations);
+
     [Fact]
     public void Without_self_service_the_policy_is_none()
     {
@@ -94,6 +107,7 @@ public sealed class SelfServicePolicyTests
         policy.AssignableRoles.ShouldBeEmpty();
         policy.HasPersonalTenant.ShouldBeFalse();
         policy.CreatesTenants.ShouldBeFalse();
+        policy.Invitations.ShouldBeFalse();
         policy.Effective(["dispatcher"]).ShouldBeEmpty();
     }
 

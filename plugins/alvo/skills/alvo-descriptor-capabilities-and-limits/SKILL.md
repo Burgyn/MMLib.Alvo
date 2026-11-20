@@ -18,8 +18,11 @@ These are declared by the schema and accepted, and are not honoured, or only in 
 `entity.realtime`, and a descriptor that sets them looks as if it works:
 
 <!-- gen:warned -->
-`dynamicEntities` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `tenancy.selfService.invitations` `entity.realtime`
+`dynamicEntities` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `entity.realtime`
 <!-- /gen:warned -->
+
+`auth.providers` warns only for `microsoft`, `github`, `apple` and `oidc`; `local` and `google` are honoured
+(`alvo-descriptor-accounts`).
 
 **Declarative actions.** `webhook`, `email`, `function` and `entity.update` run from after-hooks and `automation` rules,
 each action as its own retried delivery; `entity.update` writes once per event, as the system in the event's tenant,

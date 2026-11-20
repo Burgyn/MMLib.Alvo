@@ -37,10 +37,13 @@ internal static class SelfServicePerson
         "Only a signed-in person manages tenants. Present the access token sign-in issued as 'Authorization: Bearer "
         + "<token>'; an API key or a token minted for an integration does not reach this route.";
 
-    /// <summary>The person the request's Bearer token names, or the refusal to answer instead.</summary>
+    /// <summary>
+    /// The person the request's Bearer token names, with the session it was resolved from (<see cref="PersonSessionKey"/>;
+    /// <see langword="null"/> from a host's own person resolver), or the refusal to answer instead.
+    /// </summary>
     /// <param name="http">The request.</param>
     /// <returns>Exactly one of the person and the refusal.</returns>
-    internal static async ValueTask<(UserId? Person, IResult? Refusal)> AdmitAsync(HttpContext http)
+    internal static async ValueTask<(SessionPerson? Person, IResult? Refusal)> AdmitAsync(HttpContext http)
     {
         ArgumentNullException.ThrowIfNull(http);
         var services = http.RequestServices;
@@ -57,15 +60,20 @@ internal static class SelfServicePerson
         };
     }
 
-    private static async ValueTask<(UserId? Person, IResult? Refusal)> ResolveAsync(
+    private static async ValueTask<(SessionPerson? Person, IResult? Refusal)> ResolveAsync(
         IAlvoContextResolver resolver, string token, HttpContext http)
     {
         var principal = await resolver.ResolveAsync(token, requestedTenant: null, http.RequestAborted).ConfigureAwait(false);
         return principal?.Context switch
         {
             null => (null, ProblemResultFactory.BearerUnauthenticated(InvalidToken)),
-            { ActorKind: AlvoActorKind.User } person => (person.User, null),
+            { ActorKind: AlvoActorKind.User } person => (new SessionPerson(person.User, PersonSessionKey.SessionOf(principal.KeyId)), null),
             _ => (null, ProblemResultFactory.PersonForbidden(NotAPerson)),
         };
     }
 }
+
+/// <summary>An admitted person and the session their Bearer token was resolved from.</summary>
+/// <param name="User">The person.</param>
+/// <param name="Session">The session, or <see langword="null"/> when the resolver names none.</param>
+internal readonly record struct SessionPerson(UserId User, Guid? Session);

@@ -103,7 +103,7 @@ public sealed class EventActorTests
 
     /// <summary>A self-service policy whose <c>assignableRoles</c> are <paramref name="names"/>.</summary>
     private static SelfServicePolicy Assignable(params string[] names) =>
-        new(true, names.Select(Role.Application).ToHashSet(), null, null, SelfServicePolicy.DefaultMaxPerAccount);
+        new(true, names.Select(Role.Application).ToHashSet(), null, null, SelfServicePolicy.DefaultMaxPerAccount, Invitations: false);
 
     private static AlvoEvent Event(string? authId, string? authClaims) => new()
     {

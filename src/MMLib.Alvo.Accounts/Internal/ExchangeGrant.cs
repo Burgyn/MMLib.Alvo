@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Accounts.Internal;
 
@@ -24,6 +25,15 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// verdict admits one, so an existing account signs in under <c>invitationOnly</c> (D14) and a refused new identity writes
 /// nothing. The session and refresh ids are chosen here, so the one transaction that starts the session also issues the
 /// refresh token whose value this answers with.
+/// </para>
+/// <para>
+/// <b>An <c>invitation_code</c> is accepted in the sign-in's own transaction</b> (S4 plan D5, D7) — an RFC 8693 §2.1 /
+/// RFC 6749 §8.2 extension parameter, sent in the body like every other, so the code reaches no URL. The order is the
+/// point: the subject token is verified <em>first</em>, so nobody probes codes anonymously and a refused ID token never
+/// consumes one; a code while <c>tenancy.selfService.invitations</c> is off is an <c>invalid_request</c>, not silently
+/// dropped; the sign-up decision then knows a code was sent; and the store sees only the code's hash. A dead code refuses
+/// the <em>whole</em> exchange with one <c>invalid_grant</c> whatever made it dead — even for an account that would sign
+/// in without it: the client asked for both at once, and signs in again without the code.
 /// </para>
 /// </remarks>
 /// <param name="verifier">Verifies the subject token.</param>
@@ -52,6 +62,8 @@ internal sealed class ExchangeGrant(
 
     private const string RequestedTokenType = "requested_token_type";
 
+    private const string InvitationCodeParameter = "invitation_code";
+
     /// <summary>Exchanges the subject token <paramref name="form"/> carries.</summary>
     /// <param name="form">The token request's parameters.</param>
     /// <param name="request">The request, for the issuer in Development.</param>
@@ -72,8 +84,17 @@ internal sealed class ExchangeGrant(
             return TokenProblems.SubjectTokenRefused();
         }
 
-        var verdict = SignUpDecision.Decide(policy, identity);
-        var started = Start(identity, verdict, tokenId);
+        var code = form[InvitationCodeParameter];
+        return code is not null && !signIn.SelfService.Invitations
+            ? TokenProblems.InvitationsOff()
+            : await SignInAsync(identity, tokenId, code, policy, request, ct).ConfigureAwait(false);
+    }
+
+    private async Task<IResult> SignInAsync(
+        VerifiedIdentity identity, string tokenId, string? code, SignInPolicy policy, HttpRequest request, CancellationToken ct)
+    {
+        var verdict = SignUpDecision.Decide(policy, identity, hasInvitation: code is not null);
+        var started = Start(identity, verdict, tokenId, code);
         var outcome = await store.SignInAsync(started, ct).ConfigureAwait(false);
         return await AnswerAsync(outcome, verdict, started, policy, request, ct).ConfigureAwait(false);
     }
@@ -93,7 +114,7 @@ internal sealed class ExchangeGrant(
                 : null;
     }
 
-    private SignInRequest Start(VerifiedIdentity identity, SignUpVerdict verdict, string subjectTokenId)
+    private SignInRequest Start(VerifiedIdentity identity, SignUpVerdict verdict, string subjectTokenId, string? invitationCode)
     {
         var now = clock.GetUtcNow();
         return new SignInRequest(
@@ -104,7 +125,8 @@ internal sealed class ExchangeGrant(
             Guid.NewGuid(),
             now,
             now.AddDays(options.Value.SessionLifetimeDays),
-            signIn.PersonalTenant());
+            signIn.PersonalTenant(),
+            invitationCode is null ? null : new SignInInvitation(InvitationCode.Hash(invitationCode)));
     }
 
     private async Task<IResult> AnswerAsync(
@@ -121,6 +143,7 @@ internal sealed class ExchangeGrant(
             { Status: SignInStatus.SignUpRefused } => TokenProblems.SignUpRefused(verdict),
             { Status: SignInStatus.Disabled } => TokenProblems.SignInRefused(),
             { Status: SignInStatus.SubjectTokenReplayed } => TokenProblems.SubjectTokenRefused(),
+            { Status: SignInStatus.InvitationRefused } => TokenProblems.InvitationRefused(),
             _ => throw new InvalidOperationException($"The account store answered a sign-in with {outcome.Status} and no account."),
         };
 }

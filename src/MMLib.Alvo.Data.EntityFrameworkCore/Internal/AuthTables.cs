@@ -209,11 +209,12 @@ internal sealed class AuthTables(string schemaPrefix)
 
     /// <summary>
     /// Gets the statement reading a refresh token with its child (if any), its session and its account's disabled stamp —
-    /// everything a refresh judges, in one read.
+    /// everything a refresh judges, in one read — and the instant its session started, from which a reuse's sweep counts.
     /// </summary>
     internal string RefreshTokenSql =>
         $"""
-        SELECT t.session_id, t.created_at, t.rotated_at, c.id, s.account_id, s.provider, s.revoked_at, s.expires_at, a.disabled_at
+        SELECT t.session_id, t.created_at, t.rotated_at, c.id, s.account_id, s.provider, s.revoked_at, s.expires_at, a.disabled_at,
+               s.created_at
           FROM {RefreshTokens} t
           JOIN {Sessions} s ON s.id = t.session_id
           JOIN {Accounts} a ON a.id = s.account_id
@@ -237,6 +238,21 @@ internal sealed class AuthTables(string schemaPrefix)
         $"""
         UPDATE {Sessions} SET revoked_at = COALESCE(revoked_at, @now), revoked_reason = COALESCE(revoked_reason, @reason)
          WHERE id = @session_id
+        """;
+
+    /// <summary>
+    /// Gets the statement locking one live session of one account — a write that changes nothing, as
+    /// <see cref="TenantTables.LockAccountSql"/> is — run by a write that hands out a credential or power for that session
+    /// (a mint, an invitation's creation; stack review A-I1). Zero rows is a session that is revoked, expired or not the
+    /// account's. On PostgreSQL it waits on a reuse, sign-out or ban that is revoking the row and then re-checks
+    /// <c>revoked_at IS NULL</c> against the committed row; and a reuse that comes after it waits until the write commits,
+    /// so the reuse's sweep then sees what the write inserted. SQLite's write gate serialises the two outright. Always
+    /// taken before any tenant row, the order a refresh takes them in (session, then the personal tenant it ensures).
+    /// </summary>
+    internal string LockLiveSessionSql =>
+        $"""
+        UPDATE {Sessions} SET last_refreshed_at = last_refreshed_at
+         WHERE id = @session_id AND account_id = @account_id AND revoked_at IS NULL AND expires_at > @now
         """;
 
     /// <summary>Gets the statement revoking every live session of one account.</summary>

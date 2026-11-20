@@ -24,9 +24,9 @@ public class FrameworkTableReservationTests
     }
 
     [Fact]
-    public void The_reserved_set_is_the_seventeen_bookkeeping_tables_the_seven_account_and_tenant_tables_and_the_seven_identity_ones()
+    public void The_reserved_set_is_the_seventeen_bookkeeping_tables_the_nine_account_tenant_and_token_tables_and_the_seven_identity_ones()
     {
-        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(31);
+        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(33);
         AlvoFrameworkTables.IdentitySuffixes.Count.ShouldBe(7);
     }
 
@@ -92,6 +92,7 @@ public class FrameworkTableReservationTests
 
         names.ShouldContain("alvo_tenants");
         names.ShouldContain("alvo_tenant_members");
+        names.ShouldContain("alvo_tenant_invitations");
     }
 
     [Fact]

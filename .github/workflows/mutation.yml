@@ -41,7 +41,10 @@ name: Mutation
 #                        against MMLib.Alvo.Accounts.Tests.
 #   - "accounts-store" → the EF adapter's account store and tenant registry —
 #                        EfCoreAccountStore{,.Sessions,.Keys}.cs, Internal/AuthTables.cs,
-#                        EfCoreTenantStore*.cs and Internal/TenantTables.cs
+#                        EfCoreTenantStore*.cs (.Invitations.cs included),
+#                        Internal/TenantTables.cs, Internal/InvitationTables.cs and
+#                        Internal/InvitationAcceptance.cs, EfCoreAppTokenStore.cs and
+#                        Internal/AppTokenTables.cs
 #                        (stryker-config.accounts-store.json) — against
 #                        MMLib.Alvo.Data.Sqlite.Tests and MMLib.Alvo.Accounts.Tests. A third
 #                        partition of the EF project beside data-ef-core and data-ef-rest; see
@@ -420,6 +423,14 @@ name: Mutation
 # facts (test/_shared/ef/TenantStoreFacts.cs) compile into the same two engine suites and
 # never into MMLib.Alvo.Data.EntityFrameworkCore.Tests, so data-ef-rest excludes
 # EfCoreTenantStore*.cs and Internal/TenantTables.cs and accounts-store mutates them.
+# The invitations (accounts S4) follow the registry: their facts
+# (test/_shared/ef/InvitationStoreFacts.cs) compile into the same two engine suites, so
+# EfCoreTenantStore.Invitations.cs, Internal/InvitationTables.cs and
+# Internal/InvitationAcceptance.cs (the one acceptance both stores run) move with them.
+# The app-token registry (accounts S5) follows them for the same reason: its facts
+# (test/_shared/ef/AppTokenStoreFacts.cs) compile into the same two engine suites, so
+# EfCoreAppTokenStore.cs and Internal/AppTokenTables.cs sit on accounts-store and
+# data-ef-rest excludes them.
 #
 # `accounts` mutates every file of the package except AssemblyInfo.cs. The registration
 # surface (AddAlvoAccounts, MapAlvoAccounts) stays IN, against the drivers' precedent,
@@ -466,6 +477,18 @@ name: Mutation
 # `mutants:` is ~374 code lines x 0.16 -> 59 (upper end x 0.48 -> 179, what the budget is sized
 # on), `suite:` MTP's own Accounts.Tests count after S3.
 #
+# S5 (accounts, tokens) adds three route files to this leg — TokenRoutes, AppTokenResponse, AppTokenProblems
+# (~129 code lines; `POST {prefix}/tokens` and its answers), judged by TokenRoutesTests in the same
+# suite and excluded from the core leg for the same reason; `mutants:` is now ~503 code lines x 0.16
+# -> 80 (upper end x 0.48 -> 241), still an estimate. AppTokenRequest stays on the core leg, whose
+# suite (AppTokenRequestTests) tests it directly.
+#
+# S5 Task 8 adds `GET {prefix}/tokens` and `DELETE {prefix}/tokens/{keyId}`: TokenRoutes grows and
+# AppTokenListItem joins the leg (~74 code lines, ~577 in all); `mutants:` is now ~577 code lines x 0.16
+# -> 92 (upper end x 0.48 -> 277), still an estimate; `suite:` is MTP's Accounts.Tests count after it (383).
+# S5 Task 9's fix adds AppTokenReach (~15 code lines, the mint route's "would this token ever resolve"
+# guard), judged by AppTokenReachTests in the same suite; ~592 code lines x 0.16 -> 95.
+#
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
 # its "Number of tests found", `timeout:` with ~2x its wall clock, and `break` with
@@ -501,7 +524,10 @@ name: Mutation
 # gate, the gate witness — the security-relevant HTTP glue — run on their own leg against
 # `MMLib.Alvo.Api.Tests` (`stryker-config.commands-http.json`); the rest of `Api/**` stays
 # on #143. Six files: CommandEndpointFilter, CommandGateCheck, WebhookReceiver, CallerGate,
-# AlvoCallerFilter, AlvoGateWitness. stryker-config.json excludes the first three — its
+# AlvoCallerFilter, AlvoGateWitness. Accounts S5 adds a seventh, ManagementCallerFilter (the
+# app-token refusal in front of the Management API), judged by AppTokenManagementTests in the
+# same suite: ~25 code lines x 0.16 -> 4 more mutants (145 -> 149), still an estimate, not a probe.
+# stryker-config.json excludes the first three — its
 # suite cannot reach them — together with CommandInputs and LedgerSweeper.
 #
 # THE LEG IS NARROWER THAN ITS DESIGN, AND THAT IS A MEASUREMENT (HX-08 Ruling 42). The
@@ -927,7 +953,7 @@ jobs:
           - name: commands and webhooks over HTTP
             config: stryker-config.commands-http.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 145    # probed 2026-10-30, run to completion
+            mutants: 149    # 145 probed 2026-10-30 + ~4 ESTIMATED for ManagementCallerFilter (25 lines x 0.16)
             suite: 1034
             timeout: 280    # measured 102.7 min run to completion (10-core, --concurrency 4, 0
                             # timeouts, 24 runtime errors); ~139 min scaled to a 4-vCPU runner the
@@ -1007,8 +1033,10 @@ jobs:
           - name: accounts-store
             config: stryker-config.accounts-store.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 139    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
-                            # 70 + tenant registry 69); re-probe on the first run
+            mutants: 247    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
+                            # 70 + tenant registry 69 + invitations 54 — S4's three new files, 336
+                            # code lines — + app tokens 54, S5's two store files, 340 code
+                            # lines); still an estimate, re-probe on the first run
             suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
                             # (S3's tenant-store facts add to the first; a floor, so left as measured)
             timeout: 140    # ESTIMATED: two assemblies (~13 s + ~11 s a run), up to ~416 mutants at
@@ -1017,8 +1045,8 @@ jobs:
           - name: self-service
             config: stryker-config.self-service.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 59     # ESTIMATED lower bound, not a probe (~374 code lines x 0.16); re-probe on the first run
-            suite: 295      # MTP's own Accounts.Tests count after S3, 2026-11-14 — not yet Stryker's
+            mutants: 95     # ESTIMATED lower bound, not a probe (~592 code lines x 0.16, S5 included); re-probe on the first run
+            suite: 383      # MTP's own Accounts.Tests count after S5 task 8, 2026-11-20 — not yet Stryker's
             timeout: 90     # ESTIMATED: one assembly (Accounts.Tests over TestHost), up to ~179 mutants at
                             # concurrency 4. commands-http's TestHost suite cost ~42 s per mutant of wall
                             # clock at 1034 tests; scaled to ~295 tests that is ~12 s, so ~36 min on a

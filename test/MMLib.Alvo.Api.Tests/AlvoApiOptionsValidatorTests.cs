@@ -197,6 +197,15 @@ public class AlvoApiOptionsValidatorTests
     public void A_tenant_creation_rate_limit_below_one_is_refused()
         => ShouldFail(api => api.RateLimits.Create = 0, "RateLimits:Create");
 
+    [Fact]
+    public void An_invitations_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.Invitations = 0, "RateLimits:Invitations");
+
+    /// <summary>Spec §7.3's budget for the invitation routes: 20 a minute per client.</summary>
+    [Fact]
+    public void The_invitations_rate_limit_defaults_to_twenty()
+        => new AlvoApiOptions().RateLimits.Invitations.ShouldBe(20);
+
     private static void ShouldFail(Action<AlvoApiOptions> configure, params string[] expected)
     {
         var message = Validate(configure);

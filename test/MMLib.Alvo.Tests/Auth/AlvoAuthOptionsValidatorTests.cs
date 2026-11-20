@@ -224,4 +224,31 @@ public class AlvoAuthOptionsValidatorTests
 
         _validator.Validate(name: null, options).Succeeded.ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData("alvo_pat_ci-key")]
+    [InlineData("alvo_svc_ci-key")]
+    public void A_dev_key_with_a_reserved_prefix_is_refused(string keyId)
+    {
+        var options = new AlvoAuthOptions();
+        options.DevKeys.Add(ValidKey());
+        options.DevKeys.Add(ValidKey(keyId));
+
+        var result = _validator.Validate(name: null, options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain(
+            $"Alvo:Auth:DevKeys:1:KeyId starts with '{keyId[..9]}', which Alvo reserves for personal and service tokens. Rename the key.");
+    }
+
+    [Theory]
+    [InlineData("alvo_patrol")]
+    [InlineData("ALVO_PAT_key")]
+    public void A_dev_key_merely_resembling_a_reserved_prefix_is_accepted(string keyId)
+    {
+        var options = new AlvoAuthOptions();
+        options.DevKeys.Add(ValidKey(keyId));
+
+        _validator.Validate(name: null, options).Succeeded.ShouldBeTrue();
+    }
 }

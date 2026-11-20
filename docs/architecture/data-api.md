@@ -1009,7 +1009,7 @@ endpoints; `Management`), not three copies.
 | Presented | Data API and commands | Management API |
 |---|---|---|
 | nothing | anonymous, as today | anonymous, as today |
-| `X-Alvo-Api-Key` | the API-key resolver, as today | the API-key resolver (refusing a personal or service token arrives with those tokens) |
+| `X-Alvo-Api-Key` | the API-key resolver: a configured key as today, or a persisted personal or service token (accounts S5) | the API-key resolver; a personal or service token (`alvo_pat_`/`alvo_svc_`) that resolves is then refused **403** `forbidden` (S5 D9) |
 | `Authorization: Bearer ...` and a person resolver is registered | the person resolver | **ignored** |
 | `Authorization` with another scheme, or Bearer with no person resolver registered | **ignored, exactly as today** | ignored |
 | `X-Alvo-Api-Key` and a Bearer token Alvo owns, well-formed or malformed | **401**, ambiguous; never settled by precedence | API key as above |
@@ -1043,6 +1043,18 @@ at all while the descriptor has no `selfService` — refuses the **whole princip
 error="invalid_token"`: never a principal without a tenant, which would still reach every global entity. The tenant's
 roles come from the membership, recomputed from the applied descriptor on every request, and count only on that
 tenant's scoped rows.
+
+**`X-Alvo-Api-Key` also carries persisted app tokens** (accounts S5; `accounts.md`, *Tokens for integrators*). A key
+id that starts `alvo_pat_` (a personal token) or `alvo_svc_` (a service token) is looked up in the `{prefix}_api_keys`
+registry; every other id is a configured dev key, as before — both prefixes are reserved, so a dev key cannot use them
+and a minted token cannot shadow a configured key. A personal token acts as the person who minted it, with the tenant
+roles of their current membership read on every request; a service token acts as itself, with fixed tenant roles. **The
+tenant header still only confirms**: a token's tenant is fixed when it is minted, so no header acts in it, and a header
+naming any other tenant — even one the same person belongs to — refuses the whole principal with the API key's 401.
+Whatever refuses a token — a wrong secret, its expiry, a revocation, a kind the descriptor switched off, an ended
+membership — the answer is that same 401. A resolved token is held to its scopes on the Data API and on a command's
+entity; a host's `.WithAlvoCaller()` endpoint, which shares the `Data` surface but names no entity, refuses it 403
+`forbidden` (accounts S5; scope opt-in is #536).
 
 **The three 401s.** A Bearer the resolver refuses answers `WWW-Authenticate: Bearer error="invalid_token"`. A malformed
 one answers `Bearer error="invalid_request"`. An ambiguous request answers with both challenges (API key and Bearer).
@@ -1090,8 +1102,10 @@ by a filter on the route (the `AlvoAdminCredentialLimit` precedent): fixed one-m
 `Connection.RemoteIpAddress` — IPv4-mapped as IPv4, IPv6 by its `/64`, no address as one shared partition. Over budget is
 429 `rate-limited` with `Retry-After` in whole seconds (60 when the limiter does not say). S2 charges the token endpoint
 (`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3 charges
-`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 adds `Invitations` (20) and S5 charges
-token minting to `Create`. A host behind a proxy configures forwarded headers so the address is the client's.
+`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 charges
+`Invitations` (default 20/min) on the five invitation routes, in the same order — the exchange keeps `Token` even with
+an `invitation_code`; S5 charges token minting, `POST /auth/v1/tokens`, to the same `Create` budget, so tenant
+creation and minting share one per-client budget (listing and revoking tokens are not charged). A host behind a proxy configures forwarded headers so the address is the client's.
 
 ## The status and `type`-slug catalogue
 

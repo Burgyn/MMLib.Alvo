@@ -1,0 +1,89 @@
+### The test issuer's key set, published in the sink before anyone signs in. The discovery document is a committed
+### mapping; the key it points at is this machine's (_shared/TestIssuer.csx), so it is registered per run — an
+### import with a fixed stub id, which replaces the stub a previous run left rather than adding a second one.
+# @name PublishIssuerKeys
+## TEST-EXPECT-STATUS: [200]
+POST {{fsSinkUrl}}/__admin/mappings/import
+Content-Type: application/json
+
+{{IssuerKeySetImport}}
+
+### What Alvo reads at the issuer's jwks_uri (the sink shares Alvo's loopback, so :9090 there is :8083 here)
+# @name IssuerKeys
+## TEST-EXPECT-STATUS: [200]
+GET {{fsSinkUrl}}/oidc/jwks.json
+
+### RFC 8414 metadata: where a client exchanges an ID token, and the keys Alvo's own tokens verify against
+# @name Metadata
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/.well-known/oauth-authorization-server
+
+### Dana signs in: an RFC 8693 token exchange of her Google ID token for an Alvo session
+# @name DanaSignIn
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{DanaIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
+### A forgery: Olga's claims and the published `kid`, signed by a key the issuer never published
+# @name ForgedSignIn
+## TEST-EXPECT-STATUS: [400]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{OlgaForgedIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
+### Theo signs in
+# @name TheoSignIn
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{TheoIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
+### Olga signs in with her real ID token
+# @name OlgaSignIn
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{OlgaIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
+### Dana's ID token again: it was valid a moment ago, and it has already started a session
+# @name DanaReplaysIdToken
+## TEST-EXPECT-STATUS: [400]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{DanaIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
+### Who Dana is to Alvo
+# @name DanaUser
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{DanaSignIn.response.body.$.access_token}}
+
+### Who Theo is
+# @name TheoUser
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{TheoSignIn.response.body.$.access_token}}
+
+### Who Olga is
+# @name OlgaUser
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{OlgaSignIn.response.body.$.access_token}}
+
+### The run's own region, by the only caller `regions.create` admits — the later cases' jobs point at it
+# @name AdminCreatesRegion
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/regions
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{
+  "code": "{{RegionCode}}",
+  "name": "Self-service region {{RegionCode}}"
+}

@@ -21,6 +21,7 @@ internal static class DocsGenRun
         new ConfigurationGenerator(),
         new LimitsGenerator(),
         new HostPagesGenerator(),
+        new AccountsReferenceGenerator(),
         new ExchangesGenerator(),
         new CSharpApiGenerator(),
         new RepoPagesGenerator(),

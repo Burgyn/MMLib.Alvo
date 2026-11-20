@@ -22,8 +22,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </para>
 /// <para>
 /// The tables are created once per process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted —
-/// the account tables too, which the creator's lock and the member list read; <c>SystemSchemaInitializer</c> creates them
-/// all at boot.
+/// the account tables too, which the creator's lock and the member list read, the invitations table and the tokens table
+/// a membership change sweeps;
+/// <c>SystemSchemaInitializer</c> creates them all at boot.
 /// </para>
 /// </remarks>
 internal sealed partial class EfCoreTenantStore : ITenantStore
@@ -31,6 +32,8 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
     private readonly RelationalConnectionFactory _connections;
     private readonly TenantTables _tables;
     private readonly AuthTables _authTables;
+    private readonly InvitationTables _invitations;
+    private readonly AppTokenTables _appTokens;
     private readonly OnceDdl _ddl;
 
     /// <summary>Creates the store.</summary>
@@ -43,6 +46,8 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
         _connections = connections;
         _tables = new TenantTables(options.SchemaPrefix);
         _authTables = new AuthTables(options.SchemaPrefix);
+        _invitations = new InvitationTables(options.SchemaPrefix);
+        _appTokens = new AppTokenTables(options.SchemaPrefix);
         _ddl = new OnceDdl(EnsureTablesAsync);
     }
 
@@ -70,12 +75,12 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
     {
         var found = tenant is { } id
             ? await ReadAsync(
-                _tables.MembershipSql,
+                _tables.HonouredMembershipSql,
                 command => Bind(command, ("@user_id", Id(user)), ("@tenant_id", Id(id))),
                 reader => TenantTables.ReadMembership(reader),
                 ct).ConfigureAwait(false)
             : await ReadAsync(
-                _tables.PersonalMembershipSql,
+                _tables.HonouredPersonalMembershipSql,
                 command => Bind(command, ("@user_id", Id(user))),
                 reader => TenantTables.ReadMembership(reader),
                 ct).ConfigureAwait(false);
@@ -230,6 +235,8 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
             {
                 await _authTables.EnsureAsync(connection, ct).ConfigureAwait(false);
                 await _tables.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _invitations.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _appTokens.EnsureAsync(connection, ct).ConfigureAwait(false);
             }
         }
     }

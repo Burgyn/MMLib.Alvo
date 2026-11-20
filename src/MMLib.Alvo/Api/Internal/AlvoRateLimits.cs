@@ -12,6 +12,9 @@ internal enum AlvoRateLimit
 
     /// <summary>Tenant creation, <c>POST {prefix}/tenants</c>: <see cref="AlvoRateLimitOptions.Create"/> per minute.</summary>
     Create,
+
+    /// <summary>Every invitation route, one budget for all five: <see cref="AlvoRateLimitOptions.Invitations"/> per minute.</summary>
+    Invitations,
 }
 
 /// <summary>
@@ -46,6 +49,7 @@ internal sealed class AlvoRateLimits : IDisposable
         {
             [AlvoRateLimit.Token] = new Charged(FixedWindows(budgets?.Token ?? 0)),
             [AlvoRateLimit.Create] = new Charged(FixedWindows(budgets?.Create ?? 0)),
+            [AlvoRateLimit.Invitations] = new Charged(FixedWindows(budgets?.Invitations ?? 0)),
         };
     }
 

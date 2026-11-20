@@ -54,13 +54,26 @@ internal sealed class SelfServiceName
     internal (string? Name, IReadOnlyList<AlvoViolation> Violations) Validate(JsonElement root)
     {
         var violations = SelfServiceBody.Unknown(root, Member);
+        var name = ReadFrom(root, violations);
+        return violations.Count == 0 ? (name, []) : (null, violations);
+    }
+
+    /// <summary>
+    /// The trimmed name <paramref name="root"/>'s <c>name</c> member carries, its refusal added to
+    /// <paramref name="violations"/> — for a body that carries more than a name (a token's).
+    /// </summary>
+    /// <param name="root">The body's top-level object.</param>
+    /// <param name="violations">Where the refusal is added.</param>
+    internal string? ReadFrom(JsonElement root, List<AlvoViolation> violations)
+    {
+        ArgumentNullException.ThrowIfNull(violations);
         var (name, violation) = root.TryGetProperty(Member, out var value) ? Judge(value) : (null, Required());
         if (violation is not null)
         {
             violations.Add(violation);
         }
 
-        return violations.Count == 0 ? (name, []) : (null, violations);
+        return name;
     }
 
     private (string? Name, AlvoViolation? Violation) Judge(JsonElement value)

@@ -71,6 +71,8 @@ internal sealed partial class SystemSchemaInitializer
         _concurrencySlotsTableName = ConcurrencySlotTable.NameFor(schemaPrefix);
         _authTables = new AuthTables(schemaPrefix);
         _tenantTables = new TenantTables(schemaPrefix);
+        _invitationTables = new InvitationTables(schemaPrefix);
+        _appTokenTables = new AppTokenTables(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
@@ -91,6 +93,8 @@ internal sealed partial class SystemSchemaInitializer
     private readonly string _concurrencySlotsTableName;
     private readonly AuthTables _authTables;
     private readonly TenantTables _tenantTables;
+    private readonly InvitationTables _invitationTables;
+    private readonly AppTokenTables _appTokenTables;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -178,6 +182,8 @@ internal sealed partial class SystemSchemaInitializer
         await CreateIndexIfMissingAsync(ConcurrencySlotTable.DeliveryIndexDdl(_concurrencySlotsTableName), ct).ConfigureAwait(false);
         await _authTables.EnsureAsync(_connection, ct).ConfigureAwait(false);
         await _tenantTables.EnsureAsync(_connection, ct).ConfigureAwait(false);
+        await _invitationTables.EnsureAsync(_connection, ct).ConfigureAwait(false);
+        await _appTokenTables.EnsureAsync(_connection, ct).ConfigureAwait(false);
     }
 
     /// <summary>

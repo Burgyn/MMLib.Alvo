@@ -9,7 +9,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh
 #   curl -fsSL https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/scripts/install-agent-skills | sh -s -- ~/.claude/skills
 #
-# Downloads every skill of the alvo plugin (plugins/alvo/skills) into <dir>/<skill>/SKILL.md: the nine
+# Downloads every skill of the alvo plugin (plugins/alvo/skills) into <dir>/<skill>/SKILL.md: the ten
 # alvo-descriptor-* skills, the same Markdown the dashboard's schema assistant loads, and alvo-host-extensions, the
 # developer-only skill for an embedded host's C# (the assistant never loads it). <dir> defaults to .claude/skills, a
 # project's own skills folder; pass ~/.claude/skills for every project, or another agent's skills folder. An existing
@@ -21,6 +21,7 @@
 set -eu
 
 SKILLS="
+alvo-descriptor-accounts
 alvo-descriptor-capabilities-and-limits
 alvo-descriptor-computed-and-rollups
 alvo-descriptor-entities-and-fields

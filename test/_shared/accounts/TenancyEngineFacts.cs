@@ -18,8 +18,9 @@ namespace MMLib.Alvo.Tests.Accounts;
 /// leg is a fact the other never has to satisfy.
 /// </para>
 /// <para>
-/// <b>A second member is seeded</b> (<see cref="AccountsWorld.AddMemberAsync"/>): in S3 members arrive only through
-/// invitations, which are S4 (S3 plan D15). A scoped create echoes its <c>tenant_id</c> (the Data API's contract), so every
+/// <b>A second member is seeded</b> (<see cref="AccountsWorld.AddMemberAsync"/>): these facts are S3's, written before
+/// invitations existed (S3 plan D15) — a member who joins by invitation is <see cref="InvitationEngineFacts"/>' subject.
+/// A scoped create echoes its <c>tenant_id</c> (the Data API's contract), so every
 /// write here names the tenant it is sent in.
 /// </para>
 /// </remarks>

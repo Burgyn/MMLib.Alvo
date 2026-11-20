@@ -23,6 +23,8 @@ internal static partial class AccountsDocumentation
     {
         [TenantIdParameter] = "The tenant's id, as `GET /tenants` lists it.",
         ["userId"] = "The member's account id, as the members list shows it; the person's own id to leave.",
+        ["invitationId"] = "The invitation's id, as the invitations list shows it.",
+        ["keyId"] = "The token's key id (`alvo_pat_…` or `alvo_svc_…`), as the token list shows it — never the whole credential.",
     };
 
     /// <summary>Gives every documented path parameter its description.</summary>
@@ -97,7 +99,7 @@ internal static partial class AccountsDocumentation
             _ => null,
             RemoveMemberResponses,
             SelfServiceEndpoints.Tag);
-        return operations;
+        return WithInvitationOperations(operations);
     }
 
     private static OpenApiResponses ListMembersResponses(OpenApiDocument document) => Answers(

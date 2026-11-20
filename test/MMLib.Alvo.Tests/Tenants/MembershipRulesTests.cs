@@ -27,7 +27,7 @@ public sealed class MembershipRulesTests
     private static readonly SelfServicePolicy _withPersonal = Policy(personal: [_technician]);
 
     private static SelfServicePolicy Policy(HashSet<Role>? personal) =>
-        new(true, new HashSet<Role> { _dispatcher, _technician }, personal, new HashSet<Role> { _dispatcher }, 5);
+        new(true, new HashSet<Role> { _dispatcher, _technician }, personal, new HashSet<Role> { _dispatcher }, 5, Invitations: false);
 
     private static StoredMembership Shared(TenantId tenant, params string[] roles) =>
         new(tenant, TenantKind.Shared, "Acme", roles, IsOwner: false, DateTimeOffset.UnixEpoch);
@@ -89,7 +89,7 @@ public sealed class MembershipRulesTests
     [Fact]
     public void A_stored_role_no_longer_assignable_is_dropped()
     {
-        var narrowed = new SelfServicePolicy(true, new HashSet<Role> { _technician }, null, null, 5);
+        var narrowed = new SelfServicePolicy(true, new HashSet<Role> { _technician }, null, null, 5, Invitations: false);
 
         var resolution = MembershipRules.Decide(
             _named, Shared(_named, "dispatcher", "technician", "admin", "authenticated", "owner", "ghost"), narrowed);
@@ -202,5 +202,20 @@ public sealed class MembershipRulesTests
         public Task<MemberChangeStatus> UpdateMemberAsync(MemberUpdate update, CancellationToken ct) => throw new NotSupportedException();
 
         public Task<MemberChangeStatus> RemoveMemberAsync(MemberRemoval removal, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<InvitationPreview?> PreviewInvitationAsync(string codeHash, DateTimeOffset now, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<InvitationView>> ListInvitationsAsync(TenantId tenant, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<MemberChangeStatus> RevokeInvitationAsync(InvitationRevocation revocation, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 }

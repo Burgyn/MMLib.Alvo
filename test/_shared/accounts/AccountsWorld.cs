@@ -53,6 +53,13 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
     /// </summary>
     internal const int UnthrottledTokenRequests = 10_000;
 
+    /// <summary>
+    /// The invitation routes' per-minute budget in a world, for the same reason as <see cref="UnthrottledTokenRequests"/>:
+    /// a fact that walks every dead reason over preview and accept sends more than the production default of 20. A fact
+    /// about the limit sets its own through <c>api</c>.
+    /// </summary>
+    internal const int UnthrottledInvitationRequests = 10_000;
+
     /// <summary>The instant every world's clock starts at.</summary>
     internal static DateTimeOffset Start { get; } = new(2026, 11, 13, 9, 0, 0, TimeSpan.Zero);
 
@@ -113,6 +120,7 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
             ConfigureApi: options =>
             {
                 options.RateLimits.Token = UnthrottledTokenRequests;
+                options.RateLimits.Invitations = UnthrottledInvitationRequests;
                 api?.Invoke(options);
             },
             MapOpenApiDocument: openApi,
@@ -151,10 +159,14 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
 
     /// <summary>Exchanges <paramref name="idToken"/> for an Alvo session (RFC 8693).</summary>
     /// <param name="idToken">The subject token.</param>
-    internal Task<HttpResponseMessage> ExchangeAsync(string idToken) => TokenAsync(
+    /// <param name="invitationCode">An invitation code to accept in the same transaction (S4 plan D5), or none.</param>
+    internal Task<HttpResponseMessage> ExchangeAsync(string idToken, string? invitationCode = null) => TokenAsync(
+    [
         ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
         ("subject_token", idToken),
-        ("subject_token_type", "urn:ietf:params:oauth:token-type:id_token"));
+        ("subject_token_type", "urn:ietf:params:oauth:token-type:id_token"),
+        .. invitationCode is null ? [] : new[] { ("invitation_code", invitationCode) },
+    ]);
 
     /// <summary>Signs <paramref name="subject"/> in, asserting the exchange succeeded.</summary>
     /// <param name="subject">The <c>sub</c>.</param>

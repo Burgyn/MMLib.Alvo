@@ -14,3 +14,15 @@ services:
   alvo:
     image: ${ALVO_LOAD_IMAGE:?set ALVO_LOAD_IMAGE — scripts/test-load builds and selects it}
     pull_policy: never
+    # The demo's sign-in wiring (S6: Development, the test issuer, the secrets key, wider rate budgets) is reset, so the
+    # gate's A/B and every calibration keep measuring the host the baselines in test/load/baselines/ describe.
+    environment:
+      ASPNETCORE_ENVIRONMENT: !reset null
+      Alvo__Accounts__Providers__Google__ClientIds__0: !reset null
+      Alvo__Accounts__Providers__Google__Authority: !reset null
+      Alvo__Accounts__Providers__Google__AllowHttpMetadata: !reset null
+      Alvo__Secrets__EncryptionKeyFile: !reset null
+      Alvo__Api__RateLimits__Token: !reset null
+      Alvo__Api__RateLimits__Create: !reset null
+      Alvo__Api__RateLimits__Invitations: !reset null
+    secrets: !reset []

@@ -11,9 +11,8 @@ namespace MMLib.Alvo.Tests.Descriptor;
 
 /// <summary>
 /// The keys <b>inside</b> a block this build honours that it does not honour themselves —
-/// <c>entity.storage: dynamic</c>, an <c>auth.providers</c> other than local or google, <c>entity.realtime</c> and
-/// <c>tenancy.selfService.invitations</c> — asserted on
-/// which slot the one warning names, in both directions (docs/todo-admin.md §8d items 21 and 27).
+/// <c>entity.storage: dynamic</c>, an <c>auth.providers</c> other than local or google and <c>entity.realtime</c> —
+/// asserted on which slot the one warning names, in both directions (docs/todo-admin.md §8d items 21 and 27).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -94,24 +93,18 @@ public class UnhonouredKeysTests
     }
 
     /// <summary>
-    /// <b><c>invitations: true</c> is accepted and warned until S4</b> (plan D11): the <c>selfService</c> block is frozen
-    /// once, and an owner of this build has no way to invite anyone — and <c>false</c> is a key declined by value.
+    /// <b><c>invitations: true</c> is honoured</b> (S4 plan D14): owners invite people into shared tenants, so the key that
+    /// was warned about from S3 (S3 plan D11) earns no line, whatever it says.
     /// </summary>
-    [Fact]
-    public void Invitations_are_unhonoured_until_s4()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Invitations_are_honoured(bool invitations)
     {
-        var warning = WarningFor(
-            Entities,
-            auth: null,
-            tenancy: """{ "enabled": true, "selfService": { "createTenants": {}, "invitations": true } }""");
+        var tenancy = $$"""{ "enabled": true, "selfService": { "createTenants": {}, "invitations": {{(invitations ? "true" : "false")}} } }""";
 
-        warning.ShouldNotBeNull();
-        warning.ShouldContain(InvitationsSlot, Shouldly.Case.Sensitive);
-        warning.ShouldContain("owners cannot invite anyone in this build; invitations arrive with S4", Shouldly.Case.Sensitive);
-        WarningFor(Entities, auth: null, tenancy: """{ "enabled": true, "selfService": { "createTenants": {}, "invitations": false } }""")
-            .ShouldBeNull();
-        WarningFor(Entities, auth: null, tenancy: """{ "enabled": true, "selfService": { "createTenants": {} } }""")
-            .ShouldBeNull();
+        WarningFor(Entities, auth: null, tenancy: tenancy).ShouldBeNull();
+        UnhonouredSubsystems.WithinBlocks.Select(row => row.Block).ShouldNotContain(InvitationsSlot);
     }
 
     /// <summary><c>local</c> alone is exactly what this build does, so it earns no line.</summary>
@@ -168,7 +161,7 @@ public class UnhonouredKeysTests
     /// <summary>
     /// <b>Every slot names a key the frozen schema declares</b>, under the block its first segment names —
     /// <c>entity.*</c> under <c>$defs/entity</c>, anything else under the root's own property — and every further
-    /// segment one level down (<c>tenancy.selfService.invitations</c>).
+    /// segment one level down.
     /// </summary>
     /// <remarks>
     /// The sibling file's reason, one level down: a slot matching no key warns about nothing forever and reads as

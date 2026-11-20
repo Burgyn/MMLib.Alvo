@@ -196,6 +196,15 @@ If an email's `to` is a placeholder such as `{{new.contact_email}}`, anyone who 
 receives the mail and its data. It is harmless with the log-only provider; decide it deliberately before you register
 a real one.
 
+:::caution[With self-service tenants, any member can trigger a hook]
+When people create their own tenants ([Tenants, members and invitations](/guides/tenants-and-invitations/)), a tenant
+role counts only in decisions made as the caller, inside that tenant's scoped data. It does not limit what a hook does
+once it fires. An after-hook on a scoped entity whose condition a member's write can satisfy runs its actions, and an
+`entity.update` action writes as the system caller, which holds `admin`, even to a global entity. That is the
+escalation you declared, not the member's role leaking, but anyone who signs up and creates a tenant can set it off.
+Write such a hook's condition and choose its targets with that in mind.
+:::
+
 ## What can go wrong
 
 An after-hook never changes the answer to the write that triggered it, so it returns no problem type. What can go

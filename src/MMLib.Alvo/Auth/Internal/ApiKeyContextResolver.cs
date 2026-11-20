@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Rules;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using MMLib.Alvo.Rules;
 using System.Diagnostics.CodeAnalysis;
 
 namespace MMLib.Alvo.Auth.Internal;
@@ -7,7 +9,9 @@ namespace MMLib.Alvo.Auth.Internal;
 /// Resolves the framework's built-in dev API-key credential (<c>"&lt;keyId&gt;.&lt;secret&gt;"</c>)
 /// into an <see cref="AlvoPrincipal"/>. Every failure path returns <see langword="null"/>: an
 /// absent, malformed, or wrong credential, an unknown key id, an unusable (expired/revoked) key,
-/// an undeclared role name, and a tenant mismatch are all indistinguishable to the caller. An
+/// an undeclared role name, and a tenant mismatch are all indistinguishable to the caller — and so, for an app token
+/// (<c>alvo_pat_</c>/<c>alvo_svc_</c>), are a kind the applied descriptor does not turn on and a membership that no longer
+/// answers (<see cref="AppTokenPrincipals"/>). An
 /// unknown key id still runs a hash comparison against a same-length dummy hash, so the response
 /// time does not reveal whether the key id exists.
 /// </summary>
@@ -21,12 +25,14 @@ namespace MMLib.Alvo.Auth.Internal;
 /// has nothing to declare; it holds the built-ins alone unless a host replaced the registration, so
 /// an unprimed host refuses an application role rather than minting one nothing has declared.
 /// </remarks>
-internal sealed class ApiKeyContextResolver(
+internal sealed partial class ApiKeyContextResolver(
     IApiKeyStore store,
     RoleCatalog roleCatalog,
     TimeProvider clock,
     TenantResolver tenantResolver,
-    IRoleCatalogProvider roleCatalogProvider)
+    IRoleCatalogProvider roleCatalogProvider,
+    AppTokenPrincipals appTokens,
+    ILogger<ApiKeyContextResolver>? logger = null)
     : IAlvoContextResolver
 {
     private const char KeySeparator = '.';
@@ -61,6 +67,11 @@ internal sealed class ApiKeyContextResolver(
             return null;
         }
 
+        if (usable.Kind is not ApiKeyKind.Configured)
+        {
+            return await ResolveAppTokenAsync(usable, requestedTenant, now, cancellationToken).ConfigureAwait(false);
+        }
+
         if (!TryResolveRoles(usable.RoleNames, out var roles))
         {
             return null;
@@ -74,6 +85,49 @@ internal sealed class ApiKeyContextResolver(
         await store.TouchAsync(keyId, now, cancellationToken).ConfigureAwait(false);
         return BuildPrincipal(usable, roles, tenant);
     }
+
+    /// <summary>
+    /// An app token (S5 plan D5, D6): its tenant confirmed like any key's, then the principal its kind acts as, then the
+    /// (throttled) touch — every refusal before the touch, so a refused token records no use.
+    /// </summary>
+    /// <remarks>
+    /// <b>The touch is best-effort:</b> <c>last_used_at</c> is a hint for the owner's listing, so a store that cannot write it
+    /// never fails a request whose token is valid. The failure is logged as a warning naming the key id — never the secret —
+    /// and the request goes on; a cancelled request is not a store failure and still propagates.
+    /// </remarks>
+    private async ValueTask<AlvoPrincipal?> ResolveAppTokenAsync(
+        ApiKeyRecord token, string? requestedTenant, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (!tenantResolver.TryResolve(token, requestedTenant, out var tenant))
+        {
+            return null;
+        }
+
+        var principal = await appTokens.ResolveAsync(token, tenant, cancellationToken).ConfigureAwait(false);
+        if (principal is not null)
+        {
+            await TouchBestEffortAsync(token.KeyId, now, cancellationToken).ConfigureAwait(false);
+        }
+
+        return principal;
+    }
+
+    private async ValueTask TouchBestEffortAsync(string keyId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await store.TouchAsync(keyId, now, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            TouchFailed(logger ?? NullLogger<ApiKeyContextResolver>.Instance, keyId, exception.GetType().Name);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Recording the last use of app token {KeyId} failed with {ExceptionType}; the request goes on and the token stays valid.")]
+    private static partial void TouchFailed(ILogger logger, string keyId, string exceptionType);
 
     private static bool TrySplitPresentedKey(
         [NotNullWhen(true)] string? presented, out string keyId, out string secret)
