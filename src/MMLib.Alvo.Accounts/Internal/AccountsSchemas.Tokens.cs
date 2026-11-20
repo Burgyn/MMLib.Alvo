@@ -5,7 +5,7 @@ namespace MMLib.Alvo.Accounts.Internal;
 
 /// <summary>The app-token bodies (S5 plan D12–D14): what a person sends to mint one and what comes back.</summary>
 /// <remarks>
-/// <b><c>token</c> is a member of exactly one schema</b>, <see cref="AppTokenId"/> — the creation's 201.
+/// <b><c>token</c> is a member of exactly one schema</b>, <see cref="AppTokenId"/> — the creation's 201; the list item has none.
 /// </remarks>
 internal static partial class AccountsSchemas
 {
@@ -15,10 +15,14 @@ internal static partial class AccountsSchemas
     /// <summary>A just-minted app token: its description and its credential, shown this once.</summary>
     internal const string AppTokenId = "authAppToken";
 
+    /// <summary>One app token as listing shows it: everything but the credential.</summary>
+    internal const string AppTokenListItemId = "authAppTokenListItem";
+
     private static void AddAppTokenComponents(OpenApiDocument document)
     {
         document.AddComponent(AppTokenRequestId, AppTokenRequest());
         document.AddComponent(AppTokenId, AppToken());
+        document.AddComponent(AppTokenListItemId, AppTokenListItem());
     }
 
     private static OpenApiSchema AppTokenRequest()
@@ -91,4 +95,36 @@ internal static partial class AccountsSchemas
         ("scopes", Strings("What the token may do, as `<entity>:read` or `<entity>:write`.")),
         ("expiresAt", Instant("When the token expires.")),
         ("createdAt", Instant("When it was minted.")));
+
+    private static OpenApiSchema AppTokenListItem() => Object(
+        "An app token as listed: never its credential or a hash.",
+        ["keyId", "kind", "name", "tenantId", "roles", "scopes", "mintedBy", "createdAt", "expiresAt", "lastUsedAt", "revokedAt", "status"],
+        ("keyId", Text("The token's key id (`alvo_pat_…` or `alvo_svc_…`): not secret, the one revoking takes.")),
+        ("kind", Enumerated("`personal` or `service`.", AppTokenResponse.PersonalKind, AppTokenResponse.ServiceKind)),
+        ("name", Text("The token's name.")),
+        ("tenantId", new OpenApiSchema
+        {
+            Type = JsonSchemaType.String | JsonSchemaType.Null,
+            Format = "uuid",
+            Description = "The tenant the token acts in, or null for a personal token with none.",
+        }),
+        ("roles", Strings("A service token's tenant roles; empty for a personal one.")),
+        ("scopes", Strings("What the token may do, as `<entity>:read` or `<entity>:write`.")),
+        ("mintedBy", Object(
+            "The account that minted the token.",
+            ["id", "displayName"],
+            ("id", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The account id." }),
+            ("displayName", Nullable("The account's display name, or null.")))),
+        ("createdAt", Instant("When it was minted.")),
+        ("expiresAt", Instant("When it expires.")),
+        ("lastUsedAt", NullableInstant("When it last authenticated a request, to the minute; null if never.")),
+        ("revokedAt", NullableInstant("When it was revoked; null while it is not.")),
+        ("status", Enumerated(
+            "`revoked`, else `expired`, else `active` — the first that holds, judged when the answer was made.",
+            MMLib.Alvo.Tenants.SelfService.AppTokenListItem.ActiveStatus,
+            MMLib.Alvo.Tenants.SelfService.AppTokenListItem.ExpiredStatus,
+            MMLib.Alvo.Tenants.SelfService.AppTokenListItem.RevokedStatus)));
+
+    private static OpenApiSchema NullableInstant(string description)
+        => new() { Type = JsonSchemaType.String | JsonSchemaType.Null, Format = "date-time", Description = description };
 }

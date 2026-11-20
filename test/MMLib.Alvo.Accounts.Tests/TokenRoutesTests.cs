@@ -27,6 +27,11 @@ public sealed class TokenRoutesTests
 
     private static readonly SqliteApiEngine _engine = SqliteApiEngine.Instance;
 
+    private static readonly string[] _listedKeys =
+    [
+        "keyId", "kind", "name", "tenantId", "roles", "scopes", "mintedBy", "createdAt", "expiresAt", "lastUsedAt", "revokedAt", "status",
+    ];
+
     private static readonly string[] _createdKeys =
         ["keyId", "token", "header", "kind", "name", "tenantId", "roles", "scopes", "expiresAt", "createdAt"];
 
@@ -290,6 +295,198 @@ public sealed class TokenRoutesTests
         preflight.Headers.GetValues("Access-Control-Allow-Methods").ShouldHaveSingleItem().ShouldContain("POST");
     }
 
+    [Fact]
+    public async Task The_list_shows_my_tokens_and_my_tenants_service_tokens_never_a_secret()
+    {
+        await using var team = await TeamAsync(bobOwns: true);
+        var personal = await MintedAsync(team, Personal(team, team.Tenant));
+        team.World.Clock.Advance(TimeSpan.FromMinutes(1));
+        using var bobs = await team.World.MintAsync(team.Bob, Personal(team, team.Tenant));
+        team.World.Clock.Advance(TimeSpan.FromMinutes(1));
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        team.World.Clock.Advance(TimeSpan.FromMinutes(1));
+        var newest = await MintedAsync(team, Personal(team, team.Tenant));
+
+        var (ada, adaStatus) = await ListAsync(team, team.Ada);
+        var (bob, _) = await ListAsync(team, team.Bob);
+
+        adaStatus.ShouldBe(HttpStatusCode.OK);
+        ada.Select(item => item!["keyId"]!.GetValue<string>()).ShouldBe([KeyOf(newest), KeyOf(service), KeyOf(personal)]);
+        bob.Count.ShouldBe(2, "Bob's own personal token and Ada's service token, never Ada's personal ones");
+        bob.Select(item => item!["kind"]!.GetValue<string>()).Order().ShouldBe(["personal", "service"]);
+        var first = ada[0]!.AsObject();
+        first.Select(pair => pair.Key).ShouldBe(_listedKeys);
+        first["mintedBy"]!.AsObject().Select(pair => pair.Key).ShouldBe(["id", "displayName"]);
+        first["mintedBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
+        first["lastUsedAt"].ShouldBeNull();
+        first["revokedAt"].ShouldBeNull();
+        var text = new JsonArray([.. ada.Select(item => item!.DeepClone())]).ToJsonString();
+        text.ShouldNotContain("\"token\"");
+        text.ShouldNotContain(newest, Case.Sensitive);
+        text.ShouldNotContain(newest[(newest.IndexOf('.', StringComparison.Ordinal) + 1)..], Case.Sensitive);
+    }
+
+    [Fact]
+    public async Task A_plain_member_sees_none_of_the_service_tokens()
+    {
+        await using var team = await TeamAsync();
+        await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+
+        var (bob, _) = await ListAsync(team, team.Bob);
+
+        bob.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task The_list_shows_each_state()
+    {
+        await using var team = await TeamAsync();
+        var active = await MintedAsync(team, Personal(team, team.Tenant));
+        var expiring = Personal(team, team.Tenant);
+        expiring["expiresAt"] = team.World.Clock.GetUtcNow().AddHours(1).ToString("O", CultureInfo.InvariantCulture);
+        var expired = await MintedAsync(team, expiring);
+        var revoked = await MintedAsync(team, Personal(team, team.Tenant));
+        (await RevokeAsync(team, team.Ada, KeyOf(revoked))).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        team.World.Clock.Advance(TimeSpan.FromHours(2));
+        var (later, _) = await team.World.SignInAsync("ada");
+
+        var (list, _) = await ListAsync(team, later);
+
+        var statuses = StatusesOf(list);
+        statuses[KeyOf(active)].ShouldBe("active");
+        statuses[KeyOf(expired)].ShouldBe("expired");
+        statuses[KeyOf(revoked)].ShouldBe("revoked");
+        statuses.Count.ShouldBe(3);
+        list.Single(item => item!["keyId"]!.GetValue<string>() == KeyOf(revoked))!["revokedAt"].ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Last_used_is_recorded_within_a_minute()
+    {
+        await using var team = await TeamAsync();
+        var token = await MintedAsync(team, Personal(team, team.Tenant));
+        using var first = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
+        var (afterFirst, _) = await ListAsync(team, team.Ada);
+        var stamped = afterFirst.Single()!["lastUsedAt"]!.GetValue<DateTimeOffset>();
+        team.World.Clock.Advance(TimeSpan.FromSeconds(10));
+        using var second = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
+
+        var (afterSecond, _) = await ListAsync(team, team.Ada);
+
+        first.StatusCode.ShouldBe(HttpStatusCode.OK, await first.ReadTextAsync());
+        second.StatusCode.ShouldBe(HttpStatusCode.OK, await second.ReadTextAsync());
+        stamped.ShouldBe(team.World.Clock.GetUtcNow().AddSeconds(-10));
+        afterSecond.Single()!["lastUsedAt"]!.GetValue<DateTimeOffset>().ShouldBe(stamped);
+    }
+
+    [Fact]
+    public async Task Revoking_kills_the_token_on_its_next_request()
+    {
+        await using var team = await TeamAsync();
+        var token = await MintedAsync(team, Personal(team, team.Tenant));
+        using var before = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
+
+        using var revoked = await RevokeAsync(team, team.Ada, KeyOf(token));
+        using var after = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
+
+        before.StatusCode.ShouldBe(HttpStatusCode.OK);
+        revoked.StatusCode.ShouldBe(HttpStatusCode.NoContent, await revoked.ReadTextAsync());
+        revoked.Headers.CacheControl!.NoStore.ShouldBeTrue();
+        after.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await after.ReadTextAsync());
+    }
+
+    [Fact]
+    public async Task Revoking_twice_is_204_and_keeps_the_first_instant()
+    {
+        await using var team = await TeamAsync();
+        var token = await MintedAsync(team, Personal(team, team.Tenant));
+        using var once = await RevokeAsync(team, team.Ada, KeyOf(token));
+        var (listed, _) = await ListAsync(team, team.Ada);
+        var stamped = listed.Single()!["revokedAt"]!.GetValue<DateTimeOffset>();
+        team.World.Clock.Advance(TimeSpan.FromMinutes(5));
+
+        using var twice = await RevokeAsync(team, team.Ada, KeyOf(token));
+
+        once.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        twice.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        (await ListAsync(team, team.Ada)).Items.Single()!["revokedAt"]!.GetValue<DateTimeOffset>().ShouldBe(stamped);
+    }
+
+    [Fact]
+    public async Task Any_owner_revokes_a_service_token_and_nobody_else_s_personal_one()
+    {
+        await using var team = await TeamAsync(bobOwns: true);
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        var personal = await MintedAsync(team, Personal(team, team.Tenant));
+
+        using var other = await RevokeAsync(team, team.Bob, KeyOf(personal));
+        using var unknown = await RevokeAsync(team, team.Bob, "alvo_pat_nosuchkey");
+        using var owner = await RevokeAsync(team, team.Bob, KeyOf(service));
+
+        owner.StatusCode.ShouldBe(HttpStatusCode.NoContent, await owner.ReadTextAsync());
+        other.StatusCode.ShouldBe(HttpStatusCode.NotFound, await other.ReadTextAsync());
+        (await other.Content.ReadAsByteArrayAsync(Ct)).ShouldBe(await unknown.Content.ReadAsByteArrayAsync(Ct));
+        using var usable = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", personal, tenant: team.Tenant.ToString("D"));
+        usable.StatusCode.ShouldBe(HttpStatusCode.OK, "the personal token is untouched");
+    }
+
+    [Fact]
+    public async Task A_member_s_list_after_self_service_is_switched_off_shows_only_personal_tokens()
+    {
+        await using var team = await TeamAsync();
+        await MintedAsync(team, Personal(team, team.Tenant));
+        await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        await team.World.ReapplyAsync(AccountsWorld.WithoutSelfService);
+
+        var (list, status) = await ListAsync(team, team.Ada);
+
+        status.ShouldBe(HttpStatusCode.OK);
+        list.Select(item => item!["kind"]!.GetValue<string>()).ShouldBe(["personal"]);
+    }
+
+    [Fact]
+    public async Task Without_access_tokens_list_and_revoke_are_404_naming_its_key()
+    {
+        await using var team = await TeamAsync();
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("accessTokens"));
+
+        using var list = await team.World.AsPersonAsync(HttpMethod.Get, Tokens, team.Ada);
+        using var revoke = await RevokeAsync(team, team.Ada, "alvo_pat_whatever");
+
+        await TenantRoutesTests.FeatureDisabledAsync(list, "auth.accessTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(revoke, "auth.accessTokens");
+    }
+
+    [Fact]
+    public async Task A_token_cannot_list_or_revoke()
+    {
+        await using var team = await TeamAsync();
+        var token = await MintedAsync(team, Personal(team, team.Tenant));
+
+        using var list = await team.World.AsTokenAsync(HttpMethod.Get, Tokens, token);
+        using var revoke = await team.World.AsTokenAsync(HttpMethod.Delete, $"{Tokens}/{KeyOf(token)}", token);
+
+        list.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await list.ReadTextAsync());
+        revoke.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await revoke.ReadTextAsync());
+        using var still = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
+        still.StatusCode.ShouldBe(HttpStatusCode.OK, "a refused revoke revoked nothing");
+    }
+
+    private static string KeyOf(string token) => token[..token.IndexOf('.', StringComparison.Ordinal)];
+
+    private static Dictionary<string, string> StatusesOf(IReadOnlyList<JsonObject> list) =>
+        list.ToDictionary(item => item!["keyId"]!.GetValue<string>(), item => item!["status"]!.GetValue<string>());
+
+    private static async Task<(IReadOnlyList<JsonObject> Items, HttpStatusCode Status)> ListAsync(Team team, string access)
+    {
+        using var response = await team.World.AsPersonAsync(HttpMethod.Get, Tokens, access);
+        response.Headers.CacheControl!.NoStore.ShouldBeTrue();
+        return (response.IsSuccessStatusCode ? await response.ReadJsonArrayAsync() : [], response.StatusCode);
+    }
+
+    private static Task<HttpResponseMessage> RevokeAsync(Team team, string access, string keyId) =>
+        team.World.AsPersonAsync(HttpMethod.Delete, $"{Tokens}/{keyId}", access);
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static JsonObject Personal(Team team, Guid tenant) => Body(team, "personal", tenant, null, ["jobs:read"]);
@@ -334,7 +531,7 @@ public sealed class TokenRoutesTests
         }
     }
 
-    private static async Task<Team> TeamAsync()
+    private static async Task<Team> TeamAsync(bool bobOwns = false)
     {
         var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker);
         var (ada, _) = await world.SignInAsync("ada");
@@ -342,7 +539,7 @@ public sealed class TokenRoutesTests
         var tenant = await TenantRoutesTests.CreatedAsync(world, ada, "Acme");
         var bobId = await world.UserIdAsync(bob);
         world.Clock.Advance(TimeSpan.FromMinutes(1));
-        await world.AddMemberAsync(new TenantId(tenant), bobId, ["technician"]);
+        await world.AddMemberAsync(new TenantId(tenant), bobId, bobOwns ? ["dispatcher"] : ["technician"], isOwner: bobOwns);
         return new Team(world, ada, bob, await world.UserIdAsync(ada), bobId, tenant);
     }
 

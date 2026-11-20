@@ -58,6 +58,47 @@ internal static class TokenRoutes
             : await MintedAsync(call, request).ConfigureAwait(false);
     }
 
+    /// <summary><c>GET {prefix}/tokens</c>: the person's tokens and the service tokens of tenants they own, newest first.</summary>
+    /// <param name="http">The request.</param>
+    internal static async Task<IResult> ListAsync(HttpContext http)
+    {
+        var (call, refusal) = await EnterAsync(http).ConfigureAwait(false);
+        if (call is null)
+        {
+            return refusal!;
+        }
+
+        var tokens = await TokenStore(http).ListAsync(call.Person, call.Ct).ConfigureAwait(false);
+        var honoured = MembershipRules.Honours(TenantKind.Shared, call.Policy);
+        var now = call.Now;
+        return SelfServiceCall.Json(
+            tokens.Where(token => honoured || token.Kind != ApiKeyKind.Service).Select(token => AppTokenListItem.From(token, now)).ToList());
+    }
+
+    /// <summary><c>DELETE {prefix}/tokens/{keyId}</c>: revokes a token its caller answers for; a second revocation is 204 too.</summary>
+    /// <param name="http">The request.</param>
+    /// <param name="keyId">The key id, from the route — never the credential.</param>
+    internal static async Task<IResult> RevokeAsync(HttpContext http, string keyId)
+    {
+        var (call, refusal) = await EnterAsync(http).ConfigureAwait(false);
+        if (call is null)
+        {
+            return refusal!;
+        }
+
+        var status = await TokenStore(http).RevokeAsync(new TokenRevocation(keyId, call.Person, call.Now), call.Ct).ConfigureAwait(false);
+        return status == RevokeTokenStatus.Revoked ? Results.NoContent() : ProblemResultFactory.NotFound();
+    }
+
+    private static ValueTask<(SelfServiceCall? Call, IResult? Refusal)> EnterAsync(HttpContext http)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        var tokens = http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current?.AppTokens ?? AppTokenPolicy.None;
+        return SelfServiceCall.EnterAsync(http, _ => AppTokenProblems.Off(tokens));
+    }
+
+    private static IAppTokenStore TokenStore(HttpContext http) => http.RequestServices.GetRequiredService<IAppTokenStore>();
+
     private static HashSet<string> EntitiesOf(PolicyCatalog? catalog) =>
         new(catalog?.Entities.Select(entity => entity.Key) ?? [], StringComparer.Ordinal);
 

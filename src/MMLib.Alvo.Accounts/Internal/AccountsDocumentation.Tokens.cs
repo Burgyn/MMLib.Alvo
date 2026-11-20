@@ -24,8 +24,50 @@ internal static partial class AccountsDocumentation
             document => Body("application/json", AccountsSchemas.AppTokenRequestId, "The token to mint.", document),
             CreateTokenResponses,
             SelfServiceEndpoints.TokensTag);
+        operations[SelfServiceEndpoints.ListTokensOperationId] = new(
+            "List the tokens a person answers for",
+            "The person's personal tokens and the service tokens of every shared tenant they own, newest first, each with its "
+            + "`status` (`revoked`, else `expired`, else `active`) and when it was last used. Never a credential or a hash: it "
+            + "was shown once, at minting.",
+            Bearer: true,
+            _ => null,
+            ListTokensResponses,
+            SelfServiceEndpoints.TokensTag);
+        operations[SelfServiceEndpoints.RevokeTokenOperationId] = new(
+            "Revoke a token",
+            "A person revokes a personal token they minted, or a service token they minted or — as an owner — one of a tenant "
+            + "they own; it stops working on its next request. Revoking one already revoked is a 204 too. The path names the "
+            + "token's key id, never its credential.",
+            Bearer: true,
+            _ => null,
+            RevokeTokenResponses,
+            SelfServiceEndpoints.TokensTag);
         return operations;
     }
+
+    private static OpenApiResponses ListTokensResponses(OpenApiDocument document) => Answers(
+        document,
+        ("200", Response(
+            "The person's tokens, newest first.",
+            PersonNoStore(),
+            Media("application/json", new OpenApiSchema
+            {
+                Type = JsonSchemaType.Array,
+                Items = new OpenApiSchemaReference(AccountsSchemas.AppTokenListItemId, document),
+            }))),
+        PersonUnauthenticated(document),
+        NotAPerson(document),
+        Disabled(document, "`feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it."));
+
+    private static OpenApiResponses RevokeTokenResponses(OpenApiDocument document) => Answers(
+        document,
+        ("204", Response("The token is revoked, now or already before.", PersonNoStore())),
+        PersonUnauthenticated(document),
+        NotAPerson(document),
+        Disabled(
+            document,
+            "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the "
+            + "descriptor does not declare `auth.accessTokens`; `descriptorKey` names it."));
 
     private static OpenApiResponses CreateTokenResponses(OpenApiDocument document) => Answers(
         document,

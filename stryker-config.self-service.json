@@ -23,7 +23,8 @@
       "**/Tenants/SelfService/TenantName.cs",
       "**/Tenants/SelfService/TokenRoutes.cs",
       "**/Tenants/SelfService/AppTokenResponse.cs",
-      "**/Tenants/SelfService/AppTokenProblems.cs"
+      "**/Tenants/SelfService/AppTokenProblems.cs",
+      "**/Tenants/SelfService/AppTokenListItem.cs"
     ],
     "thresholds": {
       "high": 80,

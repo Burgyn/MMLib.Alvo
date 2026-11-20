@@ -75,7 +75,7 @@ public sealed class AccountsOpenApiTests
         paths.Where(path => path.Contains("auth", StringComparison.Ordinal)
                 && !path.Contains("/tenants", StringComparison.Ordinal)
                 && !path.Contains("/invitations", StringComparison.Ordinal)
-                && !path.EndsWith("/tokens", StringComparison.Ordinal))
+                && !path.Contains("/tokens", StringComparison.Ordinal))
             .ShouldBe(_authPaths, ignoreOrder: true);
         var operations = Operations(document).Where(operation => Tags(operation).Contains("auth")).ToList();
         operations.Select(operation => operation["operationId"]!.GetValue<string>()).ShouldBe(
@@ -173,10 +173,9 @@ public sealed class AccountsOpenApiTests
         var document = await world.Api.OpenApiDocumentAsync();
 
         var paths = document["paths"]!.AsObject().Select(path => path.Key).ToList();
-        paths.Where(path => path.EndsWith("/tokens", StringComparison.Ordinal)).ShouldBe(["/auth/v1/tokens"]);
-        var operations = Operations(document).Where(operation => Tags(operation).Contains("tokens")).ToList();
-        var create = operations.ShouldHaveSingleItem();
-        create["operationId"]!.GetValue<string>().ShouldBe("tokens.create");
+        paths.Where(path => path.Contains("/tokens", StringComparison.Ordinal)).ShouldBe(["/auth/v1/tokens", "/auth/v1/tokens/{keyId}"]);
+        var create = Operation(document, "tokens.create");
+        Operations(document).Count(operation => operation["operationId"]!.GetValue<string>() == "tokens.create").ShouldBe(1);
         create["summary"].ShouldNotBeNull();
         Tags(create).ShouldBe(["tokens"]);
         Security(create).ShouldBe("[{\"alvoBearer\":[]}]");
@@ -191,6 +190,34 @@ public sealed class AccountsOpenApiTests
             .Where(schema => schema.Value!["properties"]?["token"] != null)
             .Select(schema => schema.Key);
         withToken.ShouldBe(["authAppToken"]);
+    }
+
+    /// <summary>
+    /// <c>tokens.list</c> and <c>tokens.revoke</c> appear once each (S5 plan D14), and no token operation takes a secret in
+    /// its path or query — the revoke path names the key id, never the credential.
+    /// </summary>
+    [Fact]
+    public async Task The_token_list_and_revoke_are_in_the_document_once_and_take_no_secret()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, openApi: true);
+
+        var document = await world.Api.OpenApiDocumentAsync();
+
+        var operations = Operations(document).Where(operation => Tags(operation).Contains("tokens")).ToList();
+        operations.Select(operation => operation["operationId"]!.GetValue<string>()).Order().ShouldBe(
+            ["tokens.create", "tokens.list", "tokens.revoke"]);
+        var list = Operation(document, "tokens.list");
+        var revoke = Operation(document, "tokens.revoke");
+        Security(list).ShouldBe("[{\"alvoBearer\":[]}]");
+        Security(revoke).ShouldBe("[{\"alvoBearer\":[]}]");
+        list["responses"]!["200"]!["content"]!["application/json"]!["schema"]!["items"]!["$ref"]!.GetValue<string>()
+            .ShouldBe("#/components/schemas/authAppTokenListItem");
+        revoke["responses"]!["204"].ShouldNotBeNull();
+        revoke["responses"]!["404"].ShouldNotBeNull();
+        var parameters = operations.SelectMany(operation => operation["parameters"]?.AsArray() ?? []).Select(p => p!["name"]!.GetValue<string>());
+        parameters.ShouldBe(["keyId"]);
+        document["paths"]!["/auth/v1/tokens/{keyId}"]!["delete"].ShouldNotBeNull();
+        document["components"]!["schemas"]!["authAppTokenListItem"]!["properties"]!.AsObject().ContainsKey("token").ShouldBeFalse();
     }
 
     /// <summary>

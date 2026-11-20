@@ -483,6 +483,10 @@ name: Mutation
 # -> 80 (upper end x 0.48 -> 241), still an estimate. AppTokenRequest stays on the core leg, whose
 # suite (AppTokenRequestTests) tests it directly.
 #
+# S5 Task 8 adds `GET {prefix}/tokens` and `DELETE {prefix}/tokens/{keyId}`: TokenRoutes grows and
+# AppTokenListItem joins the leg (~74 code lines, ~577 in all); `mutants:` is now ~577 code lines x 0.16
+# -> 92 (upper end x 0.48 -> 277), still an estimate; `suite:` is MTP's Accounts.Tests count after it (383).
+#
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
 # its "Number of tests found", `timeout:` with ~2x its wall clock, and `break` with
@@ -1036,8 +1040,8 @@ jobs:
           - name: self-service
             config: stryker-config.self-service.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 80     # ESTIMATED lower bound, not a probe (~503 code lines x 0.16, S5 included); re-probe on the first run
-            suite: 295      # MTP's own Accounts.Tests count after S3, 2026-11-14 — not yet Stryker's
+            mutants: 92     # ESTIMATED lower bound, not a probe (~577 code lines x 0.16, S5 included); re-probe on the first run
+            suite: 383      # MTP's own Accounts.Tests count after S5 task 8, 2026-11-20 — not yet Stryker's
             timeout: 90     # ESTIMATED: one assembly (Accounts.Tests over TestHost), up to ~179 mutants at
                             # concurrency 4. commands-http's TestHost suite cost ~42 s per mutant of wall
                             # clock at 1034 tests; scaled to ~295 tests that is ~12 s, so ~36 min on a
