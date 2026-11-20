@@ -185,7 +185,7 @@ API browser at `/scalar` behind a path base has not been verified
   production as Development to avoid setting it.
 - **`Alvo__Secrets__EncryptionKeyFile`**, which the override above already sets, also seals sign-in's signing keys,
   which live in the database. Every instance must read the same key file, and keep it: the stored keys can be read
-  only with it.
+  only with it, so losing the file breaks sign-in.
 - **`Alvo__Api__Cors__Origins__0`** (and `__1`, …) lists your app's origins exactly, with scheme and port. A wildcard
   is refused.
 - **The rate budgets** count requests per client address: `Alvo__Api__RateLimits__Token` (default 30 a minute),

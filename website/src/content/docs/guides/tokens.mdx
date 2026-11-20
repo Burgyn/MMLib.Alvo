@@ -23,7 +23,9 @@ Repairs backend in [Tenants, members and invitations](/guides/tenants-and-invita
   by another token.
 
 `{tenantId}` below is Acme's id and `{keyId}` a token's public id. Each step names the case of
-`test/teapie-field-service/170-SelfService` that runs it against the field-service demo.
+`test/teapie-field-service/170-SelfService` that runs it against the field-service demo. That suite runs the fuller
+field-service descriptor (more fields, a state machine), so its requests carry more than the ones shown here; the
+answers are the same.
 
 ## Build it
 
@@ -53,7 +55,7 @@ Repairs backend in [Tenants, members and invitations](/guides/tenants-and-invita
      "tenantId": "3c9e…",
      "roles": ["dispatcher"],
      "scopes": ["work_orders:read"],
-     "expiresAt": "2026-12-15T00:00:00Z"
+     "expiresAt": "<28 days from now>"
    }
    ```
 
@@ -69,7 +71,7 @@ Repairs backend in [Tenants, members and invitations](/guides/tenants-and-invita
      "tenantId": "3c9e…",
      "roles": ["dispatcher"],
      "scopes": ["work_orders:read"],
-     "expiresAt": "2026-12-15T00:00:00Z",
+     "expiresAt": "…",
      "createdAt": "…"
    }
    ```
@@ -77,8 +79,19 @@ Repairs backend in [Tenants, members and invitations](/guides/tenants-and-invita
    **`token` is in this answer and in no other, ever.** Put it in the billing system's secret store now. Alvo keeps
    only a hash of it. `header` names the header to send it in.
 
-   Compute `expiresAt` when you mint. It is RFC 3339 with an offset, later than now and at most `maxLifetimeDays`
-   ahead, and anything else is refused at `/expiresAt`. A service token's `roles` must be tenant roles its minter
+   `expiresAt` is required and is computed when you mint, never written down: RFC 3339 with an offset, later than now
+   and at most `maxLifetimeDays` ahead, or the mint is refused at `/expiresAt`. Here it is 28 days, inside the
+   descriptor's 30:
+
+   ```js
+   const expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString();
+   ```
+
+   ```sh
+   date -u -d '+28 days' +%Y-%m-%dT%H:%M:%SZ   # GNU date; on macOS: date -u -v+28d +%Y-%m-%dT%H:%M:%SZ
+   ```
+
+   That value replaces `<28 days from now>` in the request. A service token's `roles` must be tenant roles its minter
    holds in that tenant, and only an owner mints one. (`170-SelfService/004-billing-token`, `DanaMintsBilling`.)
 
    Dana's own script gets a personal token. It has no `roles`: it holds whatever Dana holds in Acme, read on every
@@ -94,7 +107,7 @@ Repairs backend in [Tenants, members and invitations](/guides/tenants-and-invita
      "kind": "personal",
      "tenantId": "3c9e…",
      "scopes": ["work_orders:read", "work_orders:write"],
-     "expiresAt": "2026-12-15T00:00:00Z"
+     "expiresAt": "<28 days from now>"
    }
    ```
 
@@ -169,7 +182,7 @@ Repairs backend in [Tenants, members and invitations](/guides/tenants-and-invita
        "scopes": ["work_orders:read"],
        "mintedBy": { "id": "5b1f…", "displayName": "Dana Novak" },
        "createdAt": "…",
-       "expiresAt": "2026-12-15T00:00:00Z",
+       "expiresAt": "…",
        "lastUsedAt": "…",
        "revokedAt": null,
        "status": "active"

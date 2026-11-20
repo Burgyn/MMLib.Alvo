@@ -55,11 +55,16 @@ providers therefore work the same whichever provider the person used.
    every read, update and delete to the person who wrote the row. Signing in decides who gets in, never which rows
    they see. Any `list` or `get` rule that admits `authenticated` now admits every Google account, so narrow it.
 
-2. **Create a Google client, and give the host its settings.** In the Google Cloud console, open *APIs & Services →
-   Credentials → Create credentials → OAuth client ID*. Choose **Web application**. Under *Authorised JavaScript
-   origins*, add your page's origin, here `http://localhost:5173`. When you serve from localhost, Google also wants
-   `http://localhost`. The button flow needs no redirect URI. Copy the client id, which ends in
-   `.apps.googleusercontent.com`.
+2. **Create a Google client, and give the host its settings.** Google's own page,
+   [Get your Google API client ID](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid), is
+   the source for these steps and follows the console when it changes. In the Google Cloud console:
+
+   - Set up the consent screen first (*Google Auth Platform → Branding*): the app name and support email people see
+     when they sign in. While the app's audience is in *Testing*, only the test users you list there can sign in.
+   - Under *Clients* (or *APIs & Services → Credentials*), create an **OAuth client ID** of type **Web application**.
+     Under *Authorised JavaScript origins*, add your page's origin, here `http://localhost:5173`. When you serve from
+     localhost, Google also wants `http://localhost`. The button flow needs no redirect URI.
+   - Copy the client id, which ends in `.apps.googleusercontent.com`.
 
    Save this next to the quick start's compose file as `docker-compose.override.yml`:
 
@@ -172,7 +177,8 @@ providers therefore work the same whichever provider the person used.
 
    `created_by` is the person's id. A second person who signs in lists the entries and gets an empty page.
    `test/teapie-field-service/170-SelfService/001-sign-in` runs this exchange against the field-service stack for three
-   people, together with a forged and a replayed ID token.
+   people, together with a forged and a replayed ID token. That stack runs the fuller field-service descriptor (more
+   fields, a state machine), so its requests carry more than the ones shown here; the answers are the same.
 
 4. **Keep the session alive, and end it.** `api()` refreshes a minute before the access token expires:
 
@@ -226,6 +232,26 @@ providers therefore work the same whichever provider the person used.
 
    - `PATCH /auth/v1/user` with `{ "name": "Dana N." }` changes the display name, the only thing a person may change
      about their account. The name comes from the first sign-in and later sign-ins do not overwrite it.
+
+5. **Try it.** In `sign-in.js`, replace `YOUR-CLIENT-ID.apps.googleusercontent.com` with your client id. `ALVO` is
+   already `http://localhost:8080`, the quick start's port; change it if your host runs elsewhere. Serve the folder
+   that holds `index.html` and `sign-in.js` on the origin you registered:
+
+   ```sh title="Terminal"
+   python3 -m http.server 5173
+   ```
+
+   Open `http://localhost:5173`, click the button and sign in. Then, in the browser's developer console, write an
+   entry and list your entries:
+
+   ```js
+   await api('/api/time_entries', { method: 'POST', body: JSON.stringify({ minutes: 30, note: 'First entry' }) });
+   await (await api('/api/time_entries')).json();
+   ```
+
+   The list holds your entry, with your id in `created_by`. Sign in with another Google account in a private window
+   and run the second line again: the list is empty, because the `list` rule admits only what that person wrote. If
+   the console shows a CORS error instead, the page's origin is not exactly `APP_ORIGIN` from the override.
 
 </Steps>
 

@@ -152,8 +152,9 @@ Alvo adds no authentication, authorization or routing middleware on your behalf.
   [Extending in code](/extending/), starting with [Your first extension](/extending/first-extension/).
 
 :::caution[Not in this build]
-A host cannot yet publish its own signed-in user to the generated `/api/alvo` routes: they authenticate the API-key
-header only, so your users go through your own endpoints. Do not point `Alvo:Auth:HeaderName` at `Cookie` to get
+A host cannot yet hand its own signed-in user to the generated `/api/alvo` routes. They take Alvo's own credentials
+only: an API key, or, with `MMLib.Alvo.Accounts`, an access token from [Alvo's sign-in](/guides/sign-in/). Users your
+app signs in itself go through your own endpoints. Do not point `Alvo:Auth:HeaderName` at `Cookie` to get
 around it; Alvo refuses that at startup, because it would make every generated route a cross-site request forgery
 target. The seam is planned for a later phase ([#210](https://github.com/Burgyn/MMLib.Alvo/issues/210)).
 :::
