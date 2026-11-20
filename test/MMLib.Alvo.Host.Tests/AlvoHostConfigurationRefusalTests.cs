@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Host.Internal;
 using MMLib.Alvo.Identity;
 using MMLib.Alvo.Migrations;
@@ -327,6 +328,80 @@ public class AlvoHostConfigurationRefusalTests
         exitCode.ShouldBe(78);
         captured.ToString().ShouldContain("Alvo__Admin__BootstrapPasswordFile");
     }
+
+    /// <summary>
+    /// A mounted descriptor this build refuses — here one written for a newer Alvo, carrying a key this build's schema
+    /// does not know — is a sentence on stderr naming the key and the two fixes, and a deliberate <c>78</c> (#547).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The failure the load gate's base arm met, reproduced.</b> An older image handed a newer descriptor refused it
+    /// in stage 0 with a <see cref="DescriptorValidationException"/>, which
+    /// <see cref="AlvoHostExit.IsConfigurationFailure"/> did not recognise, so it escaped <c>Main</c> and the container
+    /// exited 139 — the crash-shaped code #132 removed for every other refusal. The validation's own text was already
+    /// written for the operator; only the exit and the "what now" were missing.
+    /// </para>
+    /// <para>
+    /// A file database of the fact's own, so the start cannot reach the image's <c>/alvo/data</c> default — and so the
+    /// identity package, whose own hosted service creates its tables before Alvo's boot runs, writes somewhere disposable.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_descriptor_written_for_a_newer_alvo_exits_seventy_eight_naming_the_key_and_the_fix()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        using var captured = new StringWriter();
+        int exitCode;
+
+        try
+        {
+            exitCode = await RunCapturingStderrAsync(captured, Ephemeral, NewerDescriptorArgument, SqliteAt(databasePath));
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+
+        exitCode.ShouldBe(78);
+        var reported = captured.ToString();
+        reported.ShouldContain("/auth/passkeys");
+        reported.ShouldContain("newer Alvo");
+        reported.ShouldContain("Alvo__DescriptorPath");
+    }
+
+    /// <summary>The descriptor's own refusal is the operator's to fix, so it is on the accepting side of the predicate.</summary>
+    [Fact]
+    public void A_descriptor_this_build_refuses_is_a_misconfiguration()
+    {
+        var refusal = new DescriptorValidationException(new DescriptorValidationResult(
+            [new("/auth/passkeys", "Unknown key.", FixSuggestion: null, DescriptorValidationSeverity.Error)]));
+
+        AlvoHostExit.IsConfigurationFailure(refusal).ShouldBeTrue();
+        AlvoHostExit.Describe(refusal).ShouldContain("/auth/passkeys");
+        AlvoHostExit.Describe(refusal).ShouldContain("newer Alvo");
+    }
+
+    /// <summary>Runs the shipped entry point with stderr captured, restoring it whatever happens.</summary>
+    private static async Task<int> RunCapturingStderrAsync(StringWriter captured, params string[] args)
+    {
+        var original = Console.Error;
+
+        try
+        {
+            Console.SetError(TextWriter.Synchronized(captured));
+            return await AlvoHost.RunAsync(args).WaitAsync(_startMustNotSucceed, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+    }
+
+    private static string NewerDescriptorArgument =>
+        $"--Alvo:DescriptorPath={AlvoHostWorld.DescriptorPath("host-boot-from-a-newer-alvo.alvo.json")}";
+
+    private static string SqliteAt(string databasePath) =>
+        $"--Alvo:Database:SqliteConnectionString={AlvoHostWorld.ConnectionStringFor(databasePath)}";
 
     /// <summary>An address with no secret beside it — the way half a bootstrap is configured by hand.</summary>
     private const string BootstrapEmailOnly = "--Alvo:Admin:BootstrapEmail=admin@example.test";

@@ -217,9 +217,8 @@ Two keys the schema declares are refused when the descriptor is applied
 
 If the container does not come back after you change the descriptor, the new version was refused when it was
 applied: a facet on the wrong type, a reserved name, one of the keys above. The reason is at the end of
-`docker compose logs alvo`; see [Run your own descriptor](/start-here/run-your-own/#what-can-go-wrong). In
-this build that refusal ends the process with exit code 139 instead of 78
-([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+`docker compose logs alvo`, and the process exits with code 78; see
+[Run your own descriptor](/start-here/run-your-own/#what-can-go-wrong).
 
 ## Reference
 

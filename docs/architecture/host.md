@@ -77,15 +77,19 @@ a test lives in `AlvoHost`: `CreateBuilder` registers, `BuildAsync` maps, and `R
 the process, including the refusal an operator reads and the code they get.
 
 - **A recognised configuration failure prints a sentence on stderr and exits `78`.** Exactly
-  two shapes are recognised (`AlvoHostExit.IsConfigurationFailure`):
+  three shapes are recognised (`AlvoHostExit.IsConfigurationFailure`):
   `OptionsValidationException` — every option value the host or the framework refused,
-  whether by `ValidateOnStart` or by the driver selection that runs during registration — and
+  whether by `ValidateOnStart` or by the driver selection that runs during registration —
   `AlvoStartupRefusedException`, the boot's own refusal (drift under `Verify`, a plan that
-  would discard data). `OptionsValidationException.Failures` are printed one per paragraph
+  would discard data), and `DescriptorValidationException`, a mounted descriptor the boot
+  refuses (#340, #547): its pointed violations are printed under a headline naming the running
+  build, with the two fixes — correct the file, or run the newer Alvo it was written for, since
+  an older Alvo does not serve a newer descriptor (see deviation 55 under *What is left of #24*).
+  `OptionsValidationException.Failures` are printed one per paragraph
   rather than through `Message`, which joins them with `"; "` and runs two multi-line
   refusals into one unreadable line: a container with two things wrong is fixable in one
   restart.
-- **And an `AggregateException` over nothing but those two.** The host has two
+- **And an `AggregateException` over nothing but those.** The host has two
   `ValidateOnStart` registrations — its own `AlvoHostOptions` and `MMLib.Alvo.Identity`'s
   `AlvoIdentityOptions` — and `StartupValidator.Validate()` throws one aggregate when more
   than one of them fails. Today `BuildAsync` reads `IOptions<AlvoHostOptions>` before
@@ -105,7 +109,9 @@ the process, including the refusal an operator reads and the code they get.
 - **Everything else still propagates unhandled**, deliberately. A blanket `catch` would take
   the runtime's own report and whatever crash dump the deployment configured away from every
   genuine defect, so a named predicate is used instead and a fact asserts an unrelated
-  exception is *not* one of the two shapes.
+  exception is *not* one of the named shapes. An `InvalidOperationException` from stage 0 (a
+  field shadowing a reserved query key, a format that is not a regular expression) is still
+  outside it: the type is also every defect's, so recognising it would claim them all.
 - **The application is disposed either way.** `BuildAsync` owns the application until it
   returns one (a refused `Compose` disposes it, because reading
   `IOptions<AlvoHostOptions>` is what runs the validation and a live service provider behind
@@ -1040,7 +1046,17 @@ Still owed on the standalone side:
 - the **upgrade/downgrade contract between the NuGet version and the system-schema version** (A:555). Stage 1
   creates the current `alvo.*` tables idempotently and carries no version contract, so a container rolled back
   to an older image against a newer system schema is undefined. Recorded as design deviation 55, deferred here
-  deliberately — it has no task in the startup-lifecycle plan.
+  deliberately — it has no task in the startup-lifecycle plan. **What #547 measured and settled** (an older
+  image exiting 139 in the load gate's base arm): the crash was the *descriptor*, not the database — the gate
+  handed the base image the head's descriptor, which the older validator refuses, and that refusal escaped
+  `Main`. It now exits 78 naming the running build and the "run the newer Alvo" fix (above). The base image
+  booted on the newer database with its *own* descriptor (`schema Unchanged`, serving), so nothing older crashed
+  on the newer tables; it simply ignored them. A dashboard-first host already stands down on a stored descriptor
+  it refuses. What is still open is a *marker* that lets a future version detect "this database was initialised
+  by a newer Alvo" and refuse before serving it — a design decision, not taken in #547, because the obvious
+  shape (refuse when the stored version is newer) also refuses an old pod restarting mid-rolling-deploy, which
+  `AmIAnOlderPodAsync` deliberately drains rather than kills (#145); and no marker can protect a version released
+  before it.
 
 Not #24's, but on the same deployment path: **#134** (Scalar behind a path base) still has to be answered
 before "run it behind your ingress" is a claim this project can make. **#130** is closed — the document names

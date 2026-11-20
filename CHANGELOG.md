@@ -1421,6 +1421,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The standalone host exits 78 on a descriptor it refuses, not 139** (#340, #547). A mounted descriptor that fails
+  validation — mistyped, or written for a newer Alvo — used to escape `Main` as an unhandled
+  `DescriptorValidationException`, and the container exited with the crash-shaped 139. It is now a configuration
+  refusal like the others: the pointed violations on stderr under a headline naming the running build, the two fixes
+  (correct the file, or run the newer Alvo it was written for — an older Alvo does not serve a newer descriptor), and
+  exit code 78.
 - **Dashboard: renaming or removing a field finds every place that names it** (#513). The schema editor's field
   references missed the constructs added on 2026-11-06, so a rename left them behind (Preview then failed server-side) and
   a removal did not name them. It now carries — and a removal names as blocking — a state machine's `field` and each

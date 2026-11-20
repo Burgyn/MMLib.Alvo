@@ -257,8 +257,8 @@ records each decision.
 - `Alvo cannot start:` with a plan whose steps are marked destructive, and exit code 78: the edit discards data.
   Keep what it drops, apply it through the API with `allowDestructive`, or set `Alvo__Schema__AllowDestructive=true`
   for that one start.
-- `Descriptor validation failed:`: the descriptor is invalid. In this build the process exits with code 139 instead
-  of 78 ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+- `Descriptor validation failed:`, and exit code 78: the descriptor is invalid, or was written for a newer Alvo than
+  the one running it.
 - The host starts but never reports ready, and the log names two revisions: the file holds a descriptor the history
   has at an older revision than the database, for example after a rollback through the API. Put the current
   descriptor back in the file. `AllowDestructive` alone does not make an older descriptor serve.

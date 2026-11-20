@@ -230,8 +230,8 @@ not a throughput promise.
 **The host refuses to start.** A configuration it cannot accept stops it with one sentence per problem on stderr and
 exit code **78**, so a script can tell "an operator must change something" from a crash. That covers a missing
 descriptor, an unknown database provider, a PostgreSQL host with no connection string, a secret passed as a value, a
-dev key secret under 32 characters, drift under `Verify` and a plan that would discard data. A descriptor that fails
-validation currently exits with code 139 instead ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+dev key secret under 32 characters, a descriptor that fails validation (including one written for a newer Alvo), drift
+under `Verify` and a plan that would discard data.
 
 **The first log lines on PostgreSQL say `libgssapi_krb5.so.2` cannot be loaded.** The database driver looks for
 Kerberos support, which the image does not carry; the host starts and serves normally.

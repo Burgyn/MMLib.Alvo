@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Host.Internal;
@@ -21,7 +22,7 @@ namespace MMLib.Alvo.Host.Internal;
 /// <b>A named predicate, not a general catch.</b> #132 is explicit that everything else keeps propagating, and
 /// that is worth keeping: an unhandled exception still produces the runtime's own report and whatever crash
 /// dump the deployment configured, which a blanket <c>catch</c> would take away for every genuine defect. So
-/// exactly two shapes are recognized, and the fact that pins this asserts an unrelated exception is
+/// exactly three shapes are recognized, and the fact that pins this asserts an unrelated exception is
 /// <em>not</em> one of them.
 /// </para>
 /// </remarks>
@@ -52,6 +53,11 @@ internal static class AlvoHostExit
     /// print a stack trace instead would defeat the reason it exists.
     /// </para>
     /// <para>
+    /// <see cref="DescriptorValidationException"/> covers a mounted descriptor the boot's stage 0 refuses — mistyped, or
+    /// written for a newer Alvo, which is how an older image handed a newer descriptor used to exit <c>139</c> (#547).
+    /// Its message is pointed and written for the person who edits the file, and the fix is theirs: no retry serves it.
+    /// </para>
+    /// <para>
     /// <b>And an <see cref="AggregateException"/> over nothing but those, because that is the shape two
     /// refused option types take.</b> <c>StartupValidator.Validate()</c> collects every failing
     /// <c>ValidateOnStart</c> registration and throws one aggregate over them, and the host now has two —
@@ -75,7 +81,7 @@ internal static class AlvoHostExit
 
         return failure switch
         {
-            OptionsValidationException or AlvoStartupRefusedException => true,
+            OptionsValidationException or AlvoStartupRefusedException or DescriptorValidationException => true,
             AggregateException collected => collected.InnerExceptions.Count > 0
                 && collected.InnerExceptions.All(IsConfigurationFailure),
             _ => false,
@@ -102,6 +108,7 @@ internal static class AlvoHostExit
         return failure switch
         {
             OptionsValidationException validation => string.Join(ParagraphBreak, validation.Failures),
+            DescriptorValidationException refused => AlvoHostConfiguration.RefusedDescriptor(refused.Message),
             AggregateException collected => string.Join(
                 ParagraphBreak, collected.InnerExceptions.Select(Describe)),
             _ => failure.Message,
