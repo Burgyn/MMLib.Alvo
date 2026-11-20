@@ -53,6 +53,10 @@ keeps tokens.
   `.WithAlvoCaller()` endpoints (dispatch, technician app) would refuse app tokens anyway (S5 D9, #536), so the sample's
   README says sign-in is the standalone stack's story and names #536. Nothing in the demo or the guides promises that a
   host's own endpoints take personal or service tokens.
+  **Recorded deviation (Task 3):** the sample maps no `.WithAlvoCaller()` endpoint, so the parenthetical above is wrong.
+  Dispatch is a `MapAlvoCommand`, which takes a token within its entity's read and write scopes, and the technician app
+  is a `MapAlvoWebhookReceiver`, which authenticates by its signing secret. The sample's README states the general rule
+  (#536) and nothing about its own routes; no guide or skill repeats the parenthetical.
 - **D2 — The descriptor gains exactly §12's keys.** `auth.providers: ["local", "google"]` (`local` stays: it is the
   operator store), `auth.signUp: {"mode": "open"}`, `auth.accessTokens: {"personal": true, "service": true}` (lifetime
   default 90), `tenancy.selfService: {createTenants: {creatorRoles: ["dispatcher"]}, invitations: true,
@@ -78,6 +82,14 @@ keeps tokens.
   key's public half, carries no private member, and that no `PRIVATE KEY` block exists under `src/`, `samples/`,
   `examples/`, `schema/`, `plugins/`, `tools/`, `docs/` or `website/src/`. Not generated per run: §12 asks for a committed
   key, and a per-run key would leave a hand-started stack (README) unable to sign anyone in.
+  **Recorded deviation (Task 2, controller ruling):** no private key is committed. `_shared/TestIssuer.csx` makes an
+  RSA-2048 key on the machine that runs the suite (kept under `$TMPDIR/alvo-field-service-e2e/`, `kid` = its RFC 7638
+  thumbprint) and registers the public half in the sink through WireMock's admin API at the start of every run; the
+  committed mapping is the discovery document only. Kept per machine, not made per run, because Alvo refetches the key
+  set for an unknown `kid` at most once per five minutes (`OidcMetadata.UnknownKidInterval`). The hand-started-stack
+  objection no longer holds — any `170` run publishes the key there too. The guards became
+  `FieldServiceTestIssuerTests.No_private_key_is_committed` (every `git ls-files` path, staged included),
+  `…The_committed_issuer_carries_no_key_material`, and `170/001`'s check of the sink's live key set.
 - **D5 — The demo stack runs `ASPNETCORE_ENVIRONMENT=Development`**, as §11.2 foresaw: `AllowHttpMetadata` is refused
   anywhere else, and `Alvo:Accounts:Issuer` stays unset so tokens are issued from the URL a request reached
   (`http://localhost:8081/auth/v1`); `Audience` defaults to `field-service`. Only `MMLib.Alvo.Accounts` reads the host
@@ -93,6 +105,9 @@ keeps tokens.
   (defaults: Token 30, Invitations 20, Create 10 per minute), so the stack sets `Alvo__Api__RateLimits__Token: 120`,
   `__Invitations: 60`, `__Create: 30`, with a comment: the limits themselves are pinned in process
   (`TokenRoutesTests`, `InvitationRoutesTests`, `TenantRoutesTests`); a 429 in the e2e would be a flake, not a finding.
+  **Recorded deviation (Task 4 fix round):** `__Invitations` is **120**, not 60. All five invitation routes share one
+  budget and one `170` run spends ~31 calls on it (the expiry poll alone ~16 previews), so a second run inside a minute
+  on a live stack was refused 429 at 60. The load stack resets all three budgets (`test/load/docker-compose.load.yml`).
 - **D8 — The grace window keeps its default (10 s) and is waited out by polling, never by sleeping.** The reuse case
   replays the rotated token at once (same child, the D6 property), then polls it with `## RETRY-UNTIL-TEST-PASS`
   (≤ 30 × 1 s, `Constant` backoff) until it answers `400 invalid_grant`. A replay inside the window is idempotent, so
@@ -120,6 +135,10 @@ keeps tokens.
   → refresh reuse, last (it ends Dana's session). **Every scoped create carries `tenant_id` in its body and
   `X-Alvo-Tenant` in its headers** — the known DX gap (S3 ledger: a create must echo the tenant; Alvo checks it, never
   fills it in) is shown honestly in the demo and the guides, not papered over.
+  **Recorded deviation (Task 3):** the answer to a scoped create without `tenant_id` is `403 forbidden`, "The write was
+  rejected by policy.", with no `violations` — not Task 3 Step 2's `422` at `/tenant_id`. A candidate with no tenant
+  fails the synthesized tenant scope's `WITH CHECK`. `170-SelfService/003` pins the 403 and the guides quote it as a
+  current limitation.
 - **D12 — The guides' exchanges are hand-written, and held three ways.** DocsGen's captured exchanges boot a host with
   dev keys and no ID-token issuer, so a captured sign-in would need a test issuer inside a shipped tool. Instead:
   (a) every descriptor a guide shows is a `website/src/snippets/**/*.alvo.json` that `DocsSnippetTests` applies;
