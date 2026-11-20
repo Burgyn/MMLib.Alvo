@@ -221,7 +221,7 @@ answers are the same.
 | `@user.id` and `created_by` | the person | the token's own id |
 | Roles | the person's current tenant roles, read on every request | fixed when it is minted: at least one, each held by the minter then |
 | Who mints it | any signed-in person | an owner of a shared tenant |
-| Dies when | it expires or is revoked, the person leaves the tenant, or the person is banned | it expires or is revoked, or its minter stops being an owner (removed, demoted, leaves) or is banned |
+| Dies when | it expires or is revoked, the person leaves the tenant, is banned, or a session already open when it was minted is ended as stolen | it expires or is revoked, its minter stops being an owner (removed, demoted, leaves) or is banned, or a session of its minter's already open when it was minted is ended as stolen |
 | Use it for | a script, a CLI or an automation step that works as you | an integration that works for the team, whoever is in it |
 
 **Scopes** limit a token on the Data API to whole entities: `<entity>:read` covers listing and reading,
@@ -243,6 +243,12 @@ transaction as the change that causes it:
   roles.
 - **A person is banned.** An operator disabling the account kills every token it minted, in every tenant
   ([Banning a person](/guides/sign-in/#banning-a-person)).
+- **A session is ended as stolen.** A spent refresh token that comes back after the 10-second window ends its
+  session ([Sign in](/guides/sign-in/#where-to-keep-the-tokens-and-why)). The same transaction kills every token the
+  person minted, personal or service, and every invitation they created, in any tenant, since that session started:
+  whatever a thief holding the session could have made. What they created before it started keeps working. Nothing
+  records which session minted a token, so one minted from the person's other session in that time dies too; they
+  mint it again.
 - **A token expires, or is revoked.**
 
 **Dead stays dead.** Invite the removed person back, or enable the banned account, and their old tokens still answer

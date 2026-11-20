@@ -209,11 +209,12 @@ internal sealed class AuthTables(string schemaPrefix)
 
     /// <summary>
     /// Gets the statement reading a refresh token with its child (if any), its session and its account's disabled stamp —
-    /// everything a refresh judges, in one read.
+    /// everything a refresh judges, in one read — and the instant its session started, from which a reuse's sweep counts.
     /// </summary>
     internal string RefreshTokenSql =>
         $"""
-        SELECT t.session_id, t.created_at, t.rotated_at, c.id, s.account_id, s.provider, s.revoked_at, s.expires_at, a.disabled_at
+        SELECT t.session_id, t.created_at, t.rotated_at, c.id, s.account_id, s.provider, s.revoked_at, s.expires_at, a.disabled_at,
+               s.created_at
           FROM {RefreshTokens} t
           JOIN {Sessions} s ON s.id = t.session_id
           JOIN {Accounts} a ON a.id = s.account_id

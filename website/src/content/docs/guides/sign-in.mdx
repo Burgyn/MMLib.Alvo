@@ -194,7 +194,9 @@ providers therefore work the same whichever provider the person used.
    the one you sent is spent, so keep only the newest. Two tabs that refresh with the same token within 10 seconds of
    each other both get the same new token, so the session survives a race. A spent token presented after those 10
    seconds is treated as stolen. Alvo ends the whole session before it answers, and every token of that session, the
-   newest included, stops working:
+   newest included, stops working. In the same step it kills every personal and service token and every invitation
+   the person created since that session started, so nothing a thief made with it outlives it
+   ([When someone leaves](/guides/tokens/#when-someone-leaves)):
 
    ```http
    HTTP/1.1 400 Bad Request
@@ -265,7 +267,7 @@ providers therefore work the same whichever provider the person used.
   - **`localStorage`**, as `sign-in.js` does. The person stays signed in across reloads and tabs. A script injected
     into your page (XSS) can read it and use it from elsewhere until the session ends. Rotation limits that: once the
     thief and the real page have both refreshed with the same token more than 10 seconds apart, the session ends for
-    both.
+    both, and with it every token and invitation the person created since the session started.
   - **Memory only.** Nothing outlives the tab. On reload, sign the person in again. Initialize Google's script with
     `auto_select: true` and call `google.accounts.id.prompt()`, and a person already signed in to Google gets back in
     without a click.

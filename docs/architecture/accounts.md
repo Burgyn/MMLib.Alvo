@@ -187,6 +187,7 @@ The token endpoint follows the same pattern:
 |---|---|
 | Level 1 end to end, on both engines: exchange → Data API → refresh → logout leaves every token of the session dead | `AccountsEngineFacts.Level_one_end_to_end` (`SqliteAccountsEngineTests`, `PostgresAccountsEngineTests`) |
 | Reuse inside the grace window answers the same child; after it, the whole session dies before the response | `AccountsEngineFacts.Reuse_inside_the_window_returns_the_same_child_and_after_it_kills_the_session`; `RefreshGrantTests.A_reuse_after_the_window_kills_every_token_of_the_session_before_answering` |
+| A reuse also revokes, in its transaction, every app token (personal or service) and every invitation the account created since the reused session started, and nothing older; a replay inside the window revokes nothing (stack review A-I1) | `AccountStoreFacts.A_reuse_revokes_the_tokens_and_invitations_created_since_its_session_started`, `…A_replay_inside_the_window_revokes_nothing_the_person_minted` (both engines; red on both without the sweep) |
 | Two tabs refreshing at once get one child, and the session survives (Review Focus 1) | `AccountStoreFacts.Two_concurrent_refreshes_of_one_token_get_the_same_child` (20 iterations, both engines); `AccountsEngineFacts.Two_concurrent_refreshes_get_the_same_child_and_the_session_survives` |
 | A refresh racing a sign-out or a disable commits no child; a sign-in racing a disable starts no session | `PostgreSqlAccountStoreTests.A_refresh_racing_a_revocation_commits_no_child`, `…A_sign_in_racing_a_disable_starts_no_session`, both staged with a held row lock |
 | Two replicas on a fresh database converge on one signing key and one HMAC key (Review Focus 2) | `AccountStoreFacts.Two_concurrent_first_keys_converge_on_one`; `AccountKeysTests.Two_replicas_over_one_store_mint_tokens_each_other_validates` |
@@ -230,7 +231,9 @@ D1 (a tenant registry) and D8 (no tenant header means the personal tenant) are S
   request.
 - **D6 — A grace window that never forks.** A rotated token presented again within 10 s gets the same child, so the
   family keeps one tip. After the window, reuse revokes the session (RFC 9700 §4.14). The inclusive boundary and the
-  zero setting (strict) are both facts.
+  zero setting (strict) are both facts. **Beyond RFC 9700**, which revokes the token family: since S4 and S5 a session
+  can mint credentials that outlive it, so the reuse's transaction also revokes every app token and invitation the
+  account created since the session started (stack review A-I1; [below](#the-stack-reviews-fixes)).
 - **D7 — The refresh token travels in the body, not in an `httpOnly` cookie.** A cookie would make the token endpoint
   cookie-authenticated, which is the CSRF surface #191 removed. Rotation, reuse detection and a 15-minute access token
   carry the risk instead.
@@ -970,7 +973,7 @@ Three behaviours, recorded so they read as decisions:
 |---|---|
 | Personal and service tokens end to end, and a tenantless personal token at level 1, on both engines | `AppTokenEngineFacts.Personal_token_end_to_end`, `…Service_token_end_to_end`, `…Level_one_personal_token` (`SqliteAppTokenEngineTests`, `PostgresAppTokenEngineTests`) |
 | A personal token's roles are its person's current ones: demoted → the lost role is gone on the next request; removed → 401; invited back → the old token is still 401 (Review Focus 1) | `AppTokenEngineFacts.Personal_token_end_to_end` (red on both engines without the removal sweep); `AppTokenResolutionTests.A_personal_token_acts_as_its_person_with_live_tenant_roles`, `…A_personal_token_whose_membership_ended_is_refused`; `AppTokenStoreFacts.A_rejoined_member_s_old_personal_token_stays_revoked` |
-| A token dies with its reason, in that transaction: removal and leaving, an owner's demotion, a ban; a role change and a refused write revoke nothing; enabling revives nothing | `AppTokenStoreFacts.Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only`, `…A_member_leaving_revokes_the_same`, `…Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s`, `…Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens`, `…Changing_a_member_s_roles_revokes_nothing`, `…A_refused_demotion_revokes_nothing`, `…Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none`; `AccountStoreFacts.Disabling_revokes_sessions_and_tokens_together`; `AppTokenEngineFacts.Service_token_end_to_end`, `…A_banned_person_s_tokens_die_and_stay_dead` |
+| A token dies with its reason, in that transaction: removal and leaving, an owner's demotion, a ban, a refresh-token reuse ending a session that was open when it was minted; a role change and a refused write revoke nothing; enabling revives nothing | `AppTokenStoreFacts.Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only`, `…A_member_leaving_revokes_the_same`, `…Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s`, `…Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens`, `…Changing_a_member_s_roles_revokes_nothing`, `…A_refused_demotion_revokes_nothing`, `…Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none`; `AccountStoreFacts.Disabling_revokes_sessions_and_tokens_together`, `…A_reuse_revokes_the_tokens_and_invitations_created_since_its_session_started`; `AppTokenEngineFacts.Service_token_end_to_end`, `…A_banned_person_s_tokens_die_and_stay_dead` |
 | A mint racing its minter's demotion, removal or ban never outlives it (Review Focus 2) | `AppTokenStoreFacts.A_service_mint_racing_its_minter_s_demotion_never_outlives_it`, `…A_personal_mint_racing_the_person_s_removal_never_outlives_it`, `…A_mint_racing_a_ban_never_outlives_it` (20 iterations, both engines; red on PostgreSQL without the tenant bump) |
 | Never more than 100 live tokens per account, also in parallel | `AppTokenStoreFacts.The_live_cap_counts_only_unexpired_unrevoked_tokens`, `…Concurrent_mints_at_the_cap_never_exceed_it` (red on PostgreSQL without the account lock); `TokenRoutesTests.The_live_cap_is_409` |
 | A token never mints, lists or revokes a token, never reaches Management, never acts in another tenant, never reads outside its scopes on the Data API (Review Focus 3) | `TokenRoutesTests.A_token_cannot_mint_a_token`, `…A_token_cannot_list_or_revoke`, `…A_person_mints_a_personal_token_and_sees_it_once` (`notes` is 403 `out-of-scope`); `AppTokenManagementTests.A_token_is_refused_by_every_management_route`, `…A_bearer_beside_an_app_token_on_management_is_judged_by_the_token`; `AppTokenEngineFacts.A_token_never_acts_outside_its_tenant`; `AppTokenResolutionTests.A_header_naming_another_tenant_refuses_either_kind` |
@@ -1293,3 +1296,20 @@ And where the product answered differently from the plan's first wording (each p
   the demo stack signs people in through the test issuer only.
 - App tokens on a host's own `.WithAlvoCaller()` endpoints ([#536](https://github.com/Burgyn/MMLib.Alvo/issues/536)),
   and everything else under *Not in S5* above.
+
+## The stack review's fixes
+
+The whole-stack review of S0–S6 (`.superpowers/sdd/2026-11-13-accounts-00-master/stack-review-{A,B,C}.md`) found
+defects that no slice could see, because each sits where two slices meet. Each fix below is a fact on both engines.
+
+- **A refresh-token reuse also kills what the thief minted** (A-I1, S2 × S4 × S5). Reuse is Alvo's one affirmative
+  signal that a refresh token was stolen, and a stolen session could mint a personal token, a service token and an
+  owner-granting invitation, none of which the session's revocation touched. The reuse's transaction now also revokes
+  every live app token the account minted (`_api_keys.minted_by`) and every live invitation it created
+  (`created_by`), in any tenant, whose `created_at` is at or after the reused session's own — invitations first, then
+  tokens, the ban's lock order (`EfCoreAccountStore.RevokeMintedSinceAsync`). Nothing records the session a token was
+  minted in, so the sweep is by time: a token the person minted from another of their sessions after the stolen one
+  started dies too, and is minted again; one minted before it started survives. **Residual, recorded:** a mint whose
+  caller read saw the session live, racing the reuse's commit, can still insert a token after the sweep, because a
+  mint locks the account row and does not lock or re-read the session. The window is the length of one mint's
+  transaction, and only a caller already holding the session can use it.

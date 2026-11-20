@@ -154,6 +154,14 @@ internal sealed class AppTokenTables(string schemaPrefix)
     internal string RevokeMintedByAccountSql =>
         $"UPDATE {ApiKeys} SET revoked_at = @now WHERE minted_by = @account_id AND revoked_at IS NULL";
 
+    /// <summary>
+    /// Gets the sweep of a refresh-token reuse (stack review A-I1): every live token the account minted at or after
+    /// <c>@since</c>, the instant the reused session started — whatever a thief holding that session could have minted.
+    /// Instants are <see cref="StoredInstant.Text"/>'s fixed-width form, so <c>&gt;=</c> compares as text.
+    /// </summary>
+    internal string RevokeMintedSinceSql =>
+        $"UPDATE {ApiKeys} SET revoked_at = @now WHERE minted_by = @account_id AND created_at >= @since AND revoked_at IS NULL";
+
     /// <summary>The stored text of <paramref name="kind"/>; only a personal or a service token is ever stored.</summary>
     /// <param name="kind">The token's kind.</param>
     internal static string KindText(ApiKeyKind kind) => kind == ApiKeyKind.Service ? ServiceKind : PersonalKind;
