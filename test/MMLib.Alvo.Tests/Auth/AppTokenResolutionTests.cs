@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
@@ -62,17 +63,18 @@ public sealed class AppTokenResolutionTests
     private void Apply(string? accessTokens = """{ "personal": true, "service": true }""", string? selfService = AllOn) =>
         _catalogs.SetCurrent("tokens", Compile(accessTokens, selfService));
 
-    private ApiKeyContextResolver Resolver()
+    private ApiKeyContextResolver Resolver(ILogger<ApiKeyContextResolver>? logger = null)
     {
         var devKeys = new InMemoryApiKeyStore(Options.Create(new AlvoAuthOptions()));
         var memberships = new RegistryMembershipResolution(_tenants, _catalogs);
         return new ApiKeyContextResolver(
-            new ApiKeyStores(devKeys, _registry, _clock),
+            new ApiKeyStores(devKeys, _registry),
             RoleCatalog.BuiltInOnly,
             _clock,
             new TenantResolver(),
             _catalogs,
-            new AppTokenPrincipals(memberships, _catalogs));
+            new AppTokenPrincipals(memberships, _catalogs),
+            logger);
     }
 
     private ApiKeyRecord Stored(string keyId, TenantId? tenant, IReadOnlyList<string>? roles = null) => Stored(new ApiKeyRecord
@@ -171,6 +173,47 @@ public sealed class AppTokenResolutionTests
         Names(principal.Context.TenantRoles).ShouldBe(["dispatcher"], "technician is no longer assignable");
         _tenants.Reads.ShouldBeEmpty();
         _registry.Touches.ShouldBe([(ServiceId, _clock.GetUtcNow())]);
+    }
+
+    [Fact]
+    public async Task A_failed_last_used_write_never_fails_a_request_whose_token_is_valid()
+    {
+        Apply();
+        Stored(ServiceId, _tenant, ["dispatcher"]);
+        _registry.TouchFailure = new InvalidOperationException("database is down " + Secret);
+        var logger = new CapturingLogger();
+
+        var principal = await Resolver(logger).ResolveAsync(ServiceId + "." + Secret, null, Ct);
+
+        principal.ShouldNotBeNull().KeyId.ShouldBe(ServiceId);
+        var entry = logger.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Warning);
+        entry.Message.ShouldContain(ServiceId);
+        entry.Message.ShouldNotContain(Secret, Case.Sensitive, "the secret is never logged");
+    }
+
+    [Fact]
+    public async Task A_cancelled_request_is_not_swallowed_by_the_best_effort_touch()
+    {
+        Apply();
+        Stored(ServiceId, _tenant, ["dispatcher"]);
+        _registry.TouchFailure = new OperationCanceledException();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await Present(ServiceId));
+    }
+
+    private sealed class CapturingLogger : ILogger<ApiKeyContextResolver>
+    {
+        internal List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     [Theory]

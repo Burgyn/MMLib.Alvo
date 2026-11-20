@@ -15,6 +15,9 @@ internal sealed class RecordingAppTokenStore : IAppTokenStore
 
     internal List<(string KeyId, DateTimeOffset UsedAt)> Touches { get; } = [];
 
+    /// <summary>Gets or sets what <see cref="TouchAsync"/> throws, or <see langword="null"/> for a touch that succeeds.</summary>
+    internal Exception? TouchFailure { get; set; }
+
     internal ApiKeyRecord Put(ApiKeyRecord token)
     {
         _tokens[token.KeyId] = token;
@@ -29,6 +32,11 @@ internal sealed class RecordingAppTokenStore : IAppTokenStore
 
     public ValueTask TouchAsync(string keyId, DateTimeOffset usedAt, CancellationToken ct)
     {
+        if (TouchFailure is not null)
+        {
+            throw TouchFailure;
+        }
+
         Touches.Add((keyId, usedAt));
         return ValueTask.CompletedTask;
     }

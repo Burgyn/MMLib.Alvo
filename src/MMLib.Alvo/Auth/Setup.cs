@@ -56,8 +56,7 @@ internal static class AuthSetup
     /// </summary>
     private static Internal.ApiKeyStores ApiKeyStoresFor(IServiceProvider provider) => new(
         provider.GetRequiredService<Internal.InMemoryApiKeyStore>(),
-        provider.GetService<IAppTokenStore>(),
-        provider.GetRequiredService<TimeProvider>());
+        provider.GetService<IAppTokenStore>());
 
     /// <summary>
     /// The registry's membership resolution where a tenant registry is registered (a relational store), else the one that

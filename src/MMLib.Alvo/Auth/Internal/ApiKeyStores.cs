@@ -20,8 +20,7 @@ namespace MMLib.Alvo.Auth.Internal;
 /// </remarks>
 /// <param name="devKeys">The configured dev keys.</param>
 /// <param name="appTokens">The persisted app-token registry, or <see langword="null"/> where none is registered.</param>
-/// <param name="clock">The clock the touch throttle reads.</param>
-internal sealed class ApiKeyStores(InMemoryApiKeyStore devKeys, IAppTokenStore? appTokens, TimeProvider clock) : IApiKeyStore
+internal sealed class ApiKeyStores(InMemoryApiKeyStore devKeys, IAppTokenStore? appTokens) : IApiKeyStore
 {
     /// <summary>The shortest gap between two persisted touches of one app token from this replica.</summary>
     internal static TimeSpan TouchInterval { get; } = TimeSpan.FromSeconds(60);
@@ -49,15 +48,14 @@ internal sealed class ApiKeyStores(InMemoryApiKeyStore devKeys, IAppTokenStore? 
             return devKeys.TouchAsync(keyId, usedAt, cancellationToken);
         }
 
-        return appTokens is not null && ClaimTouch(keyId)
+        return appTokens is not null && ClaimTouch(keyId, usedAt)
             ? appTokens.TouchAsync(keyId, usedAt, cancellationToken)
             : ValueTask.CompletedTask;
     }
 
-    /// <summary>Whether this replica's last touch of <paramref name="keyId"/> is at least <see cref="TouchInterval"/> old.</summary>
-    private bool ClaimTouch(string keyId)
+    /// <summary>Whether this replica's last touch of <paramref name="keyId"/> is at least <see cref="TouchInterval"/> before <paramref name="now"/>.</summary>
+    private bool ClaimTouch(string keyId, DateTimeOffset now)
     {
-        var now = clock.GetUtcNow();
         var claimed = false;
         _lastTouched.AddOrUpdate(
             keyId,

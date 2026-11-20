@@ -42,7 +42,7 @@ public sealed class ApiKeyStoresTests
         Kind = AppTokenSecret.KindOf(keyId),
     };
 
-    private ApiKeyStores Stores(bool withRegistry = true) => new(DevKeys(), withRegistry ? _registry : null, _clock);
+    private ApiKeyStores Stores(bool withRegistry = true) => new(DevKeys(), withRegistry ? _registry : null);
 
     [Fact]
     public async Task Dev_keys_resolve_from_configuration_and_app_tokens_from_the_registry()
@@ -91,6 +91,19 @@ public sealed class ApiKeyStoresTests
         _clock.Advance(TimeSpan.FromSeconds(1));
         await stores.TouchAsync(TokenId, _clock.GetUtcNow(), Ct);
         _registry.Touches.Select(touch => touch.UsedAt).ShouldBe([start, _clock.GetUtcNow()]);
+    }
+
+    [Fact]
+    public async Task The_throttle_reads_the_instant_it_is_given_not_the_clock_again()
+    {
+        var stores = Stores();
+        var first = _clock.GetUtcNow().AddHours(-1);
+
+        await stores.TouchAsync(TokenId, first, Ct);
+        await stores.TouchAsync(TokenId, first.AddSeconds(59), Ct);
+        await stores.TouchAsync(TokenId, first.AddSeconds(60), Ct);
+
+        _registry.Touches.Select(touch => touch.UsedAt).ShouldBe([first, first.AddSeconds(60)]);
     }
 
     [Fact]
