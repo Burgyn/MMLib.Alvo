@@ -75,12 +75,12 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
     {
         var found = tenant is { } id
             ? await ReadAsync(
-                _tables.MembershipSql,
+                _tables.HonouredMembershipSql,
                 command => Bind(command, ("@user_id", Id(user)), ("@tenant_id", Id(id))),
                 reader => TenantTables.ReadMembership(reader),
                 ct).ConfigureAwait(false)
             : await ReadAsync(
-                _tables.PersonalMembershipSql,
+                _tables.HonouredPersonalMembershipSql,
                 command => Bind(command, ("@user_id", Id(user))),
                 reader => TenantTables.ReadMembership(reader),
                 ct).ConfigureAwait(false);

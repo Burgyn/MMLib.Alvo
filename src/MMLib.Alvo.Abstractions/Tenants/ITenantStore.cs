@@ -36,7 +36,9 @@ internal interface ITenantStore
 
     /// <summary>
     /// The membership of <paramref name="user"/> in <paramref name="tenant"/> — or, when <paramref name="tenant"/> is
-    /// <see langword="null"/>, in their personal tenant — or <see langword="null"/> when they are no member of it.
+    /// <see langword="null"/>, in their personal tenant — or <see langword="null"/> when they are no member of it, or when
+    /// their account is disabled: a ban leaves the row, and this read is what callers without a session honour (an
+    /// <c>EventActor</c> delivery, a personal token), so it does not honour a banned person's membership.
     /// </summary>
     /// <param name="user">The account.</param>
     /// <param name="tenant">The tenant, or <see langword="null"/> for the personal one.</param>

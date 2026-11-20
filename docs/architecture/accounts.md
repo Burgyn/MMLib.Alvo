@@ -437,7 +437,7 @@ A name is trimmed, 1–100 code points, no control character — the display nam
 | A non-member gets the unknown id's 404 on every route; a membership the descriptor does not honour is managed by no route | `MemberRoutesTests.A_non_member_gets_404_on_every_member_route`, `…An_unhonoured_personal_membership_is_managed_by_no_route`; `TenantRoutesTests.A_non_member_and_an_unknown_tenant_get_the_same_404` |
 | Person only: an API key is 403, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_403_and_no_credential_is_a_bearer_challenge`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
 | `feature-disabled` names its key on all six routes; creating is rate-limited and only creating | `TenantRoutesTests.Without_self_service_every_route_is_404_feature_disabled`, `…Without_create_tenants_creating_is_404_naming_its_key`, `…Tenant_creation_answers_429_after_its_limit` |
-| An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests` |
+| An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10); a banned person holds none while banned (stack review B-M1) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests`; `TenantStoreFacts.A_banned_person_s_memberships_are_not_found_until_the_account_is_enabled` (both engines; red on both without the account condition) |
 | The registry is the tenant list only under `selfService` and only when the host registers none (D13) | `TenantCatalogsTests` |
 | The default tenant list honours what a request honours: shared tenants, personal ones only while `personalTenant` is on — one predicate for a tenant, a membership and every listing | `TenantCatalogsTests.Without_personal_tenant_the_registry_lists_only_shared_tenants`, `…A_migration_starts_once_per_registry_tenant_only_at_a_self_service_revision`; `MembershipRulesTests.Honours_is_one_test_for_a_tenant_and_its_membership`, `…A_listing_drops_a_personal_row_that_is_not_its_owner_s` |
 
@@ -464,7 +464,8 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   yet, so handing one over and leaving frees nothing.
 - **D10** — an event actor keeps a recorded tenant role only while it is assignable, and a person actor's roles are
   narrowed at delivery to their current membership — never widened. A removed member's queued delivery still runs in
-  the tenant, with project roles only (`events.md`).
+  the tenant, with project roles only (`events.md`). So does a banned person's: the registry read the delivery uses
+  (`ITenantStore.FindMembershipAsync`) does not honour the membership of a disabled account (stack review B-M1).
 - **D11** — `invitations` was accepted by the schema and warned as unhonoured in S3. S4 honours it (S4 D14).
 - **D12** — the global-write warning lists each `create`/`update`/`delete` rule of a global entity whose role literals
   include `authenticated`; a rule that admits without naming a role is not listed.
@@ -922,7 +923,7 @@ on.
 
 **A personal token is a `User` actor, a service token an `ApiKey` one** (D6). An event a personal token causes reports
 `authtype user` and the person as `authid`, so S3 D10's delivery narrowing applies to it unchanged: a queued delivery of
-a person removed since loses their tenant roles, whether they acted by session or by token. A service token's queued
+a person removed or banned since loses their tenant roles, whether they acted by session or by token. A service token's queued
 deliveries keep the tenant roles recorded at the event, bounded by `assignableRoles`, as any API key's do.
 
 ### The routes
@@ -1313,3 +1314,12 @@ defects that no slice could see, because each sits where two slices meet. Each f
   caller read saw the session live, racing the reuse's commit, can still insert a token after the sweep, because a
   mint locks the account row and does not lock or re-read the session. The window is the length of one mint's
   transaction, and only a caller already holding the session can use it.
+- **A banned person's queued work loses their tenant roles** (B-M1, S2 ban × S3 D10). A ban revokes sessions,
+  invitations and tokens but leaves membership rows, and the registry read an `EventActor` delivery narrows by
+  (`RegistryMembershipResolution` → `ITenantStore.FindMembershipAsync`) did not look at the account, so a queued,
+  retried or replayed delivery ran with the banned person's full tenant roles. That read now uses
+  `TenantTables.HonouredMembershipSql`, which adds `NOT EXISTS` a disabled account. **Narrower than "every path using
+  the same SQL"**, deliberately: the member writes read the *target* member with `MembershipSql`, and honouring the ban
+  there would stop an owner from demoting or removing a banned member. The in-transaction actor reads (a mint, an
+  accept, a member write) need no change: each first locks the actor's account row with `disabled_at IS NULL`, or runs
+  for a person whose live session already proved it. Enabling the account honours the memberships again.

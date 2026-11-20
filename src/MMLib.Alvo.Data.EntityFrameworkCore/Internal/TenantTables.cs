@@ -140,6 +140,23 @@ internal sealed class TenantTables(string schemaPrefix)
         """;
 
     /// <summary>
+    /// Gets <see cref="MembershipSql"/> for a membership that is honoured — its account not disabled — the registry read of
+    /// a caller with no session to prove the account live: an <c>EventActor</c> delivery, a personal token (stack review
+    /// B-M1). A ban leaves the membership rows in place, so without this a banned person's queued work kept their tenant
+    /// roles. <c>NOT EXISTS … disabled</c> rather than a join, so a member without an account row stays a member, as in
+    /// <see cref="InvitationTables"/>' liveness read. The writes that judge a <em>target</em> member keep
+    /// <see cref="MembershipSql"/>, so an owner still demotes and removes a banned member.
+    /// </summary>
+    internal string HonouredMembershipSql => MembershipSql + HonouredAccount;
+
+    /// <summary>Gets <see cref="PersonalMembershipSql"/> for a membership that is honoured, as <see cref="HonouredMembershipSql"/>.</summary>
+    internal string HonouredPersonalMembershipSql => PersonalMembershipSql + HonouredAccount;
+
+    /// <summary>The condition, appended to a membership read over <c>m</c>, that the member's account is not disabled.</summary>
+    private string HonouredAccount =>
+        $"\n   AND NOT EXISTS (SELECT 1 FROM {Accounts} d WHERE d.id = m.user_id AND d.disabled_at IS NOT NULL)";
+
+    /// <summary>
     /// Gets the statement ensuring an account's personal tenant (D6): named after the account's display name, else
     /// <c>Personal</c>; a tenant it already has — committed, or being inserted by a concurrent sign-in, which this waits
     /// for on PostgreSQL — wins, and this inserts nothing. No row when there is no such account.
