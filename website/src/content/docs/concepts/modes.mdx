@@ -86,8 +86,9 @@ failing CEL function or a failing write hook its own way. [Handle errors](/guide
 both.
 
 :::caution[Not in this build]
-A host cannot yet publish its own signed-in user to the generated API's routes: they authenticate API keys only, and
-your users go through your own endpoints ([#210](https://github.com/Burgyn/MMLib.Alvo/issues/210)). One host serves one
+A host cannot yet hand its own signed-in user to the generated API's routes. They take Alvo's own credentials only:
+an API key, or, with `MMLib.Alvo.Accounts`, an access token from [Alvo's sign-in](/guides/sign-in/). Users your app
+signs in itself go through your own endpoints ([#210](https://github.com/Burgyn/MMLib.Alvo/issues/210)). One host serves one
 project ([#141](https://github.com/Burgyn/MMLib.Alvo/issues/141)).
 :::
 

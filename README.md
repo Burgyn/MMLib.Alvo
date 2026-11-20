@@ -149,7 +149,7 @@ Next: [the 10-minute tutorial →](https://alvo.burgyn.online/start-here/tutoria
 ## What you get
 
 - **[One validated descriptor](https://alvo.burgyn.online/concepts/descriptor/)** — entities, fields, rules, hooks, computed fields and rollups, checked by a JSON Schema and then semantically.
-- **[Rules in SQL](https://alvo.burgyn.online/guides/access-rules/)** — CEL access rules compiled into the SQL of every list, read, update and delete (a create's row is checked in the transaction); an operation with no rule is refused.
+- **[Rules in SQL](https://alvo.burgyn.online/guides/access-rules/)** — CEL access rules compiled into the SQL of every list, read, update and delete (a create's row is checked in the transaction); an operation with no rule is refused. The rules judge API keys, people [signed in with Google](https://alvo.burgyn.online/guides/sign-in/) in [companies they create and invite their team to](https://alvo.burgyn.online/guides/tenants-and-invitations/), and [integrators' tokens](https://alvo.burgyn.online/guides/tokens/) alike.
 - **[Hooks that fail closed](https://alvo.burgyn.online/guides/before-hooks/)** — before-hooks refuse or rewrite a write inside its transaction, with built-in functions and your own C# ones.
 - **[Events and webhooks](https://alvo.burgyn.online/guides/after-hooks-and-webhooks/)** — every write commits its event through an outbox; after-hooks send e-mail and deliver webhooks, with retries.
 - **[Audit](https://alvo.burgyn.online/guides/audit-row-changes/) and [history](https://alvo.burgyn.online/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
@@ -212,6 +212,7 @@ Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pac
 | `MMLib.Alvo.Data.Sqlite` | The SQLite driver for Alvo, registered with UseSqlite. |
 | `MMLib.Alvo.Data.PostgreSql` | The PostgreSQL driver for Alvo, registered with UsePostgreSql. |
 | `MMLib.Alvo.Identity` | ASP.NET Core Identity for Alvo: administrator accounts, roles, cookie sign-in and the bootstrap administrator. |
+| `MMLib.Alvo.Accounts` | End-user sign-in for Alvo: the OAuth token endpoint, sessions, signing keys and the OIDC ID-token verifier. |
 | `MMLib.Alvo.Admin` | The Alvo admin dashboard: server-interactive Blazor components and the design system they ship with. |
 | `MMLib.Alvo.Ai` | The Alvo schema assistant: an agent that reads a project and proposes a descriptor change, and cannot apply one. |
 | `MMLib.Alvo.TestHost` | A real Alvo backend for tests: the production pipeline over an in-memory SQLite database, with events delivered when the test says so. |

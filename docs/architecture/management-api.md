@@ -1,7 +1,8 @@
 # The Management API
 
-The configuration surface: twenty-one HTTP routes over two services — `IAlvoManagement`, and `IAlvoUserAdministration`
-for *Administering people* — that read and change what a project **is** — its descriptor, its revision history, its
+The configuration surface: thirty-one HTTP routes over four services — `IAlvoManagement`, `IAlvoOperations` for
+*Operations*, `IAlvoUserAdministration` for *Administering people*, and `IAlvoAccountAdministration` for *Disabling an
+end user* — that read and change what a project **is** — its descriptor, its revision history, its
 resolved schema, what this build honours, the host code registered with it, and who a policy would admit. It never reads or writes a row of application data. That is not an omission; it is
 deviation **D4**, and the whole shape of this document follows from it.
 
@@ -54,6 +55,13 @@ And seven more, from a second contract — see *Administering people*:
 | `PUT {m}/projects/{project}/users/{user:guid}/disabled` | `SetDisabledAsync` | `admin` |
 | `POST {m}/projects/{project}/users/{user:guid}/credential-reset` | `IssueCredentialTokenAsync` | `admin` |
 | `DELETE {m}/projects/{project}/users/{user:guid}/lockout` | `ClearLockoutAsync` | `admin` |
+
+And one more, from a fourth contract, mapped only when `AddAlvoAccounts` registered end-user sign-in — see *Disabling an
+end user*:
+
+| Route | `IAlvoAccountAdministration` member | Level |
+|---|---|---|
+| `PUT {m}/projects/{project}/accounts/{account:guid}/disabled` | `SetDisabledAsync` | `admin` |
 
 **This table is generated from nothing.** It is prose, and prose drifts — so it is not what holds the
 mapping. `ManagementContractTests` does, reflectively and in four directions: every member of
@@ -284,6 +292,32 @@ anonymous caller reaches no level — so it is refused, on reads as well as on w
 applied to the surface that admits it does not know who is calling. A host that wants an unattended apply
 publishes a caller the project's own `access` block admits, or applies through the boot.
 
+**Who the Management API believes the caller is.** It never reads `Authorization`: a Bearer token is ignored there
+even when a person resolver is registered, so Management stays the surface of operators and development keys (the
+reading is in [`data-api.md`](./data-api.md#how-a-request-becomes-a-caller-one-credential-reading)). And an `access`
+level sees **project roles only**. A caller can also hold *tenant roles*, which a membership grants inside one tenant
+and which count only in the rules of a `tenancy: scoped` entity; a role someone gives themselves by creating a tenant
+must never open a level of the project's own management. Two independent locks hold that: the `access` block compiles
+with no tenancy, so its `@user.roles` has no tenant scope to fold into, and `ManagementAccessEvaluator` strips
+`TenantRoles` from the context before a host-replaceable `IPredicateEvaluator` sees it.
+`TenantRoleManagementTests` pins the outcome in process. Since self-service tenants (accounts S3) a third lock stands
+in front of both: an `access` level that names a role in `tenancy.selfService.assignableRoles` is refused at apply, so a
+role anyone can be given in their own tenant is never a management role to begin with. Over HTTP, a person's Bearer with
+a tenant header on a Management route gets exactly the anonymous answer
+(`TenancyEngineFacts.A_tenant_role_never_reaches_management`, both engines).
+
+**Personal and service tokens never manage a project** (accounts S5 D9, which closes S1 D8). They travel on
+`X-Alvo-Api-Key` like any key, so `ManagementCallerFilter` resolves one first — an unusable token is the ordinary 401 of
+any key — and then refuses a principal whose key id carries an app-token prefix (`alvo_pat_`, `alvo_svc_`) with **403**
+`forbidden` and one fixed detail: *"Personal and service tokens are app credentials and never manage a project. Use an
+operator session or a configured API key."* That holds even when the token's roles would satisfy an `access` level: a
+token is something a person or an owner hands an integration, and handing it out must never hand out the project's
+configuration. The prefix is a sound test because both prefixes are reserved — a configured dev key cannot carry one —
+so `AlvoPrincipal` did not have to grow a "kind". A Bearer sent beside a token is ignored here as always, so the token
+decides. In-process `IAlvoManagement` callers publish their own principal, as before. Pinned by
+`AppTokenManagementTests` (every route, read and write) and, for a `dispatcher` service token over HTTP on both
+engines, `AppTokenEngineFacts.A_service_token_s_tenant_role_never_reaches_global_data_or_management`.
+
 ## D3: `If-Match` carries `revision`, not an `ETag`
 
 The Data API's optimistic concurrency is a strong `ETag` over a row version. The Management API's is an
@@ -457,6 +491,8 @@ pinned over the wire by
 `ManagementAccessTests.A_key_scoped_to_one_entity_still_reaches_management_because_scopes_do_not_govern_configuration`.
 #146's review recorded this as #212's question to decide; this is the answer. Revisit if a
 management-shaped scope is ever wanted, and note it would then need a default for every key already issued.
+A personal or service token is the exception by kind, not by scope: whatever its roles, it is refused 403 (above,
+accounts S5 D9).
 
 ## `info` reports the data provider, not the engine
 
@@ -552,6 +588,47 @@ resolves from the host's own composed container rather than constructing the dec
 `IAlvoManagement` is the descriptor's surface, membership is a store's, and a deployment can have the first
 without the second. `ManagementContractTests` still holds this table — `UserAdministrationRouteTests` is its
 counterpart for the second contract, including the non-vacuity guard and a 403-over-the-wire fact per route.
+
+## Disabling an end user
+
+Spec 2026-11-13 §5.6: an operator of an open-sign-up app must be able to ban a person on day one.
+`PUT {m}/projects/{project}/accounts/{account}/disabled` with `{"disabled": true}` stamps the account's `disabled_at`
+and revokes every live session of it (reason `disabled`) **in one transaction** — one `IAccountStore` call — so the
+person's next request with an access token is `401 invalid_token`, their next refresh `invalid_grant`, and their next
+sign-in `403 sign-in-refused`. `{"disabled": false}` on a disabled account clears the stamp and lets them sign in
+again, and revokes every session the account still has in the same transaction: a clean slate, so a ban is a
+force-logout even for a session the ban's own revocation never saw, and the person signs in afresh. The ban's
+transaction also revokes every personal and service token the account minted (accounts S5 D10) — the service half goes
+beyond spec §7.1, because a banned owner who kept a token's secret would otherwise keep acting as the tenant — and
+enabling the account revives none: the person mints new ones
+(`AppTokenEngineFacts.A_banned_person_s_tokens_die_and_stay_dead`, both engines). On an account that
+is not disabled it is a no-op — still `204`, and nobody is logged out. The success answer is `204`; an account id that
+does not exist is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
+must not be the permissive one. The ban takes effect on the very next request, not when the access token expires:
+every Bearer request reads its session (spec §5.7's one store read), and that read sees the revocation. Until the
+audit component (#42) records who banned whom, each change that lands writes one Information line, category
+`MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} disabled end-user account {id}.` (or `enabled`) — ids
+only, never the person's email or a token; a refused or missed change writes none.
+
+**Its own operation, `ManageAccounts`, at `admin`.** Not `ManageUsers`: those people manage the project, these use
+the app — a deployment can have either without the other, and a later level split between them should not need a new
+operation then. Disabling a person decides who may reach the backend, which spec §3.3 gives to `admin`.
+
+**Mapped only when sign-in is registered** — `MapAccounts` asks `IServiceProviderIsService` whether
+`IAlvoAccountAdministration` exists (the `MapUsers` precedent), so a deployment without `AddAlvoAccounts` answers
+`404`, not `500`, and its route table does not change. **The gate is the whole of the authorization**: the port is
+`internal` to the family and this route is its only caller. When a dashboard view of end users needs it in-process
+(spec §10), it becomes public in the `IAlvoUserAdministration` shape — the implementation under an unguarded key, a
+core decorator the only registration under the plain interface. The delegate also admits through `ManagementGate`,
+which is what answers a project this build does not serve with its named `404`.
+
+**A Bearer token never reaches it.** The Management API reads no `Authorization` header (S1), so a person presenting
+their own access token here is an anonymous caller and is refused `403` like one —
+`AccountAdministrationTests.A_bearer_token_never_reaches_the_route`. The endpoint's name is
+`Alvo.Management.Accounts.SetDisabledAsync`, qualified because `IAlvoUserAdministration` has a member of the same name
+and endpoint names must be unique. `AccountAdministrationRouteTests` is `ManagementContractTests`' counterpart for this
+contract. `AccountsEngineFacts.A_disabled_person_is_refused_on_the_next_request` drives the route end to end on both
+engines; the accounts side (tables, sessions, the person resolver) is [`accounts.md`](./accounts.md).
 
 ## What is deliberately absent
 

@@ -110,7 +110,34 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md` and sequenced in
   `docs/superpowers/plans/2026-11-13-accounts-00-master.md` (#36, #140, #210, #376 territory). Prioritised by
   the maintainer ahead of F5's close; the marker stays on F5. **S0**: a scoped → scoped `ref` is a foreign key
-  over `(tenant_id, id)` (#161, an F6 debt, closed as the initiative's prerequisite). S1 (role provenance) is next.
+  over `(tenant_id, id)` (#161, an F6 debt, closed as the initiative's prerequisite). **S1**: role provenance —
+  `AlvoContext.TenantRoles`, counted only while every entity on a decision's path is scoped, and one credential reading
+  for the Data API, the commands and Management. **S2**: sign-in, level 1 — `MMLib.Alvo.Accounts` (Google ID token
+  exchanged for Alvo's own access and rotating refresh tokens, `/user`, `/logout`, RFC 8414 metadata and JWKS, the
+  person resolver), `auth.signUp`, CORS and rate limits, the operator's account ban; proven end to end on SQLite and
+  PostgreSQL, with no secret in any log (`docs/architecture/accounts.md`). **S3**: self-service tenants, levels 2–3
+  without invitations — `tenancy.selfService`, the tenant registry (`_tenants`, `_tenant_members`), the personal
+  tenant, `/auth/v1/tenants` and its members routes, the tenant header selecting among a person's memberships in the
+  session's one read, the registry as the default tenant list under `selfService`; every tenant wall proven end to end
+  on SQLite and PostgreSQL (`TenancyEngineFacts`). **S4**: invitations — owners invite people into shared tenants by a
+  128-bit code shown once (`_tenant_invitations`, `/auth/v1/tenants/{id}/invitations`, anonymous preview, accept),
+  every dead code one 404, an owner's invitations dying with their ownership or their account, and `signUp.mode: invitationOnly` signing
+  people up through `invitation_code` on the token exchange with account and membership in one transaction;
+  `tenancy.selfService.invitations` is honoured; proven end to end and under both races on SQLite and PostgreSQL
+  (`InvitationEngineFacts`). **S5**: tokens for integrators — `auth.accessTokens`, personal tokens acting as their
+  person with live tenant roles and service tokens acting as a shared tenant with fixed ones, minted over
+  `/auth/v1/tokens` and shown once (`alvo_pat_`/`alvo_svc_`, `_api_keys`), sent as `X-Alvo-Api-Key`, refused by the
+  Management API and by a host's own `.WithAlvoCaller()` endpoints (a scope opt-in for those is #536), and revoked in
+  the transaction that removes, demotes or bans their minter; proven end to end on SQLite
+  and PostgreSQL with no secret in any log (`AppTokenEngineFacts`). **S6**: the demo and the docs — the field-service
+  stack signs people in through a test OpenID issuer (Development only, its key made per machine and never committed),
+  and `test/teapie-field-service/170-SelfService` runs level 3 against the real container: a founder, an invited
+  technician, a billing service token, a removed member, every tenant wall and refresh reuse, with every existing suite
+  still green; three guides (*Sign-in and accounts*, *Tenants, members and invitations*, *Tokens for integrators*), a
+  generated sign-in reference, and a tenth descriptor skill, `alvo-descriptor-accounts`
+  (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are complete as stacked PRs #524, #525, #528, #529,
+  #530, #537 and S6's; a whole-stack review precedes the merge. Follow-ups: #523, #526, #527, #536, #538, #539 and
+  #540 (the v10 assistant eval is owed).
 
 ## 3a. What closed F4
 

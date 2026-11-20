@@ -1,0 +1,61 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "acme-repairs",
+  "auth": {
+    "providers": ["google"],
+    "roles": ["dispatcher", "technician"],
+    "signUp": { "mode": "open" },
+    "accessTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }
+  },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "createTenants": { "creatorRoles": ["dispatcher"], "maxPerAccount": 3 },
+      "invitations": true,
+      "assignableRoles": ["dispatcher", "technician"]
+    }
+  },
+  "entities": {
+    "regions": {
+      "tenancy": "global",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 8 },
+        "name": { "type": "string", "required": true, "maxLength": 80 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles"
+      }
+    },
+    "customers": {
+      "fields": {
+        "name": { "type": "string", "required": true, "maxLength": 120 }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles",
+        "get": "'dispatcher' in @user.roles",
+        "create": "'dispatcher' in @user.roles",
+        "update": "'dispatcher' in @user.roles"
+      }
+    },
+    "work_orders": {
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "status": { "type": "enum", "values": ["scheduled", "in_progress", "completed"], "default": "scheduled" },
+        "assigned_to": { "type": "uuid" },
+        "customer_id": { "type": "ref", "entity": "customers", "required": true },
+        "region_id": { "type": "ref", "entity": "regions" }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles || assigned_to == @user.id",
+        "get": "'dispatcher' in @user.roles || assigned_to == @user.id",
+        "create": "'dispatcher' in @user.roles",
+        "update": "'dispatcher' in @user.roles || assigned_to == @user.id",
+        "delete": "'dispatcher' in @user.roles"
+      }
+    }
+  }
+}

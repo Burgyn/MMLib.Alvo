@@ -1,0 +1,70 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "tenant-roles-desk",
+  "description": "Spec 6.2 end to end: a tenant role counts only while every entity on a decision's path is scoped - in a scoped entity's rules and a relation into a scoped entity, never in a global entity's rules, never past a global hop, never from a global entity into a scoped one, and never at a Management access level.",
+  "tenancy": { "enabled": true },
+  "auth": { "roles": ["dispatcher"] },
+  "access": { "viewer": "'dispatcher' in @user.roles" },
+  "entities": {
+    "regions": {
+      "description": "Shared reference data: a global entity whose rules name the role outright.",
+      "tenancy": "global",
+      "fields": {
+        "code": { "type": "string", "maxLength": 8, "required": true }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles",
+        "get": "'dispatcher' in @user.roles",
+        "create": "'dispatcher' in @user.roles"
+      }
+    },
+    "depots": {
+      "description": "Shared reference data a caller reaches only through a work order: a global entity whose rules reach a scoped entity through a relation term.",
+      "tenancy": "global",
+      "fields": {
+        "code": { "type": "string", "maxLength": 8, "required": true }
+      },
+      "rules": {
+        "list": "work_orders.exists(w, true)",
+        "get": "true",
+        "update": "work_orders.exists(w, true)",
+        "create": "'dispatcher' in @user.roles"
+      }
+    },
+    "work_orders": {
+      "tenancy": "scoped",
+      "fields": {
+        "title": { "type": "string", "maxLength": 80 },
+        "depot_id": { "type": "ref", "entity": "depots" }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles",
+        "get": "'dispatcher' in @user.roles",
+        "create": "'dispatcher' in @user.roles"
+      }
+    },
+    "visits": {
+      "tenancy": "scoped",
+      "fields": {
+        "work_order_id": { "type": "ref", "entity": "work_orders" }
+      },
+      "rules": {
+        "list": "work_order_id.title != ''",
+        "get": "work_order_id.title != ''",
+        "create": "'dispatcher' in @user.roles"
+      }
+    },
+    "stops": {
+      "tenancy": "scoped",
+      "fields": {
+        "region_id": { "type": "ref", "entity": "regions" }
+      },
+      "rules": {
+        "list": "region_id.code == 'N'",
+        "get": "region_id.code == 'N'",
+        "create": "'dispatcher' in @user.roles"
+      }
+    }
+  }
+}

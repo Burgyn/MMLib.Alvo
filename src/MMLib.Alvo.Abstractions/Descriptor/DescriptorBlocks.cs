@@ -15,6 +15,48 @@ public sealed record Tenancy
 {
     /// <summary>Turn on row-level multi-tenancy (shared DB + shared schema, discriminator column).</summary>
     public bool? Enabled { get; init; }
+
+    /// <summary>
+    /// Self-service tenants for signed-in people (schema <c>tenancy.selfService</c>); <see langword="null"/> keeps tenants
+    /// to API keys and operator grants. Requires <see cref="Enabled"/>.
+    /// </summary>
+    public TenancySelfService? SelfService { get; init; }
+}
+
+/// <summary>Which tenants signed-in people get and manage themselves (schema <c>tenancy.selfService</c>).</summary>
+public sealed record TenancySelfService
+{
+    /// <summary>Present: every person gets one tenant of their own at sign-up.</summary>
+    public SelfServicePersonalTenant? PersonalTenant { get; init; }
+
+    /// <summary>Present: a person may create shared tenants.</summary>
+    public SelfServiceCreateTenants? CreateTenants { get; init; }
+
+    /// <summary>Whether owners may invite people by link; requires <see cref="CreateTenants"/>.</summary>
+    public bool? Invitations { get; init; }
+
+    /// <summary>
+    /// The tenant roles: the only roles a membership can ever carry, each declared in <c>auth.roles</c> and never a
+    /// built-in role.
+    /// </summary>
+    public IReadOnlyList<string>? AssignableRoles { get; init; }
+}
+
+/// <summary>The tenant every person gets of their own (schema <c>tenancy.selfService.personalTenant</c>).</summary>
+public sealed record SelfServicePersonalTenant
+{
+    /// <summary>The tenant roles a person holds in their personal tenant, each in <c>assignableRoles</c>; default none.</summary>
+    public IReadOnlyList<string>? Roles { get; init; }
+}
+
+/// <summary>Whether and how a person may create shared tenants (schema <c>tenancy.selfService.createTenants</c>).</summary>
+public sealed record SelfServiceCreateTenants
+{
+    /// <summary>The tenant roles the creator receives, each in <c>assignableRoles</c>.</summary>
+    public IReadOnlyList<string>? CreatorRoles { get; init; }
+
+    /// <summary>How many shared tenants one account may create: 1–100, default 5.</summary>
+    public int? MaxPerAccount { get; init; }
 }
 
 /// <summary>
@@ -56,6 +98,44 @@ public sealed record Auth
 
     /// <summary>Application roles beyond the built-in ones (anon, authenticated, admin).</summary>
     public IReadOnlyList<string>? Roles { get; init; }
+
+    /// <summary>
+    /// Who may create an account by signing in; required once <see cref="Providers"/> lists a provider Alvo honours
+    /// for end users (today <c>google</c>).
+    /// </summary>
+    public AuthSignUp? SignUp { get; init; }
+
+    /// <summary>Which self-service tokens for integrators people may mint; <see langword="null"/> mints none.</summary>
+    public AuthAccessTokens? AccessTokens { get; init; }
+}
+
+/// <summary>Self-service tokens for integrators (schema <c>auth.accessTokens</c>).</summary>
+public sealed record AuthAccessTokens
+{
+    /// <summary>Whether a person may mint tokens that act as them; <see langword="null"/> means <see langword="false"/>.</summary>
+    public bool? Personal { get; init; }
+
+    /// <summary>
+    /// Whether a tenant owner may mint tokens that act as a shared tenant; <see langword="null"/> means
+    /// <see langword="false"/>. Requires <c>tenancy.selfService.createTenants</c>.
+    /// </summary>
+    public bool? Service { get; init; }
+
+    /// <summary>The longest expiry a token may ask for, in days (1–365); <see langword="null"/> means 90.</summary>
+    public int? MaxLifetimeDays { get; init; }
+}
+
+/// <summary>Who may create an account by signing in with an end-user provider (schema <c>auth.signUp</c>).</summary>
+public sealed record AuthSignUp
+{
+    /// <summary>Whether any person the provider vouches for may create an account, or only one accepting an invitation.</summary>
+    public required SignUpMode Mode { get; init; }
+
+    /// <summary>
+    /// The domains a <b>trusted</b> email must be in for its owner to sign up, lower-case hostnames; <see langword="null"/>
+    /// admits any domain.
+    /// </summary>
+    public IReadOnlyList<string>? AllowedEmailDomains { get; init; }
 }
 
 /// <summary>Who may manage this project in the admin dashboard, mapped to levels via CEL (schema <c>access</c>).</summary>

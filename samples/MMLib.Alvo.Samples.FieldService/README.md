@@ -52,6 +52,13 @@ Then try:
 The host runs on PostgreSQL only; the unit tests use `MMLib.Alvo.TestHost` (SQLite). The dev keys are demo
 authentication: a real embedded host plugs in its own.
 
+**Sign-in is the standalone stack's story, not this host's.** The descriptor lists `google` and turns on self-service
+tenants and tokens, but this host registers no `AddAlvoAccounts`. It logs, on every boot, that `auth.providers lists
+google, but this host registered no end-user sign-in`, and every request behaves as it did before (the standalone
+stack's `examples/field-service/README.md` *Self-service* runs it end to end). A host that does add sign-in should know
+that its own `.WithAlvoCaller()` endpoints refuse personal and service tokens until an endpoint can name the scope it
+needs (#536); a command such as `work_orders.dispatch` takes one within its entity's scopes.
+
 ## The slices
 
 The slices are vertical, over the types the build generates from the descriptor (`AdditionalFiles …
@@ -64,7 +71,7 @@ A renamed field breaks the build, and the boot check warns about a class that no
 | `Mobile/` | inbound Standard Webhook `/hooks/technician-app` | Inbound webhooks. The descriptor declares what Alvo sends; a signed, deduplicated inbound call is a host route. | `Mobile/JobCompletedReceiverTests` | `030-Mobile` |
 | `Scheduling/` | before-write hooks `within-service-hours` (work orders) and `visit-within-service-hours` (visits) | A time-zone-aware hour. Alvo's CEL has no local-hour function, and rules, CHECKs and lookup checks compile to SQL. Comparing a slot with another row's hours in Bratislava time is code. | `Scheduling/*Tests` | `020-Dispatch` |
 | `Sla/` | handler `escalate-sla-breach` on `work_orders.sla_breached` | A subscriber for a timer's event. The descriptor arms the timer, but automation cannot subscribe to the event it publishes. | `Sla/EscalateSlaBreachTests` | `040-Sla` |
-| `Reports/`, `Tenancy/` | schedule `overdue-report` (`EachTenant`) + `IAlvoTenantCatalog` | A per-tenant scheduled job. A cron automation takes no condition and runs per tenant only with a tenant catalog, which the standalone image does not register. | `Reports/OverdueReportTests` | `050-Reports` |
+| `Reports/`, `Tenancy/` | schedule `overdue-report` (`EachTenant`) + `IAlvoTenantCatalog` | A per-tenant scheduled job. A cron automation takes no condition, and the standalone image's only tenant list is the self-service registry's, which holds no API-key tenant such as the demo's. | `Reports/OverdueReportTests` | `050-Reports` |
 
 Every slice is registered in `FieldServiceSetup`, in three steps:
 

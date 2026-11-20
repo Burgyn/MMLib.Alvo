@@ -24,7 +24,7 @@ public class ReferenceIndexGeneratorTests
     }
 
     [Fact]
-    public void The_data_api_is_listed_beside_the_pages_on_disk()
+    public void The_route_references_are_listed_beside_the_pages_on_disk()
     {
         var reference = Directory.CreateTempSubdirectory("docsgen-reference-").FullName;
         File.WriteAllText(Path.Combine(reference, "limits.md"), "---\ntitle: \"Limits and budgets\"\ndescription: \"Every limit.\"\nsidebar:\n  order: 9\n---\n");
@@ -32,7 +32,7 @@ public class ReferenceIndexGeneratorTests
 
         var slugs = ReferenceIndexGenerator.Listed(reference).Select(page => page.Slug);
 
-        slugs.ShouldBe(["problem-types", "data-api", "limits"]);
+        slugs.ShouldBe(["problem-types", "data-api", "accounts-api", "limits"]);
     }
 
     [Fact]

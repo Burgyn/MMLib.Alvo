@@ -30,6 +30,14 @@ namespace MMLib.Alvo.Management.Internal;
 /// <c>access</c> block locks everyone out still has exactly one person who can fix it. The reserved
 /// all-zero <see cref="UserId"/> never reaches that port at all — see <see cref="IsBootstrapAdmin"/>.
 /// </para>
+/// <para>
+/// <b>A tenant role never unlocks Management</b> (spec §6.2, review finding B1): a role a person gives themselves by
+/// creating a tenant must reach a scoped entity's rules inside that tenant and nothing else, so an <c>access</c> level reads
+/// project roles only. Two locks hold it. The access scope the levels compile against has no tenancy, so Alvo's own
+/// evaluator never folds a tenant role into <c>@user.roles</c> there; and every level is judged against the caller with
+/// <see cref="AlvoContext.TenantRoles"/> stripped — see <see cref="ProjectRolesOnly"/> — so the rule holds for a host's own
+/// <see cref="IPredicateEvaluator"/> too, which the first lock cannot bind.
+/// </para>
 /// </remarks>
 /// <param name="catalogs">The holder the applied <c>access</c> levels are read from.</param>
 /// <param name="evaluator">The evaluator every level is judged by.</param>
@@ -39,6 +47,8 @@ internal sealed class ManagementAccessEvaluator(
     IPredicateEvaluator evaluator,
     IAlvoBootstrapAdmin bootstrapAdmin)
 {
+    private static readonly IReadOnlySet<Role> _noTenantRoles = new HashSet<Role>();
+
     /// <summary>Whether <paramref name="context"/> may perform <paramref name="operation"/>.</summary>
     /// <param name="operation">The operation about to be performed.</param>
     /// <param name="context">The caller.</param>
@@ -92,12 +102,21 @@ internal sealed class ManagementAccessEvaluator(
             return ManagementLevel.None;
         }
 
-        var viewer = MatchedLevel(ManagementLevel.Viewer, access.Viewer, context);
-        var developer = MatchedLevel(ManagementLevel.Developer, access.Developer, context);
-        var admin = MatchedLevel(ManagementLevel.Admin, access.Admin, context);
+        var caller = ProjectRolesOnly(context);
+        var viewer = MatchedLevel(ManagementLevel.Viewer, access.Viewer, caller);
+        var developer = MatchedLevel(ManagementLevel.Developer, access.Developer, caller);
+        var admin = MatchedLevel(ManagementLevel.Admin, access.Admin, caller);
 
         return Higher(admin, Higher(developer, viewer));
     }
+
+    /// <summary>
+    /// The caller as an <c>access</c> level sees it: everything it is, minus its tenant roles — <paramref name="context"/>
+    /// itself when it carries none, which is every caller but a person acting in a tenant.
+    /// </summary>
+    /// <param name="context">The caller.</param>
+    private static AlvoContext ProjectRolesOnly(AlvoContext context) =>
+        context.TenantRoles.Count == 0 ? context : context with { TenantRoles = _noTenantRoles };
 
     /// <summary><paramref name="level"/> when its predicate admits the caller, otherwise none.</summary>
     /// <param name="level">The level the predicate was declared for.</param>

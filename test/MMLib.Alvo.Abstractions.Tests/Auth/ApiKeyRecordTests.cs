@@ -23,4 +23,42 @@ public class ApiKeyRecordTests
         text.ShouldNotContain(Hash);
         text.ShouldContain("KeyId = dev");
     }
+
+    [Fact]
+    public void A_record_defaults_to_configured_with_no_minter()
+    {
+        var record = new ApiKeyRecord
+        {
+            KeyId = "dev",
+            Sha256Hash = Hash,
+            User = UserId.New(),
+            RoleNames = [],
+            Scopes = new HashSet<ApiKeyScope>(),
+        };
+
+        record.Kind.ShouldBe(ApiKeyKind.Configured);
+        record.MintedBy.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Printing_a_record_shows_kind_and_minter_never_the_hash()
+    {
+        var minter = UserId.New();
+        var record = new ApiKeyRecord
+        {
+            KeyId = "alvo_pat_AAAAAAAAAAAAAAAAAAAAAA",
+            Sha256Hash = Hash,
+            User = minter,
+            RoleNames = [],
+            Scopes = new HashSet<ApiKeyScope>(),
+            Kind = ApiKeyKind.Personal,
+            MintedBy = minter,
+        };
+
+        var text = record.ToString();
+
+        text.ShouldContain("Kind = Personal");
+        text.ShouldContain($"MintedBy = {minter}");
+        text.ShouldNotContain(Hash);
+    }
 }

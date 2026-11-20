@@ -138,7 +138,8 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression), changed: changed);
+            var state = new EvalState(
+                current, previous, context, ScopedPath(expression), failClosed: FailsClosed(expression), changed: changed);
             return Truth(Evaluate(expression.Root, state), WholeCondition, state.FailClosed, WholeConditionReason);
         }
         catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
@@ -193,7 +194,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(AlvoRecord.Empty, null, context);
+            var state = new EvalState(AlvoRecord.Empty, null, context, ScopedPath(expression));
             return Evaluate(expression.Root, state) is not false;
         }
 #pragma warning disable CA1031
@@ -219,7 +220,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, null, null);
+            var state = new EvalState(current, null, null, everyEntityScoped: false);
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
@@ -278,7 +279,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, null, now, FailsClosed(expression));
+            var state = new EvalState(current, previous, null, everyEntityScoped: false, now, FailsClosed(expression));
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
@@ -307,7 +308,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, null, context, now, failClosed: true);
+            var state = new EvalState(current, null, context, ScopedPath(expression), now, failClosed: true);
             return Instant(Evaluate(expression.Root, state));
         }
         catch (CelFunctionException failure) when (failure is { OnCallerData: true, Judged: false })
@@ -335,6 +336,9 @@ internal static class CelInterpreter
     /// the type checker's literal-zero-divisor refusal reads too.
     /// </summary>
     private static bool FailsClosed(CompiledExpression expression) => CelHookArithmetic.FailsClosed(expression.Profile);
+
+    /// <summary>The path an evaluation folds roles on: the expression's own entity, the only one the interpreter reaches.</summary>
+    private static bool ScopedPath(CompiledExpression expression) => RoleProvenance.StillScoped(true, expression.Entity.Tenancy);
 
     /// <summary>
     /// Wraps an exception the defence-in-depth catch met on the fail-closed path (Ruling Y-D, final review M1). Such an
@@ -367,7 +371,7 @@ internal static class CelInterpreter
     {
         CelLiteral literal => literal.Value,
         CelFieldRef fieldRef => ResolveField(fieldRef, state),
-        CelContextRef contextRef => ResolveContext(contextRef, state.Context),
+        CelContextRef contextRef => ResolveContext(contextRef, state),
         CelUnary unary => EvaluateUnary(unary, state),
         CelBinary binary => EvaluateBinary(binary, state),
         CelHas has => ResolveField(has.Field, state) is not null,
@@ -419,9 +423,13 @@ internal static class CelInterpreter
         return record?[fieldRef.FieldName];
     }
 
-    private static object? ResolveContext(CelContextRef contextRef, AlvoContext? context)
+    /// <summary>
+    /// Resolves a context read against the caller; <c>@user.roles</c> is the set <see cref="RoleProvenance"/> makes
+    /// visible on the evaluated expression's path, so a tenant role counts only in a scoped entity's expression.
+    /// </summary>
+    private static object? ResolveContext(CelContextRef contextRef, in EvalState state)
     {
-        if (context is null)
+        if (state.Context is not { } context)
         {
             return null;
         }
@@ -429,7 +437,7 @@ internal static class CelInterpreter
         return contextRef.Value switch
         {
             CelContextValue.UserId => context.User.Value,
-            CelContextValue.UserRoles => context.Roles.Select(role => role.Name).ToArray(),
+            CelContextValue.UserRoles => RoleProvenance.OnPath(context, state.EveryEntityScoped).Select(role => role.Name).ToArray(),
             CelContextValue.TenantId => context.Tenant?.Value,
             _ => null,
         };
@@ -887,6 +895,7 @@ internal static class CelInterpreter
         AlvoRecord current,
         AlvoRecord? previous,
         AlvoContext? context,
+        bool everyEntityScoped,
         DateTimeOffset? now = null,
         bool failClosed = false,
         IReadOnlyCollection<string>? changed = null)
@@ -896,6 +905,13 @@ internal static class CelInterpreter
         public AlvoRecord? Previous { get; } = previous;
 
         public AlvoContext? Context { get; } = context;
+
+        /// <summary>
+        /// Gets whether every entity on the evaluated expression's path is scoped — what decides whether the caller's tenant
+        /// roles join <c>@user.roles</c> (<see cref="RoleProvenance"/>). The interpreter never enters a relation, so the
+        /// path is the expression's own entity; <see langword="false"/> on every entry point that passes no caller.
+        /// </summary>
+        public bool EveryEntityScoped { get; } = everyEntityScoped;
 
         /// <summary>
         /// The instant a <see cref="CelProfile.Mutate"/> evaluation's caller passed for <c>now()</c>, or

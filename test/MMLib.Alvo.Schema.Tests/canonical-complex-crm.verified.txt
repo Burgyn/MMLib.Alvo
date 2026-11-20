@@ -13,8 +13,12 @@
     "roles": [
       "sales",
       "manager",
-      "finance"
-    ]
+      "finance",
+      "member"
+    ],
+    "signUp": {
+      "mode": "invitationOnly"
+    }
   },
   "automation": {
     "bulk-import-index": {
@@ -398,7 +402,18 @@
     }
   },
   "tenancy": {
-    "enabled": true
+    "enabled": true,
+    "selfService": {
+      "assignableRoles": [
+        "member"
+      ],
+      "createTenants": {
+        "creatorRoles": [
+          "member"
+        ]
+      },
+      "invitations": true
+    }
   },
   "webhooks": {
     "endpoints": {

@@ -29,6 +29,11 @@ namespace MMLib.Alvo.Events.Internal;
 /// not to — on an event already at the limit is recorded <c>chain-depth-exceeded</c>, the loop signal, rather than
 /// <c>when-failed</c>; a condition that does not hold records nothing at any depth.
 /// </para>
+/// <para>
+/// <b>A condition sees the tenant roles the actor still could hold</b> (S3 plan D10a): the recorded ones ∩ the applied
+/// descriptor's declared roles ∩ its <c>assignableRoles</c>, through <see cref="EventActor.AssignableTenantRoles"/> — the set
+/// an <c>EventActor</c> run starts from.
+/// </para>
 /// </remarks>
 internal sealed class DeliveryFanOut(
     IDeliveryStore store,
@@ -41,7 +46,7 @@ internal sealed class DeliveryFanOut(
     /// <returns>How many deliveries the event fans out to, recorded now or by an earlier attempt — dead ones included.</returns>
     internal async Task<int> FanOutAsync(AlvoEvent @event, PolicyCatalog catalog, CancellationToken cancellationToken)
     {
-        var plan = Plan(@event, binder.For(catalog));
+        var plan = Plan(@event, binder.For(catalog), catalog);
         if (plan.Requests.Count > 0
             && await store.FanOutAsync(plan.Requests, cancellationToken).ConfigureAwait(false) > 0)
         {
@@ -51,9 +56,9 @@ internal sealed class DeliveryFanOut(
         return plan.Requests.Count;
     }
 
-    private FanOutPlan Plan(AlvoEvent @event, ExtensionBindings bindings)
+    private FanOutPlan Plan(AlvoEvent @event, ExtensionBindings bindings, PolicyCatalog catalog)
     {
-        var caller = EnvelopeReading.CallerOf(@event);
+        var caller = CallerOf(@event, catalog);
         var plan = new FanOutPlan();
         foreach (var (handler, condition) in bindings.Selecting(@event))
         {
@@ -66,6 +71,14 @@ internal sealed class DeliveryFanOut(
         }
 
         return plan;
+    }
+
+    /// <summary>The envelope's caller, its tenant roles cut to those the applied descriptor still lets a membership carry.</summary>
+    private static EnvelopeCaller CallerOf(AlvoEvent @event, PolicyCatalog catalog)
+    {
+        var caller = EnvelopeReading.CallerOf(@event);
+        var tenantRoles = EventActor.AssignableTenantRoles(caller.Context.TenantRoles, catalog.Roles, catalog.SelfService);
+        return caller with { Context = caller.Context with { TenantRoles = tenantRoles } };
     }
 
     private void Add(FanOutPlan plan, AlvoEvent @event, BoundHandler handler, HandlerJudgement judgement)

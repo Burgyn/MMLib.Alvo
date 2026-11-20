@@ -31,7 +31,7 @@ public abstract partial class DataApiEngineTests
     public async Task A_relation_rule_scopes_list_get_count_and_patch_over_http_on_every_engine()
     {
         await using var world = await AlvoApiWorld.FromDescriptorAsync(
-            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsBob]);
+            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsBob], engine: Engine);
         var aliceOrder = await CreateRelatedOrderAsync(world, _relationsAlice);
         var bobOrder = await CreateRelatedOrderAsync(world, _relationsBob);
 
@@ -65,7 +65,7 @@ public abstract partial class DataApiEngineTests
     public async Task A_failing_lookup_check_answers_422_with_its_message_and_pointer_on_every_engine()
     {
         await using var world = await AlvoApiWorld.FromDescriptorAsync(
-            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsBob]);
+            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsBob], engine: Engine);
         using var product = await world.SendAsync(HttpMethod.Post, "/api/products", _relationsClerk, body: new JsonObject
         {
             ["active"] = false,
@@ -108,7 +108,7 @@ public abstract partial class DataApiEngineTests
     public async Task A_reference_to_another_tenants_row_answers_exactly_as_one_to_no_row_on_every_engine()
     {
         await using var world = await AlvoApiWorld.FromDescriptorAsync(
-            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsOtherClerk]);
+            "relations-desk.alvo.json", [_relationsClerk, _relationsAlice, _relationsOtherClerk], engine: Engine);
         using var product = await world.SendAsync(HttpMethod.Post, "/api/products", _relationsOtherClerk, body: new JsonObject
         {
             ["active"] = true,

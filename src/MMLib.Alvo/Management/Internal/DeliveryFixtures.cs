@@ -25,7 +25,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// <b>The envelope's attributes stay only on the shape this build writes them</b>, because they identify rather than
 /// describe and a fixture must run as the event's tenant and actor: <c>id</c>, <c>tenantid</c>, <c>authid</c> and
 /// <c>causationid</c> as uuids; <c>correlationid</c> as a uuid or a 32-hex-digit trace id; <c>traceparent</c> in the W3C
-/// format; <c>authclaims</c> while it carries nothing but role names; the remaining standard attributes and Alvo extensions
+/// format; <c>authclaims</c> while it carries nothing but role names (<c>roles</c>, and <c>tenantRoles</c> beside it); the remaining standard attributes and Alvo extensions
 /// as scalars. A data event's <c>subject</c> and <c>partitionkey</c> stay while they are the entity and a uuid; any other
 /// partition key keeps its namespace only when that is the entity or <c>custom.event</c> (the marker
 /// <c>IAlvoEvents.PublishAsync</c> writes), and is otherwise redacted whole. The changed-field names stay while each is a
@@ -51,6 +51,7 @@ internal static class DeliveryFixtures
     private const string OldRecordMember = "old_record";
     private const string ChangedMember = "changed";
     private const string RolesClaim = "roles";
+    private const string TenantRolesClaim = "tenantRoles";
     private const string CustomPartitionMarker = "custom.event";
     private const char NamespaceSeparator = ':';
     private const char SubjectSeparator = '/';
@@ -76,7 +77,7 @@ internal static class DeliveryFixtures
         [AlvoEventAttributes.CausationId] = value => Is(value, IsUuid),
         [AlvoEventAttributes.CorrelationId] = value => Is(value, text => IsUuid(text) || IsHex(text, TraceIdDigits)),
         [AlvoEventAttributes.TraceParent] = value => Is(value, IsTraceParent),
-        [AlvoEventAttributes.AuthClaims] = value => Is(value, IsRolesOnly),
+        [AlvoEventAttributes.AuthClaims] = value => Is(value, IsRoleNamesOnly),
     };
 
     private static readonly JsonDocumentOptions _strict = new() { AllowDuplicateProperties = false };
@@ -277,13 +278,17 @@ internal static class DeliveryFixtures
         value is JsonArray names
         && names.All(name => TextOf(name) is { } text && (allowed is null || allowed.Contains(text)));
 
-    private static bool IsRolesOnly(string claims)
+    /// <summary>
+    /// Whether <paramref name="claims"/> is the shape <c>AlvoEventProvenance</c> writes: a <c>roles</c> name list and, for a
+    /// caller with tenant roles, a <c>tenantRoles</c> name list beside it — nothing else.
+    /// </summary>
+    private static bool IsRoleNamesOnly(string claims)
     {
         try
         {
             return JsonNode.Parse(claims, documentOptions: _strict) is JsonObject root
-                && root.Count == 1
-                && IsNameList(root[RolesClaim], null);
+                && IsNameList(root[RolesClaim], null)
+                && root.All(member => member.Key == RolesClaim || (member.Key == TenantRolesClaim && IsNameList(member.Value, null)));
         }
         catch (JsonException)
         {

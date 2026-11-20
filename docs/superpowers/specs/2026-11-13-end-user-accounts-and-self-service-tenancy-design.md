@@ -92,7 +92,7 @@ for things that cross tenants, one tenant per request. **A does not remove B** �
     "time_entries": {
       "audit": true,
       "fields": { "minutes": { "type": "integer", "required": true } },
-      "access": {
+      "rules": {
         "list":   "created_by == @user.id",
         "get":    "created_by == @user.id",
         "create": "'authenticated' in @user.roles",
@@ -116,7 +116,7 @@ descriptor change, because rows already carry `tenant_id`.
   "entities": {
     "time_entries": {
       "fields": { "minutes": { "type": "integer", "required": true } },
-      "access": { "list": "'authenticated' in @user.roles", "create": "'authenticated' in @user.roles" }
+      "rules": { "list": "'authenticated' in @user.roles", "create": "'authenticated' in @user.roles" }
     }
   }
 }
@@ -173,6 +173,11 @@ operator grants). Requires `tenancy.enabled: true`.
 | `service` | boolean | `false` | A tenant owner may mint tokens that act as the tenant. Requires `selfService`. |
 | `maxLifetimeDays` | integer 1–365 | `90` | The longest expiry a token may ask for. |
 
+**Recorded deviation (S5 plan D8):** apply refuses `service: true` without `tenancy.selfService.createTenants`, not
+only without `selfService` — stricter than the table's "Requires `selfService`", which it implies. A service token acts
+as a *shared* tenant: a personal tenant has exactly one member forever (§6.1), so a token there would outlive nothing a
+personal token does not, and minting one for a personal tenant is refused (409) as well.
+
 **Apply-time refusals** (structured, with a fix): `selfService` without tenancy; `invitations` without
 `createTenants`; an `assignableRoles` entry not declared in `auth.roles` or naming a built-in role;
 `personalTenant.roles`/`creatorRoles` not ⊆ `assignableRoles`; **an `assignableRoles` role named in the
@@ -183,7 +188,12 @@ without `selfService`; an end-user provider without `auth.signUp`.
 `authenticated` for a write is listed — those rows are now writable by anyone who signs up.
 
 `auth.providers` keeps its enum. `google` stops being *unhonoured* (#36) in S2; the others keep the
-warning until their slice; `local` keeps its meaning (the operator store) until §5.7 widens it.
+warning until their slice; `local` keeps its meaning (the operator store) until §5.7 widens it. A host that
+lists `google` but registers no end-user sign-in is warned **at boot** (S2 plan D11): the warning belongs to the
+boot plan, so a runtime apply that adds `google` repeats it only at the next boot.
+
+An entity's per-operation CEL lives under its `rules` key (the schema's name); `access` is the project's
+top-level management block, which §3.1's refusals below refer to.
 
 ## 4. Prior art adopted, and where Alvo deviates
 
@@ -239,6 +249,15 @@ warning until their slice; `local` keeps its meaning (the operator store) until 
   acceptance *Zmena role je auditovaná*). They need the event envelope to carry a tenant (#153) and the
   audit component (#42). This initiative records `created_by`/`joined_at`/`invitation_id` on the rows so
   the later audit has facts to start from; §14 does not claim those two criteria.
+- **D10 — Sessions and refresh tokens are not swept yet** (recorded by the S2 final review). Nothing deletes a
+  `{prefix}_auth_sessions` or `{prefix}_auth_refresh_tokens` row: every sign-in inserts a session, every refresh a token
+  (about 96 rows a day for one session refreshed every 15 minutes), and with `signUp: open` anyone holding a Google
+  account can add rows within the token budget. Session stores ordinarily expire such rows; Alvo does not in S2,
+  because the sweep has a constraint of its own — it must keep a session's `subject_token_id` for at least the
+  ID-token acceptance window (`iat` ≤ 5 min plus 2 min skew), or an ID token becomes replayable once its session row
+  is gone — and it is a bounded background job, not a sign-in concern. Follow-up:
+  [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527) (rotated tokens and expired or revoked sessions past the
+  grace window).
 
 ## 5. Accounts and sessions
 
@@ -443,9 +462,24 @@ Where they count:
 
 | Evaluated where | `@user.roles` is |
 |---|---|
-| a rule of a **`tenancy: scoped`** entity (and a relation term whose related entity is scoped) | project roles ∪ tenant roles |
-| a rule of a **`tenancy: global`** entity (and a relation term whose related entity is global) | project roles only |
+| a rule of a **`tenancy: scoped`** entity, and every relation term reached from it **while every entity on the path is scoped** | project roles ∪ tenant roles |
+| a rule of a **`tenancy: global`** entity, and **everything reached from it** — including a relation term into a scoped entity and that entity's own `list` rule bound into it | project roles only |
+| a scoped entity's relation term into a global entity, and anything reached through it | project roles only |
 | a Management `access` level | project roles only |
+
+**The rule in one line: a tenant role counts only while every entity on the decision's path is scoped.** A
+decision about a global entity must never depend on a tenant role, not even transitively: otherwise a global
+`regions` with `update: "jobs.exists(j, true)"` and a scoped `jobs` whose `list` admits `'dispatcher' in
+@user.roles` would let anyone who creates a tenant and holds `dispatcher` there update shared reference data.
+(Found by the S1 task review; the first version of this table folded by the *related* entity alone.)
+
+**What this rule governs, and what it does not.** It governs every *authorization decision*: entity rules, relation
+terms, masks, lookup checks, state-machine transitions, conditions evaluated as the caller, and Management access.
+It does **not** govern an automation action the app author declared to run **as `System`**: a scoped entity's
+after-hook whose condition admits a tenant role may still fire a `System` action against a global entity, because
+running as `System` is the author's explicit, reviewed escalation (spec §3.3 of the product spec), not the caller's
+authority leaking. The guides say so next to the hook docs, so an author who writes such a hook knows a tenant
+member can trigger it.
 
 Rule authors still write `'dispatcher' in @user.roles` — one spelling. The policy cache key already
 separates by entity, and role literals fold per caller at render, so the split is an evaluation-time
@@ -520,7 +554,24 @@ truth for *people*, not a precondition for a `tenant_id` value.
 **`IAlvoTenantCatalog`:** a default over the registry is registered **only when `selfService` is on and
 the host registered none** — so the existing "an `EachTenant` schedule without a catalog refuses boot"
 check keeps firing everywhere else. Its documentation states plainly that it lists self-service tenants
-only; a deployment mixing API-key tenants with self-service ones registers its own catalog.
+only — and of those only the ones the descriptor honours (personal tenants only while `personalTenant` is on); a
+deployment mixing API-key tenants with self-service ones registers its own catalog. Under an open sign-up with
+`personalTenant` every account adds one run to each `EachTenant` tick — a cost, not a wall breach, recorded in
+`docs/architecture/accounts.md` (D13).
+
+Where the refusal fires moved, and that is a **recorded deviation** (S3 Task 9): an `EachTenant`
+schedule on a host with a registry and no catalog of its own is now judged *per descriptor*, not in the
+boot's catalog-free pass, because a `selfService` descriptor cures it — and every EF provider registers
+the registry, so the registry's presence says nothing about intent. Concretely: (a) a relational host
+with no descriptor at all now boots, the schedule unbound; (b) its first apply without `selfService`
+only warns, as for any extension that was never bound; (c) the next restart then stands down not-ready
+on that stored descriptor; (d) a host booting from a stored descriptor that cannot bind the schedule
+stands down not-ready instead of exiting — the existing treatment of every per-descriptor extension
+problem. A file (GitOps) boot still exits with the same locator and fix, an apply that drops
+`selfService` while such a schedule is bound is refused as an unbinding, and a host with no registry
+still refuses at the catalog-free pass. The reason: keeping the refusal in the catalog-free pass would
+make a dashboard-first self-service host with such a schedule unbootable — its first boot has no
+descriptor, and the descriptor that cures it can only arrive after the boot.
 
 ## 7. Tokens for integrators
 
@@ -547,6 +598,12 @@ keys. Key ids are prefixed `alvo_pat_…` / `alvo_svc_…` for secret scanning. 
 compatibly with its kind and minter; a personal token stores no roles, and its resolution goes through
 membership resolution rather than `RoleNames`.
 
+**Recorded deviation (S5 plan D10):** a service token also dies when its minter's **account is disabled** — beyond the
+table's "removed or demoted". A banned owner who kept a service token's secret would otherwise keep acting as the tenant
+(§16 B4's case). The ban revokes every token the account minted in its own transaction, and enabling the account
+revives none. Every death, of either kind, is a revocation stamp written in the transaction that kills its reason, so
+a person invited back does not get their old tokens back.
+
 ### 7.2 The self-service routes
 
 | Route | Who |
@@ -557,6 +614,10 @@ membership resolution rather than `RoleNames`.
 
 `expiresAt` is required and ≤ `maxLifetimeDays`. The secret is answered once and stored as its SHA-256.
 Scopes naming an entity the descriptor lacks are refused with the list of entities.
+
+**Recorded deviation (S5 plan D1):** the routes are mapped under the sign-in prefix, `{authPrefix}/tokens` (default
+`/auth/v1/tokens`), not under `{prefix}` — as S3 and S4 did for §6.3's routes. `/api/tokens` would collide with an
+entity named `tokens`, and minting needs a person's session, which exists only where sign-in is mapped.
 
 ### 7.3 Abuse limits and CORS
 
@@ -666,7 +727,11 @@ only for a slice that changes routes or the demo.
 ```
 
 An `http://` authority is refused at startup unless that provider sets `AllowHttpMetadata: true`, which
-logs a warning on every start — it exists for the end-to-end stack's test issuer only.
+logs a warning on every start — it exists for the end-to-end stack's test issuer only. **`AllowHttpMetadata` itself
+is refused at startup outside the Development environment**, exactly as an unset `Issuer` is, with a message naming
+the setting and why (S2 plan-guard ruling): a public switch that turns a security control off must not be reachable
+from a production configuration by one stray key. Only the accounts package reads the host environment, so the
+end-to-end stack (§12) runs Development without changing any other behaviour.
 
 ## 12. The demo: field-service gets self-service
 
@@ -680,7 +745,7 @@ existing test**: API keys keep working beside sign-in, which is itself a propert
 - The compose stack gains a **test OIDC issuer**: the WireMock `sink` serves a discovery document and a
   static JWKS; the TeaPie suite mints ID tokens in a `.csx` script with the matching test private key
   (committed under `test/`, labelled test-only). Alvo's Google provider points at it through `Authority`
-  + `AllowHttpMetadata`.
+  + `AllowHttpMetadata`, so the stack's Alvo runs in the Development environment (§11.2).
 - A new TeaPie collection, **`170-SelfService`**: a dispatcher signs in → creates *Acme Repairs* →
   invites a technician → the technician accepts and sees only the work orders assigned to them → the
   dispatcher mints a service token for billing, which reads completed jobs → the dispatcher removes the
@@ -689,6 +754,27 @@ existing test**: API keys keep working beside sign-in, which is itself a propert
   in B and on the global `regions`; a self-made dispatcher cannot write `regions`; expired/revoked/used-up
   invitations answering the same 404; a personal token dying with its owner's membership; a token trying
   to mint a token; a personal token refused by the Management API.
+
+**Recorded decisions (S6 plan, `2026-11-13-accounts-s6-demo-docs.md`).**
+- **D1 — sign-in lives on the standalone stack only.** The embedded sample (`samples/MMLib.Alvo.Samples.FieldService`)
+  serves the same descriptor with no `AddAlvoAccounts`: it logs the boot warning and behaves as before. It maps no
+  `.WithAlvoCaller()` endpoint — dispatch is a mapped command, which takes a token within its entity's scopes — so
+  nothing there is promised to personal or service tokens either (#536 is the general rule).
+- **D2 — `regions` is not touched.** Its rules already name only `admin` for a create and admit no update or delete,
+  and other collections pin that shape; so "a self-made dispatcher cannot write `regions`" is pinned as a `403` beside
+  the admin's `201`. The descriptor gains exactly the keys above, keeps `local`, and has **no `personalTenant`**: a
+  field-service person works in a company, so a request naming no tenant acts in none.
+- **D4 — deviation from "the matching test private key (committed under `test/`)" and the static JWKS above.** No
+  private key is committed. The suite makes an RSA key on the machine that runs it (kept under `$TMPDIR`, `kid` = its
+  RFC 7638 thumbprint) and registers the public half in the sink through WireMock's admin API at the start of every
+  run; only the discovery document is a committed mapping. Alvo refetches a provider's key set for an unknown `kid` at
+  most once per five minutes, which is why the key is kept per machine rather than made per run. A public repository
+  thus holds no private key at all, and a hand-started stack still signs people in once a run has published the key.
+- **D5 — the stack runs Development with `Alvo:Accounts:Issuer` unset**, so tokens name the URL a request reached;
+  only the accounts package reads the environment (§11.2).
+- **D7 — wider per-IP rate budgets on the demo stack:** `Token` 120, `Create` 30, `Invitations` 120 (the plan said 60;
+  one `170-SelfService` run spends about 31 invitation calls). The limits themselves are pinned in process. The load
+  stack resets all of the demo's sign-in configuration, so load still measures the host its baselines describe.
 
 ## 13. Documentation
 
@@ -707,6 +793,15 @@ working thing, then explains why it behaves as it does:
 - **`docs/architecture/accounts.md`** — the contributor view: tables, the resolution pipeline, role
   provenance, the invariants and the tests that hold them, the deviations of §4.
 - `examples/field-service/README.md` gains a *Self-service* section; `docs/PLAN.md` records the initiative.
+
+**Recorded decisions (S6 plan).**
+- **D12 — the guides' exchanges are hand-written, and held three ways.** Capturing a sign-in would need a test issuer
+  inside DocsGen, a shipped tool. Instead every descriptor a guide shows is a snippet `DocsSnippetTests` applies; a fact
+  (`AccountsReferenceTests`) checks every `METHOD /auth/v1/…` a guide names against the generated reference; and each
+  worked flow names the `170-SelfService` case that runs it against the real container.
+- **D13 — the routes' reference comes from OpenAPI.** DocsGen boots a second in-process host over the field-service
+  descriptor with Google configured (a placeholder client id, an `https` issuer, no network) and publishes only the
+  paths under `/auth/v1`, as `reference/accounts-api`, beside the Data API's.
 
 ## 14. Acceptance criteria
 

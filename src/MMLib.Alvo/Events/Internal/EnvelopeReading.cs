@@ -49,10 +49,12 @@ internal static class EnvelopeReading
 
     /// <summary>The caller one event's conditions resolve against: the credential, tenant and roles the envelope records.</summary>
     /// <remarks>
-    /// What the envelope does not record is left absent — the all-zero id, no tenant, only <see cref="Role.Anon"/> —
-    /// and never borrowed from the dispatcher's own <see cref="AlvoContext.System"/> identity. Each subscriber's gate
-    /// keeps a condition reading an absent value from being decided against it. <c>authclaims</c> is parsed once here,
-    /// and whether it named any role travels with the context.
+    /// What the envelope does not record is left absent — the all-zero id, no tenant, only <see cref="Role.Anon"/>, no
+    /// tenant role — and never borrowed from the dispatcher's own <see cref="AlvoContext.System"/> identity. Each
+    /// subscriber's gate keeps a condition reading an absent value from being decided against it. <c>authclaims</c> is
+    /// parsed once here, and whether it named any role travels with the context. Tenant roles are read only when the
+    /// envelope names both an identity and a tenant, as <see cref="EventActor"/> reads them, and a built-in named among
+    /// them is dropped: it is never a tenant role, and a stored envelope must not make the dispatch throw.
     /// </remarks>
     internal static EnvelopeCaller CallerOf(AlvoEvent @event)
     {
@@ -60,8 +62,19 @@ internal static class EnvelopeReading
         TenantId? tenant = TenantId.TryParse(@event.TenantId, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
         var names = AlvoEventProvenance.RolesIn(@event.AuthClaims);
         var roles = names is { Count: > 0 } ? RoleCatalog.Create(names).Resolve(names) : null;
+        var context = new AlvoContext { User = actor, Roles = roles ?? _noRoles, Tenant = tenant };
+        var tenanted = tenant is null || actor == default ? context : context with { TenantRoles = TenantRolesOf(@event) };
 
-        return new EnvelopeCaller(new AlvoContext { User = actor, Roles = roles ?? _noRoles, Tenant = tenant }, roles is not null);
+        return new EnvelopeCaller(tenanted, roles is not null);
+    }
+
+    private static IReadOnlySet<Role> TenantRolesOf(AlvoEvent @event)
+    {
+        var names = (AlvoEventProvenance.TenantRolesIn(@event.AuthClaims) ?? [])
+            .Where(name => !RoleCatalog.BuiltInOnly.TryGet(name, out _))
+            .ToList();
+
+        return RoleCatalog.Create(names).Resolve(names);
     }
 
     /// <summary>

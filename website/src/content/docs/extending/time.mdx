@@ -94,7 +94,10 @@ with a dead `chain-depth-exceeded` delivery, as an event loop does. `ScheduleAsy
 - **`AlvoJobContext`** says which occurrence this is (`ScheduledFor`), which tenant (`Tenant`), which attempt, and gives
   the run a data session as the system in that tenant (`Data`).
 - **Per tenant.** `options.Scope = AlvoScheduleScope.EachTenant` runs one run per tenant, each reading only its own
-  rows. Alvo does not know your tenants: register an `IAlvoTenantCatalog` that lists them, or the host refuses to start.
+  rows. Something has to list the tenants. When the descriptor declares `tenancy.selfService`, Alvo lists the
+  self-service tenants it honours from its own registry. Otherwise, or when you also serve tenants that API keys
+  created, register an `IAlvoTenantCatalog` that lists them. Yours always wins. With neither, the host refuses to start
+  ([Tenants, members and invitations](/guides/tenants-and-invitations/)).
 - **Run now.** The dashboard's *Run now*, or `POST …/schedules/{id}/run` (the `developer` level), starts one run
   outside the cron; the next occurrence stays where it was. On `EachTenant` it starts one run per tenant, and answers
   409 when the catalog lists no tenants.
@@ -116,9 +119,10 @@ schedule pump. A rollback below revision 4 neither undoes it nor runs it again o
 It starts at the first revision Alvo reads at or after 4 — a revision *number* reached, not a shape: if a rollback
 lands first, it runs over the older shape, so check for the fields you need.
 
-When that revision's descriptor has a tenant-scoped entity, a migration runs **once per tenant** your
-`IAlvoTenantCatalog` lists, each as the system in that tenant, so no run reads another tenant's rows. Without a catalog
-the host refuses to start while such a migration has not yet started. A tenant created after the migration started
+When that revision's descriptor has a tenant-scoped entity, a migration runs **once per tenant** the tenant list
+names: your `IAlvoTenantCatalog`, or, without one, the self-service registry when the descriptor declares
+`tenancy.selfService`. Each run is the system in that tenant, so no run reads another tenant's rows. With neither, the
+host refuses to start while such a migration has not yet started. A tenant created after the migration started
 does not get it — make the fix-up part of creating a tenant if it must. With no tenants at all the migration counts as
 done, and the log says so.
 

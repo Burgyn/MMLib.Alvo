@@ -20,7 +20,9 @@
 #       and six multi-step journeys — and, as the advanced demo, the work-order state machine, a
 #       gapless sequence, CHECK validations, a partial unique index, the visits calendar (exclusion,
 #       lookup check, rollup, relation rule) and a completion webhook to a WireMock billing sink that
-#       shares the alvo container's network namespace (so its http://localhost URL is loopback).
+#       shares the alvo container's network namespace (so its http://localhost URL is loopback). And sign-in:
+#       people sign in with an ID token from a test OpenID issuer the same sink serves (Google's preset under
+#       another authority, Development only), found tenants, invite and mint tokens (170-SelfService).
 #
 #   docker-compose.field-service-host.yml (:8082) — does the SAME descriptor plus host code behave as the
 #       sample claims? samples/MMLib.Alvo.Samples.FieldService, the embedded host over the same file: the
@@ -70,6 +72,9 @@ export ALVO_FS_ADMIN_SECRET="${ALVO_FS_ADMIN_SECRET:-$(openssl rand -hex 16)}"
 # The technician app's Standard Webhooks secret: `whsec_` + 32 random bytes in base64, the form the receiver requires
 # (at least 24 bytes). The suite signs its deliveries with the same value.
 export ALVO_FS_TECH_APP_SECRET="${ALVO_FS_TECH_APP_SECRET:-whsec_$(openssl rand -base64 32)}"
+# The key that seals what the field-service stack's sign-in stores at rest (32 random bytes in base64). Compose
+# hands it to the container as a secret file; TeaPie never needs it.
+export ALVO_FS_SECRETS_KEY="${ALVO_FS_SECRETS_KEY:-$(openssl rand -base64 32)}"
 
 # The field-service demo's non-secret constants — tenant ids, user ids, the published port. Sourced
 # rather than restated: compose interpolates the same file, so the environment TeaPie asserts
@@ -92,6 +97,7 @@ write_teapie_environment() {
 
     "fsBaseUrl": "http://localhost:$ALVO_FS_PORT",
     "fsSinkUrl": "http://localhost:$ALVO_FS_SINK_PORT",
+    "fsGoogleClientId": "$ALVO_FS_GOOGLE_CLIENT_ID",
 
     "fshBaseUrl": "http://localhost:$ALVO_FSH_PORT",
     "fshSinkUrl": "http://localhost:$ALVO_FSH_SINK_PORT",
@@ -238,17 +244,22 @@ assert_the_hidden_value_reached_postgresql() {
 # Tenant isolation, asserted at the row level rather than at the API's. The suite proves tenant B is
 # answered 404; this proves the rows really are partitioned by `tenant_id` in the table, so a driver
 # that answered correctly while storing everything under one discriminator would be caught.
+#
+# Counted over the two SEEDED tenants only: 170-SelfService founds tenants of its own (Acme Repairs, with jobs), whose
+# ids are minted per run, so "every tenant_id in the table" is no longer a number this script can know. Both seeded
+# tenants hold work orders under their own id, or the count is not 2 — one discriminator for everything answers 1 or 0.
 assert_the_tenants_are_partitioned_in_postgresql() {
-  echo "[e2e] the two tenants' rows carry two distinct tenant_id values in PostgreSQL"
+  echo "[e2e] the two seeded tenants' rows carry their two distinct tenant_id values in PostgreSQL"
   local tenants
   tenants="$(docker compose "${FIELD_SERVICE_COMPOSE[@]}" exec -T postgres \
     psql -U alvo -d alvo_field_service -v ON_ERROR_STOP=1 -tAc \
-    "select count(distinct tenant_id) from work_orders" | tr -d '[:space:]')"
+    "select count(distinct tenant_id) from work_orders where tenant_id in ('$ALVO_FS_TENANT_NORTH', '$ALVO_FS_TENANT_SOUTH')" \
+    | tr -d '[:space:]')"
   if [ "$tenants" != "2" ]; then
-    echo "[e2e] expected work orders in exactly 2 tenants, found '${tenants}'." >&2
+    echo "[e2e] expected work orders in both seeded tenants, found '${tenants}'." >&2
     exit 1
   fi
-  echo "[e2e] distinct tenant_id values in work_orders: $tenants"
+  echo "[e2e] distinct seeded tenant_id values in work_orders: $tenants"
 }
 
 write_teapie_environment

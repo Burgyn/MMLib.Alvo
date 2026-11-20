@@ -971,8 +971,141 @@ one document-wide list of every classification Alvo can mint, not a per-operatio
   whole reason this guard is needed. The tenant header buys an attacker nothing on its own, and is covered
   because it is the same one-variable mistake in the same section. `Authorization` is deliberately *not*
   refused: a browser re-sends it only to an origin where the user already completed an HTTP authentication
-  challenge, it is not CORS-safelisted, and it is a legitimate place for an API key. A host that wants its
+  challenge, it is not CORS-safelisted, and it is a legitimate place for an API key. Alvo still ignores that header
+  unless a person resolver is registered, and then only when it is not the API-key header; the rules are in
+  [How a request becomes a caller](#how-a-request-becomes-a-caller-one-credential-reading). A host that wants its
   own users on the generated routes wants **#210**, not any of this.
+
+## How a request becomes a caller: one credential reading
+
+**The guarantee.** A host that runs its own authentication keeps working. Alvo reads the `Authorization` header only
+when a person resolver is registered — the `IAlvoContextResolver` `MMLib.Alvo.Accounts` registers in `AddAlvoAccounts`,
+under the core's internal key `CallerResolution.PersonResolverKey` — and then only for the `Bearer` scheme. The key is
+deliberately not published: a host-supplied person resolver is #210's design, and a string a host could register under
+today would be a contract nobody designed (S2 decision; `AlvoIdentity.ResolverKey` is public because a host does
+consume it). Without one, every `Authorization` value, `Bearer` included, is left alone for the host's
+own `JwtBearer` or a Basic-auth proxy, exactly as before. The Management API never reads it at all.
+
+**Once `AddAlvoAccounts` is called, Bearer is real.** A Bearer value on the Data API and the commands is then an Alvo
+access token and nothing else: the person resolver validates it, reads its session once, and answers either a person or
+`401 invalid_token` — never "ignored", so a host that runs its own `JwtBearer` scheme on the same routes cannot also
+add Alvo's sign-in (it keeps its scheme by not calling `AddAlvoAccounts`; a host-federated person resolver is #210). The
+same call refuses to start beside `Alvo:Auth:HeaderName = Authorization`, because the two channels cannot both own
+one header. What happens after the token is read — the pipeline, the tables, the invariants — is
+[`accounts.md`](./accounts.md); `AccountsEngineFacts` pins it on both engines, and
+`AccountsEngineFacts.An_api_key_beside_sign_in_behaves_exactly_as_before` pins that API keys and a host's other
+`Authorization` schemes do not notice.
+
+**Why one reading.** Three places turn a request into an `AlvoContext`: the Data API filter (`AlvoContextFilter`), the
+command gate (`CallerGate`) and the Management filter (`ManagementCallerFilter`). When each reads headers for itself,
+they drift, and the drift is a security bug: a credential one of them honours and another ignores is a credential that
+works on one surface and silently downgrades to anonymous on the next. All three now call `CallerResolution`, which
+reads the request once into a `PresentedCredential` and admits it by channel. The reading is pure and tested on its own
+(`CredentialReadingTests`); the surface is a parameter (`Data` for the Data API, commands and `WithAlvoCaller`
+endpoints; `Management`), not three copies.
+
+**What is presented, and what happens**
+
+| Presented | Data API and commands | Management API |
+|---|---|---|
+| nothing | anonymous, as today | anonymous, as today |
+| `X-Alvo-Api-Key` | the API-key resolver: a configured key as today, or a persisted personal or service token (accounts S5) | the API-key resolver; a personal or service token (`alvo_pat_`/`alvo_svc_`) that resolves is then refused **403** `forbidden` (S5 D9) |
+| `Authorization: Bearer ...` and a person resolver is registered | the person resolver | **ignored** |
+| `Authorization` with another scheme, or Bearer with no person resolver registered | **ignored, exactly as today** | ignored |
+| `X-Alvo-Api-Key` and a Bearer token Alvo owns, well-formed or malformed | **401**, ambiguous; never settled by precedence | API key as above |
+
+**The rules the table leaves open**
+
+- `Authorization` is read only when `Alvo:Auth:HeaderName` is *not* `Authorization` (compared ignoring case). Naming it
+  as the API-key header is allowed in a host without accounts, and the API-key channel then owns it exactly as before.
+  `AddAlvoAccounts` refuses that combination at startup, naming `Alvo:Auth:HeaderName`, because the two channels cannot
+  both own one header.
+- The scheme is the text before the first space, compared ignoring case (RFC 7235 section 2.1). Any scheme but `Bearer`
+  is ignored.
+- A Bearer value is malformed when its token is empty or contains whitespace, or when more than one `Authorization`
+  line arrives and any of them is Bearer. That is a 401, never "take the first": it is the repeated-header rule the
+  API key already follows.
+- "A person resolver is registered" is read once, from the container's keyed-service lookup; a container that cannot
+  answer counts as *not registered*, which is today's behaviour. Only a registration under exactly the person-resolver
+  key counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
+  register, and a container that says yes to that one holds a catch-all, not a person resolver — the channel stays
+  closed. The resolver itself is resolved per request, so a scoped one works.
+- The tenant header is passed to the person resolver as received, as it is to the API-key resolver. Validating it is the
+  resolver's job.
+
+**A person's tenant header selects among their memberships** (spec D8; `accounts.md`, *How a person acts in a tenant*).
+An API key's header can only *confirm* the one tenant the key was issued for. A person may belong to many tenants, so
+for them the header *chooses*: it names the tenant this request acts in, and the person resolver checks, in the same
+store read as the session, that the person is a member of it under the applied `tenancy.selfService`. No header means
+the person's personal tenant when the descriptor gives one, else no tenant (global entities and level 1 only). A
+header naming anything the person is not a member of — another person's tenant, an unknown or unparsable id, or any id
+at all while the descriptor has no `selfService` — refuses the **whole principal** with `401 Bearer
+error="invalid_token"`: never a principal without a tenant, which would still reach every global entity. The tenant's
+roles come from the membership, recomputed from the applied descriptor on every request, and count only on that
+tenant's scoped rows.
+
+**`X-Alvo-Api-Key` also carries persisted app tokens** (accounts S5; `accounts.md`, *Tokens for integrators*). A key
+id that starts `alvo_pat_` (a personal token) or `alvo_svc_` (a service token) is looked up in the `{prefix}_api_keys`
+registry; every other id is a configured dev key, as before — both prefixes are reserved, so a dev key cannot use them
+and a minted token cannot shadow a configured key. A personal token acts as the person who minted it, with the tenant
+roles of their current membership read on every request; a service token acts as itself, with fixed tenant roles. **The
+tenant header still only confirms**: a token's tenant is fixed when it is minted, so no header acts in it, and a header
+naming any other tenant — even one the same person belongs to — refuses the whole principal with the API key's 401.
+Whatever refuses a token — a wrong secret, its expiry, a revocation, a kind the descriptor switched off, an ended
+membership — the answer is that same 401. A resolved token is held to its scopes on the Data API and on a command's
+entity; a host's `.WithAlvoCaller()` endpoint, which shares the `Data` surface but names no entity, refuses it 403
+`forbidden` (accounts S5; scope opt-in is #536).
+
+**The three 401s.** A Bearer the resolver refuses answers `WWW-Authenticate: Bearer error="invalid_token"`. A malformed
+one answers `Bearer error="invalid_request"`. An ambiguous request answers with both challenges (API key and Bearer).
+The problem `type` stays `unauthenticated` throughout.
+
+**Deviation from RFC 6750 section 3.1, on purpose.** The RFC answers `invalid_request` with **400**. Alvo answers 401.
+Every credential that was *presented but cannot be used* already gets one diagnosis on all three sites, and agents
+branch on it; a Bearer that is syntactically broken is the same situation as an API key that is unknown, and splitting
+them across two statuses would make the client tell them apart for no gain.
+
+## CORS and rate limits (spec 2026-11-13 §7.3, S2 D3)
+
+Both live in the core and both are **endpoint filters Alvo attaches to its own routes**, not middleware and not
+`RequireCors` / `RequireRateLimiting` metadata. Metadata only works with `UseCors()` / `UseRateLimiter()` in the host's
+pipeline after routing — `EndpointMiddleware` even throws on CORS metadata without it — and an embedded host must get
+both without adding a pipeline step. (Spec §7.3 says "named policies"; this is the deliberate deviation, for that
+reason.)
+
+**CORS** (`Alvo:Api:Cors:Origins`, `AlvoCors`). The framework's own `ICorsService` evaluates a `CorsPolicy` object Alvo
+holds — never a registered policy name, so no host policy can collide with it — from the **first** filter on every
+generated Data API endpoint and every sign-in route, so a 401, 403 or 429 carries the headers too. Preflights are
+answered by one `OPTIONS {prefix}/{**path}` catch-all per Alvo route group (the Data API's `RoutePrefix`, the sign-in
+`Prefix`), excluded from the OpenAPI document and **mapped only when origins are configured**: none of Alvo's routes
+accepts a CORS preflight in routing's sense, so a preflight is routed as a plain `OPTIONS` and reaches the catch-all,
+and a host without origins answers it 405 exactly as before. No origins means no CORS header at all.
+
+- Origins are absolute `http`/`https` URIs with no path, query or fragment, compared as scheme + host + port; `*` is
+  refused at startup — credentials are never allowed (Alvo's credentials travel in headers), and a wildcard would let
+  any site's script read answers.
+- Allowed methods `GET POST PUT PATCH DELETE`; allowed request headers `Authorization`, `Content-Type`, the configured
+  API-key and tenant headers, `Idempotency-Key`, `If-Match`, `If-None-Match`, `Prefer`; exposed `ETag`, `Location`,
+  `WWW-Authenticate`, `Retry-After`, `Preference-Applied`; preflight max age 10 minutes. `If-None-Match`, `Prefer` and
+  `Preference-Applied` go beyond the S2 plan's list: the Data API reads and answers them, and a browser client could not
+  make a conditional read or ask for a count without them.
+- With origins configured, **every** answer of a covered route carries `Vary: Origin` — with or without an `Origin`,
+  allowed or not, and with a single configured origin, where the framework's evaluator adds none. The auth metadata and
+  the JWKS are `public, max-age=300`, and without it a shared cache would hand a server-side fetch's answer (no
+  `Access-Control-Allow-Origin`) to a browser app. Without origins nothing is added.
+- **Not covered:** host-mapped commands (`MapAlvoCommand`). The host picks their path, so there is no Alvo group to own
+  a preflight; a host that serves commands to a browser on another origin adds its own CORS for them. The Management
+  API is not covered either — it is an operator surface, not a browser app's.
+
+**Rate limits** (`Alvo:Api:RateLimits`, `AlvoRateLimits`). A `PartitionedRateLimiter<HttpContext>` per budget, charged
+by a filter on the route (the `AlvoAdminCredentialLimit` precedent): fixed one-minute windows, no queue, partitioned by
+`Connection.RemoteIpAddress` — IPv4-mapped as IPv4, IPv6 by its `/64`, no address as one shared partition. Over budget is
+429 `rate-limited` with `Retry-After` in whole seconds (60 when the limiter does not say). S2 charges the token endpoint
+(`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3 charges
+`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 charges
+`Invitations` (default 20/min) on the five invitation routes, in the same order — the exchange keeps `Token` even with
+an `invitation_code`; S5 charges token minting, `POST /auth/v1/tokens`, to the same `Create` budget, so tenant
+creation and minting share one per-client budget (listing and revoking tokens are not charged). A host behind a proxy configures forwarded headers so the address is the client's.
 
 ## The status and `type`-slug catalogue
 
@@ -1437,7 +1570,10 @@ would fire on every descriptor ever applied. Recorded on **#38**. It is, however
 quiet — the one deliberate split between the capability report and the apply warning, recorded in
 `CapabilityReport`. Beside it, two keys inside honoured blocks are warned at apply as qualified slots
 (`UnhonouredSubsystems.WithinBlocks`): `entity.storage` for any `storage: dynamic` entity, which the mapper
-drops (F7, #41), and `auth.providers` for any provider other than `local` (#36).
+drops (F7, #41), and `auth.providers` for any provider other than `local` and `google` (#36). `google` is honoured
+since S2 ([`accounts.md`](./accounts.md)); whether *this host* registered sign-in is a host fact, not a descriptor
+one, so a descriptor listing `google` on a host without `AddAlvoAccounts` gets a separate boot warning instead (S2 plan
+D11, boot-only).
 
 ### Declaring a framework-managed column is refused, and it costs one capability
 

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "time-tracker",
+  "description": "Level 1 with an access block naming two management levels by role, so disabling an account is measured against an administrator the descriptor admits and a developer it does not admit that far.",
+  "auth": {
+    "providers": [
+      "google"
+    ],
+    "roles": [
+      "operator",
+      "developer"
+    ],
+    "signUp": {
+      "mode": "open"
+    }
+  },
+  "access": {
+    "developer": "'developer' in @user.roles",
+    "admin": "'operator' in @user.roles"
+  },
+  "entities": {
+    "time_entries": {
+      "audit": true,
+      "fields": {
+        "minutes": {
+          "type": "integer",
+          "required": true
+        }
+      },
+      "rules": {
+        "list": "created_by == @user.id",
+        "get": "created_by == @user.id",
+        "create": "'authenticated' in @user.roles",
+        "update": "created_by == @user.id",
+        "delete": "created_by == @user.id"
+      }
+    }
+  }
+}

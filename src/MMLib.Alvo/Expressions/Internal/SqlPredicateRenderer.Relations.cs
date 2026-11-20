@@ -87,7 +87,7 @@ internal sealed partial class SqlPredicateRenderer
     {
         if (predicate is not null)
         {
-            terms.Add(RenderPredicate(predicate.Root, inner with { Entity = predicate.Entity }).Sql);
+            terms.Add(RenderPredicate(predicate.Root, inner.At(predicate.Entity)).Sql);
         }
     }
 
@@ -154,10 +154,23 @@ internal sealed partial class SqlPredicateRenderer
 
         public RelationSql? Relations { get; init; }
 
+        /// <summary>
+        /// Gets whether every entity on this scope's path — the top-level one, each related one a relation term entered,
+        /// and this scope's — is scoped: the one condition under which a tenant role folds (<see cref="RoleProvenance"/>).
+        /// </summary>
+        public bool EveryEntityScoped { get; init; }
+
         private AliasCounter Aliases { get; init; } = new();
 
         public static RenderScope Top(EntitySchema entity, AlvoContext? context, IFieldSqlRenderer fields, ILiteralSink sink) =>
-            new(entity, context, fields, sink);
+            new(entity, context, fields, sink) { EveryEntityScoped = RoleProvenance.StillScoped(true, entity.Tenancy) };
+
+        /// <summary>This scope over <paramref name="entity"/>, which joins its path.</summary>
+        public RenderScope At(EntitySchema entity) => this with
+        {
+            Entity = entity,
+            EveryEntityScoped = RoleProvenance.StillScoped(EveryEntityScoped, entity.Tenancy),
+        };
 
         public string NextAlias() => AliasPrefix + Aliases.Next();
 
@@ -168,9 +181,8 @@ internal sealed partial class SqlPredicateRenderer
         public RowSource QualifiedRow => Row is RowSource.Unqualified ? Relations!.Outer : Row;
 
         /// <summary>The scope of a related row under <paramref name="alias"/>; its outer row is this scope's, qualified.</summary>
-        public RenderScope Into(EntitySchema related, string alias) => this with
+        public RenderScope Into(EntitySchema related, string alias) => At(related) with
         {
-            Entity = related,
             Row = new RowSource.Columns(alias),
             OuterEntity = Entity,
             Outer = QualifiedRow,

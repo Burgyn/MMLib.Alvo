@@ -5,6 +5,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Management.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Tests.Expressions;
 using MMLib.Alvo.Tests.Rules;
 using NSubstitute;
 
@@ -184,6 +185,45 @@ public class ManagementAccessEvaluatorTests
             ManagementLevel.Admin, "an identified caller the port does recognise is still lifted");
     }
 
+    /// <summary>
+    /// <b>A tenant role never unlocks Management</b> (spec §6.2, B1): a role a person gives themselves by creating a tenant
+    /// counts only in a scoped entity's rules, never in an <c>access</c> level — even one naming that very role. The same
+    /// role held as a project role is the control.
+    /// </summary>
+    [Fact]
+    public void A_tenant_role_matches_no_access_level()
+    {
+        var levels = Levels(
+            admin: "'manager' in @user.roles",
+            developer: "'manager' in @user.roles",
+            viewer: "'manager' in @user.roles");
+
+        Resolve(TenantManager(), levels).ShouldBe(ManagementLevel.None);
+        Resolve(Caller("manager"), levels).ShouldBe(ManagementLevel.Admin);
+    }
+
+    /// <summary>
+    /// <b>A host's own <see cref="IPredicateEvaluator"/> never sees a tenant role.</b> The port is public and host-replaceable,
+    /// so the access scope having no tenancy is a guarantee of Alvo's own evaluator only; the gate strips
+    /// <see cref="AlvoContext.TenantRoles"/> before any evaluator is asked, and keeps everything else the caller is.
+    /// </summary>
+    [Fact]
+    public void A_host_evaluator_never_receives_tenant_roles()
+    {
+        var host = Substitute.For<IPredicateEvaluator>();
+        host.Evaluate(default!, default!, default, default!).ReturnsForAnyArgs(true);
+        var caller = TenantManager();
+
+        ManagementCallers.Evaluator(ManagementCallers.Primed(Levels(admin: "true", developer: "true", viewer: "true")), host)
+            .Resolve(caller)
+            .ShouldBe(ManagementLevel.Admin);
+
+        var received = host.ReceivedCalls().Select(call => call.GetArguments()[3].ShouldBeOfType<AlvoContext>()).ToList();
+        received.Count.ShouldBe(3);
+        received.ShouldAllBe(context => context.TenantRoles.Count == 0
+            && context.User == caller.User && context.Roles == caller.Roles && context.Tenant == caller.Tenant);
+    }
+
     // ---- Allows, the layer where levels DO form a hierarchy -----------------------------------
 
     /// <summary>
@@ -261,6 +301,13 @@ public class ManagementAccessEvaluatorTests
     // ---- fixtures ------------------------------------------------------------------------------
 
     private static AlvoContext Caller(params string[] roleNames) => ManagementCallers.Caller(roleNames);
+
+    /// <summary>An authenticated Acme caller holding <c>manager</c> as a tenant role only.</summary>
+    private static AlvoContext TenantManager() => Caller() with
+    {
+        Tenant = CelFixtures.AcmeTenant,
+        TenantRoles = RoleCatalog.Create(["manager"]).Resolve(["manager"]),
+    };
 
     private static Access Levels(string? admin = null, string? developer = null, string? viewer = null) =>
         ManagementCallers.Levels(admin, developer, viewer);

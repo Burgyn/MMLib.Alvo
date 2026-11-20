@@ -29,6 +29,9 @@ runs as a Docker container or as a library inside your own app.
   endpoints. [Standalone and embedded](/concepts/modes/), [Extending in code](/extending/)
 - **An admin dashboard** with a schema editor, rule and hook editors, a data browser, history with rollback, and an AI
   assistant that uses the same skills your agents can. [The admin dashboard](/guides/admin-dashboard/)
+- **Sign-in and teams, from the descriptor.** People sign in with Google, create their own companies, invite
+  colleagues and hold roles per company, and integrations get tokens of their own. No user table or membership code
+  of yours. [Sign-in and accounts](/guides/sign-in/)
 - **Dynamic entities (planned).** Your end users define their own record types at runtime, in one shared store, in an
   embedded host. Not in this build. [Dynamic entities (planned)](/concepts/dynamic-entities/)
 
@@ -48,8 +51,8 @@ runs as a Docker container or as a library inside your own app.
   the format and APIs may still change. See [What works today](/start-here/what-works-today/).
 - **You need realtime subscriptions or file storage.** Neither runs in this build; after-hooks and `automation` rules
   that send e-mail, post webhooks, call host functions or update a record do.
-- **You need sign-in through Google, Microsoft or another identity provider.** Only local accounts and API keys exist
-  in this build; embedded, your app can bring its own authentication.
+- **You need sign-in through Microsoft, Apple, GitHub or your own OpenID provider, or email and password for your
+  app's users.** In this build people sign in with Google only; embedded, your app can bring its own authentication.
 - **Your logic does not fit declarative rules and hooks.** If most of your backend is custom code, the escape hatch is
   the embedded mode, where your C# joins Alvo's write pipeline and outbox rather than replacing them
   ([Where logic goes](/extending/where-logic-goes/)); but then weigh how much Alvo still does for you.

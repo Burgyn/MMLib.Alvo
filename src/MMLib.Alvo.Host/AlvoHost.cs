@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Admin;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
@@ -132,6 +133,12 @@ public static class AlvoHost
         }
 
         builder.Services.AddAlvo(alvo => Configure(alvo, options, builder.Configuration));
+
+        if (AccountsConfigured(builder.Configuration))
+        {
+            var accounts = builder.Configuration.GetSection(AlvoAccounts.ConfigurationSection);
+            builder.Services.AddAlvoAccounts(account => accounts.Bind(account));
+        }
 
         return builder;
     }
@@ -323,6 +330,11 @@ public static class AlvoHost
         app.UseAntiforgery();
 
         app.MapAlvo();
+        if (AccountsConfigured(app.Configuration))
+        {
+            app.MapAlvoAccounts();
+        }
+
         app.MapAlvoAdminSignIn();
         app.MapAlvoAdmin();
 
@@ -432,6 +444,28 @@ public static class AlvoHost
         builder.Services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<AlvoHostOptions>, AlvoHostOptionsValidation>());
     }
+
+    /// <summary>
+    /// Whether end-user sign-in is on: <c>Alvo:Accounts:Providers</c> configures at least one provider (S2 D9).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One predicate, read at both moments</b> — registration and mapping — so the services and the routes cannot come
+    /// apart. Off is the default, and it is the whole of Review Focus 4: an image that never configured a provider starts
+    /// without a secrets key file, maps no <c>/auth</c> route, publishes no Bearer scheme in its document, and leaves the
+    /// <c>Authorization</c> header to nobody, exactly as before sign-in existed.
+    /// </para>
+    /// <para>
+    /// <b>A provider, not any key under <c>Alvo:Accounts</c>.</b> An issuer or a lifetime set alone switches nothing on:
+    /// without a provider nobody could sign in, and turning the package on would only add a key-file requirement. Once a
+    /// provider is configured, everything else is <c>AddAlvoAccounts</c>' own startup validation — the key file, the
+    /// relational store, the API-key header, and the issuer outside Development.
+    /// </para>
+    /// </remarks>
+    /// <param name="configuration">The host's configuration.</param>
+    private static bool AccountsConfigured(IConfiguration configuration) =>
+        configuration.GetSection($"{AlvoAccounts.ConfigurationSection}:{nameof(AlvoAccountsOptions.Providers)}")
+            .GetChildren().Any();
 
     private static string? ConnectionString(ConfigurationManager configuration) =>
         configuration.GetConnectionString(AlvoHostConfiguration.ConnectionName) is { } configured

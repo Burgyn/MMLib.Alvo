@@ -32,6 +32,12 @@ public sealed record ApiKeyRecord
     /// <summary>Gets when this key was last used, if ever.</summary>
     public DateTimeOffset? LastUsedAt { get; init; }
 
+    /// <summary>Gets what kind of credential this is; <see cref="ApiKeyKind.Configured"/> unless a person minted it.</summary>
+    public ApiKeyKind Kind { get; init; }
+
+    /// <summary>Gets the person who minted this key; <see langword="null"/> for a <see cref="ApiKeyKind.Configured"/> key.</summary>
+    public UserId? MintedBy { get; init; }
+
     /// <summary>Answers whether this key is usable at <paramref name="now"/>: not revoked and not expired.</summary>
     /// <param name="now">The instant to evaluate usability at.</param>
     public bool IsUsable(DateTimeOffset now) => RevokedAt is null && (ExpiresAt is null || ExpiresAt > now);
@@ -39,8 +45,10 @@ public sealed record ApiKeyRecord
     private bool PrintMembers(StringBuilder builder)
     {
         builder.Append("KeyId = ").Append(KeyId);
+        builder.Append(", Kind = ").Append(Kind);
         builder.Append(", Sha256Hash = ***");
         builder.Append(", User = ").Append(User);
+        builder.Append(", MintedBy = ").Append(MintedBy);
         builder.Append(", RoleNames = [").Append(string.Join(", ", RoleNames)).Append(']');
         builder.Append(", Tenant = ").Append(Tenant);
         builder.Append(", Scopes = ").Append(Scopes.Count).Append(" scope(s)");
