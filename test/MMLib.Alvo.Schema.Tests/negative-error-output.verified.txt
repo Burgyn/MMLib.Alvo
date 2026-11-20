@@ -1,5 +1,8 @@
 [
   {
+    file: assignable-role-in-access.json
+  },
+  {
     file: decimal-without-scale.json,
     failures: [
       {
@@ -88,6 +91,12 @@
     ]
   },
   {
+    file: self-service-admin-assignable.json
+  },
+  {
+    file: self-service-without-tenancy.json
+  },
+  {
     file: sequence-two-numbers.json,
     failures: [
       {
@@ -113,6 +122,9 @@
         Message: Validation pattern - Central Europe Standard Time did not match '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'
       }
     ]
+  },
+  {
+    file: service-tokens-without-shared-tenants.json
   },
   {
     file: state-machine-no-transitions.json,

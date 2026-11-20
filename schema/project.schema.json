@@ -60,6 +60,62 @@
           "type": "boolean",
           "default": false,
           "description": "Turn on row-level multi-tenancy (shared DB + shared schema, discriminator column)."
+        },
+        "selfService": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional; absent = tenants come only from API keys and operator grants. Present = signed-in people get tenants of their own and, with createTenants, shared tenants they manage. Requires enabled: true.",
+          "properties": {
+            "personalTenant": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Present = every person gets one tenant of their own at sign-up.",
+              "properties": {
+                "roles": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "description": "The tenant roles a person holds in their personal tenant (each in assignableRoles; default [])."
+                }
+              }
+            },
+            "createTenants": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Present = a person may create shared tenants.",
+              "properties": {
+                "creatorRoles": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "description": "The tenant roles the creator receives (each in assignableRoles)."
+                },
+                "maxPerAccount": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100,
+                  "default": 5,
+                  "description": "How many shared tenants one account may create: 1–100, default 5."
+                }
+              }
+            },
+            "invitations": {
+              "type": "boolean",
+              "description": "Owners may invite by link. Requires createTenants."
+            },
+            "assignableRoles": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/identifier"
+              },
+              "description": "The tenant roles: the only roles a membership can ever carry. Each must be declared in auth.roles."
+            }
+          }
         }
       }
     },
@@ -168,6 +224,30 @@
                 "pattern": "^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
               },
               "description": "Optional. Only accounts whose trusted email is in one of these domains may sign up — a company app restricted to kros.sk. Lower-case hostnames, no wildcard."
+            }
+          }
+        },
+        "accessTokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Self-service tokens for integrators: personal tokens that act as a person, service tokens that act as a tenant. Optional; absent = no self-service tokens.",
+          "properties": {
+            "personal": {
+              "type": "boolean",
+              "default": false,
+              "description": "A person may mint tokens that act as them."
+            },
+            "service": {
+              "type": "boolean",
+              "default": false,
+              "description": "A tenant owner may mint tokens that act as the tenant. Requires tenancy.selfService with createTenants: a service token acts as a shared tenant, never a personal one."
+            },
+            "maxLifetimeDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 90,
+              "description": "The longest expiry a token may ask for: 1–365 days, default 90."
             }
           }
         }

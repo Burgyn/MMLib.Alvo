@@ -15,6 +15,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// so the second reads the rotated token outright.
 /// </para>
 /// <para>
+/// <b>Every answer but a refusal commits.</b> A rotation and a reuse write their own rows; a replay writes only the personal
+/// tenant it may ensure (S3 plan D6), and nothing when it ensures none. A refusal rolls back, so a rotation whose session
+/// died meanwhile leaves no child.
+/// </para>
+/// <para>
 /// <b>A zero grace window is strict reuse detection</b>: any second presentation revokes the session, even at the
 /// rotation's own instant. The window is otherwise inclusive — 10 s after the rotation still answers the child.
 /// </para>
@@ -30,7 +35,7 @@ internal sealed partial class EfCoreAccountStore
 
         return InTransactionAsync(
             (connection, transaction, token) => RefreshedAsync(connection, transaction, request, token),
-            outcome => outcome.Status is RefreshStatus.Rotated or RefreshStatus.Reused,
+            outcome => outcome.Status is not RefreshStatus.Refused,
             ct);
     }
 
@@ -56,6 +61,18 @@ internal sealed partial class EfCoreAccountStore
             ct);
 
     private async Task<RefreshOutcome> RefreshedAsync(
+        DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
+    {
+        var outcome = await AnsweredAsync(connection, transaction, request, ct).ConfigureAwait(false);
+        if (outcome is { Status: RefreshStatus.Rotated or RefreshStatus.Replayed, Account: { } account })
+        {
+            await PersonalTenantEnsuredAsync(connection, transaction, account, request.PersonalTenant, request.Now, ct).ConfigureAwait(false);
+        }
+
+        return outcome;
+    }
+
+    private async Task<RefreshOutcome> AnsweredAsync(
         DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
     {
         var token = await TokenAsync(connection, transaction, request.TokenId, ct).ConfigureAwait(false);
@@ -112,7 +129,27 @@ internal sealed partial class EfCoreAccountStore
         }
 
         await RevokeAsync(connection, transaction, token.Session, SessionRevocations.Reuse, request.Now, ct).ConfigureAwait(false);
+        await RevokeMintedSinceAsync(connection, transaction, token.Account, token.SessionStartedAt, request.Now, ct).ConfigureAwait(false);
         return new RefreshOutcome(RefreshStatus.Reused, null, null, null, null);
+    }
+
+    /// <summary>
+    /// Revokes, beside the reused session and in its transaction, every invitation and app token
+    /// <paramref name="account"/> created since <paramref name="since"/> — the session's start (stack review A-I1). Reuse is
+    /// the one signal that a refresh token was stolen, and nothing ties a token or an invitation to the session that minted
+    /// it, so the sweep takes all of them from that instant on, including any the person's other sessions created
+    /// meanwhile. What was created before the session started is not the thief's and lives on. The ban's lock order:
+    /// the session, then invitations, then tokens.
+    /// </summary>
+    private async Task RevokeMintedSinceAsync(
+        DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset since, DateTimeOffset now, CancellationToken ct)
+    {
+        await ExecuteAsync(
+            connection, transaction, _invitationTables.RevokeCreatedSinceSql,
+            command => Bind(command, ("@now", Instant(now)), ("@user_id", Id(account)), ("@since", Instant(since))), ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection, transaction, _appTokenTables.RevokeMintedSinceSql,
+            command => Bind(command, ("@now", Instant(now)), ("@account_id", Id(account)), ("@since", Instant(since))), ct).ConfigureAwait(false);
     }
 
     private static bool IsWithinGrace(DateTimeOffset rotatedAt, RefreshRequest request) =>
@@ -130,6 +167,10 @@ internal sealed partial class EfCoreAccountStore
             connection, transaction, _tables.RevokeSessionSql,
             command => Bind(command, ("@now", Instant(now)), ("@reason", reason), ("@session_id", Id(session))), ct);
 
+    /// <summary>
+    /// Stamps <paramref name="account"/> disabled and, in the same transaction, revokes its sessions, the invitations it
+    /// created and every app token it minted, personal or service (S5 plan D10). Enabling it later revives no token.
+    /// </summary>
     private async Task<bool> DisabledAsync(
         DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset now, CancellationToken ct)
     {
@@ -141,6 +182,12 @@ internal sealed partial class EfCoreAccountStore
         }
 
         await RevokeAccountSessionsAsync(connection, transaction, account, now, ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection, transaction, _invitationTables.RevokeCreatedByAccountSql,
+            command => Bind(command, ("@now", Instant(now)), ("@user_id", Id(account))), ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection, transaction, _appTokenTables.RevokeMintedByAccountSql,
+            command => Bind(command, ("@now", Instant(now)), ("@account_id", Id(account))), ct).ConfigureAwait(false);
         return true;
     }
 
@@ -195,9 +242,12 @@ internal sealed partial class EfCoreAccountStore
         reader.GetString(5),
         !reader.IsDBNull(6),
         StoredInstant.Of(reader.GetString(7)),
-        !reader.IsDBNull(8));
+        !reader.IsDBNull(8),
+        StoredInstant.Of(reader.GetString(9)));
 
-    /// <summary>A refresh token as a refresh judges it: its own stamps, its child, its session and its account.</summary>
+    /// <summary>
+    /// A refresh token as a refresh judges it: its own stamps, its child, its session (and when that started) and its account.
+    /// </summary>
     private sealed record TokenRow(
         Guid Session,
         DateTimeOffset CreatedAt,
@@ -207,7 +257,8 @@ internal sealed partial class EfCoreAccountStore
         string Provider,
         bool SessionRevoked,
         DateTimeOffset SessionExpiresAt,
-        bool AccountDisabled)
+        bool AccountDisabled,
+        DateTimeOffset SessionStartedAt)
     {
         internal bool IsUsable(DateTimeOffset now) => !SessionRevoked && !AccountDisabled && SessionExpiresAt > now;
 

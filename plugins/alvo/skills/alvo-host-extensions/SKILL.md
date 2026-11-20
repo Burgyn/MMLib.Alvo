@@ -83,7 +83,8 @@ event your code publishes (`[AlvoEvent("type")]`). **At least once**: dedupe on 
 
 - Commands — https://alvo.burgyn.online/extending/commands/: `app.MapAlvoCommand(name, pattern, access, handler)`,
   `AddCommand<T>(name, access)` for in-process calls, `MapAlvoWebhookReceiver(pattern, secretName, handler)` verifies
-  Standard Webhooks. Make the external call first, then the writes in `ctx.TransactAsync`.
+  Standard Webhooks. Make the external call first, then the writes in `ctx.TransactAsync`. A command takes a personal
+  or service token within its entity's scope; an endpoint marked `.WithAlvoCaller()` refuses both with 403 (#536).
 - Transactions — https://alvo.burgyn.online/extending/transactions/: `IAlvoTransactions.TransactAsync(caller, (unit,
   ct) => …)`; return commits, throw rolls back. `IAlvoData` is refused inside a unit; each call has its own savepoint.
 - Time — https://alvo.burgyn.online/extending/time/: `IAlvoScheduler.ScheduleAsync(key, at, message)`,

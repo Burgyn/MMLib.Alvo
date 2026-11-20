@@ -1,0 +1,33 @@
+### Dana's client refreshes: RFC 6749 §6, and the refresh token rotates (RFC 9700 §4.14)
+# @name DanaRefreshes
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{DanaRefresh}}
+
+### A second tab sends the same, now-rotated token at once — inside the grace window, it gets the same child
+# @name DanaReplaysInsideWindow
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{DanaRefresh}}
+
+### The newest access token works — so its 401 in the next case is the reuse, not a token that never did
+# @name LatestAccessBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{DanaReplaysInsideWindow.response.body.$.access_token}}
+
+### The same rotated token after the window is reuse. Polled — never slept — until the window (10 s) has passed;
+### a replay still inside it answers the same child again, so the poll cannot fork the family. At most ~30 s.
+# @name ReuseAfterWindow
+## RETRY-UNTIL-TEST-PASS: The rotated token, replayed after the grace window, is refused as invalid_grant.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{DanaRefresh}}

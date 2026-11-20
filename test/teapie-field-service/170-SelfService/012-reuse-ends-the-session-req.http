@@ -1,0 +1,19 @@
+### Reuse revoked the whole family: the child Dana's first refresh received is dead too
+# @name ChildAfterReuse
+## TEST-EXPECT-STATUS: [400]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&refresh_token={{DanaChildRefresh}}
+
+### And so is the session the family belonged to: her newest access token
+# @name AccessAfterReuse
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{DanaLatestAccess}}
+
+### Theo's session is his own, and reuse of Dana's token does not touch it
+# @name TheoStillSignedIn
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{TheoAccess}}

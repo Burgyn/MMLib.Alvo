@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Tests.Descriptor;
 
 /// <summary>
 /// The keys <b>inside</b> a block this build honours that it does not honour themselves —
-/// <c>entity.storage: dynamic</c>, an <c>auth.providers</c> other than local or google, and <c>entity.realtime</c> — asserted on
-/// which slot the one warning names, in both directions (docs/todo-admin.md §8d items 21 and 27).
+/// <c>entity.storage: dynamic</c>, an <c>auth.providers</c> other than local or google and <c>entity.realtime</c> —
+/// asserted on which slot the one warning names, in both directions (docs/todo-admin.md §8d items 21 and 27).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -32,6 +32,7 @@ public class UnhonouredKeysTests
     private const string StorageSlot = "entity.storage";
     private const string ProvidersSlot = "auth.providers";
     private const string RealtimeSlot = "entity.realtime";
+    private const string InvitationsSlot = "tenancy.selfService.invitations";
 
     /// <summary>
     /// <b>An entity with <c>storage: dynamic</c> is warned about although <c>dynamicEntities</c> is not
@@ -91,6 +92,21 @@ public class UnhonouredKeysTests
         BootWarnings("""{ "providers": ["local"] }""", hasPerson: false).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// <b><c>invitations: true</c> is honoured</b> (S4 plan D14): owners invite people into shared tenants, so the key that
+    /// was warned about from S3 (S3 plan D11) earns no line, whatever it says.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Invitations_are_honoured(bool invitations)
+    {
+        var tenancy = $$"""{ "enabled": true, "selfService": { "createTenants": {}, "invitations": {{(invitations ? "true" : "false")}} } }""";
+
+        WarningFor(Entities, auth: null, tenancy: tenancy).ShouldBeNull();
+        UnhonouredSubsystems.WithinBlocks.Select(row => row.Block).ShouldNotContain(InvitationsSlot);
+    }
+
     /// <summary><c>local</c> alone is exactly what this build does, so it earns no line.</summary>
     [Fact]
     public void Local_alone_earns_no_provider_warning()
@@ -144,7 +160,8 @@ public class UnhonouredKeysTests
 
     /// <summary>
     /// <b>Every slot names a key the frozen schema declares</b>, under the block its first segment names —
-    /// <c>entity.*</c> under <c>$defs/entity</c>, anything else under the root's own property.
+    /// <c>entity.*</c> under <c>$defs/entity</c>, anything else under the root's own property — and every further
+    /// segment one level down.
     /// </summary>
     /// <remarks>
     /// The sibling file's reason, one level down: a slot matching no key warns about nothing forever and reads as
@@ -162,7 +179,12 @@ public class UnhonouredKeysTests
             var owner = block == "entity" ? schema["$defs"]!["entity"] : schema["properties"]![block];
 
             owner.ShouldNotBeNull($"'{slot.Block}' names no block of the schema");
-            owner!["properties"]!.AsObject().ContainsKey(key).ShouldBeTrue($"'{slot.Block}' names no declared key");
+            foreach (var segment in key.Split('.'))
+            {
+                var properties = owner!["properties"]?.AsObject();
+                (properties?.ContainsKey(segment) == true).ShouldBeTrue($"'{slot.Block}' names no declared key");
+                owner = properties![segment];
+            }
         }
     }
 
@@ -182,10 +204,10 @@ public class UnhonouredKeysTests
     private const string Entities = """{ "notes": { "fields": { "title": { "type": "string" } } } }""";
 
     /// <summary>The one warning a descriptor with these entities earns, or null when it earns none.</summary>
-    private static string? WarningFor(string entities, string? auth = null)
+    private static string? WarningFor(string entities, string? auth = null, string? tenancy = null)
     {
         var logger = new CapturingLogger();
-        UnhonouredSubsystems.Warn(logger, Parse(entities, auth));
+        UnhonouredSubsystems.Warn(logger, Parse(entities, auth, tenancy));
         return logger.Warnings.SingleOrDefault();
     }
 
@@ -204,10 +226,13 @@ public class UnhonouredKeysTests
         return capturing.Warnings;
     }
 
-    private static AlvoDescriptor Parse(string entities, string? auth)
-        => AlvoDescriptor.Parse(auth is null
-            ? $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys", "entities": {{entities}} }"""
-            : $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys", "auth": {{auth}}, "entities": {{entities}} }""");
+    private static AlvoDescriptor Parse(string entities, string? auth, string? tenancy = null)
+    {
+        var authBlock = auth is null ? string.Empty : $$""" "auth": {{auth}},""";
+        var tenancyBlock = tenancy is null ? string.Empty : $$""" "tenancy": {{tenancy}},""";
+        return AlvoDescriptor.Parse(
+            $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys",{{authBlock}}{{tenancyBlock}} "entities": {{entities}} }""");
+    }
 
     private static (string Block, string Key) Split(string slot)
     {

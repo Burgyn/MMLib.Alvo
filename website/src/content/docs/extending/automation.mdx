@@ -21,8 +21,9 @@ event handlers.
 - **An entity event**, `entity.<entity>.<created|updated|deleted>`. The condition and the actions read the row as the
   matching after-hook does: `new.` on create and update, `old.` on update and delete.
 - **A five-field cron**, read in UTC: `{"schedule": "0 2 * * *"}`. On a project with tenancy it runs **once per tenant**,
-  each run in that tenant, and the host must register an `IAlvoTenantCatalog`; without tenancy it runs once. A cron
-  rule takes no condition — it has no row to read.
+  each run in that tenant; without tenancy it runs once. The tenants come from the host's `IAlvoTenantCatalog` or,
+  without one, from the self-service registry when the descriptor declares `tenancy.selfService`. A cron rule takes
+  no condition — it has no row to read.
 
 ## Actions
 
@@ -51,6 +52,15 @@ The write and a ledger key for the event commit in one transaction, so a retry, 
 - A rule that updates the row that triggered it stops at the chain-depth limit, dead `chain-depth-exceeded`.
 - The condition and `$cel` values may read the triggering row's `hidden` fields.
 
+:::caution[With self-service tenants, any member can trigger it]
+A tenant role a person holds in a tenant they created or joined
+([Tenants, members and invitations](/guides/tenants-and-invitations/#tenant-roles-and-project-roles)) never counts in
+a rule of a global entity. An `entity.update` action is not judged as that person, though: it writes as the system
+caller, with `admin`. So a rule on a scoped entity's event, whose condition a member's write satisfies, may update a
+global record that no member could write directly. That is your declared escalation, and anyone who signs up and
+creates a tenant can trigger it. Keep its condition and its `recordId` narrow.
+:::
+
 ## Secrets
 
 `secretRef` and `headersSecretRef` must be secret names (`^[a-z][a-z0-9._-]{0,63}$`); anything else is refused at apply,
@@ -73,7 +83,7 @@ refusing applies — so the secret can be added under *Settings → Secrets*; th
 | A wildcard trigger (`entity.*.created`) | Name the entity: a rule's row images are one entity's. |
 | `auth.*` and `storage.*` triggers | No such event exists in this build. |
 | A `condition` on a cron rule | A schedule has no row to read. |
-| A cron rule on a project with tenancy, in a host that registers no `IAlvoTenantCatalog` — the standalone image registers none | Alvo does not know which tenants to run it for. |
+| A cron rule on a project with tenancy and without `tenancy.selfService`, in a host that registers no `IAlvoTenantCatalog`. The standalone image registers none, so there it needs `selfService` | Alvo does not know which tenants to run it for. |
 
 Editing a rule makes it a new subscriber: the apply cancels the old one's unfinished deliveries (error type
 `superseded`) and records one `cancel-superseded` row in the [operations log](/extending/operate-deliveries/#audit),

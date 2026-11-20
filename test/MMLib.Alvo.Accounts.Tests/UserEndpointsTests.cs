@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Tests;
+using MMLib.Alvo.Tenants;
 using MMLib.Alvo.Tests.Accounts;
 using System.Net;
 using System.Text;
@@ -19,6 +20,8 @@ public sealed class UserEndpointsTests
 
     private static readonly SqliteApiEngine _engine = SqliteApiEngine.Instance;
 
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     [Fact]
     public async Task User_answers_the_account_its_providers_and_no_memberships()
     {
@@ -35,6 +38,35 @@ public sealed class UserEndpointsTests
         body["emailTrusted"]!.GetValue<bool>().ShouldBeTrue();
         body["providers"]!.AsArray().Select(provider => provider!.GetValue<string>()).ShouldBe(["google"]);
         body["memberships"]!.AsArray().ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Level 3 (spec §5.5, S3 plan D5): the personal tenant first, then the shared ones by joining, each with the roles the
+    /// applied descriptor still honours — a stored name outside <c>assignableRoles</c> is never listed — and ownership.
+    /// </summary>
+    [Fact]
+    public async Task User_lists_the_memberships_with_kind_roles_and_ownership()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: "team-tracker.alvo.json");
+        var (ada, _) = await world.SignInAsync("ada");
+        var (bob, _) = await world.SignInAsync("bob", email: "bob@gmail.com");
+        var own = TenantId.New();
+        var bobs = TenantId.New();
+        var adaId = await world.UserIdAsync(ada);
+        await world.Tenants.CreateSharedAsync(new CreateTenantRequest(own, "Acme", adaId, ["dispatcher"], 2, AccountsWorld.Start), Ct);
+        await world.Tenants.CreateSharedAsync(
+            new CreateTenantRequest(bobs, "Bob crew", await world.UserIdAsync(bob), ["dispatcher"], 2, AccountsWorld.Start), Ct);
+        world.Clock.Advance(TimeSpan.FromMinutes(1));
+        await world.AddMemberAsync(bobs, adaId, ["technician", "owner", "dispatcher"]);
+
+        var memberships = await world.MembershipsAsync(ada);
+
+        memberships.Select(membership => membership!.ToJsonString()).ShouldBe(
+        [
+            $$"""{"tenantId":"{{await world.PersonalTenantAsync(ada)}}","name":"Ada Lovelace","kind":"personal","roles":[],"isOwner":true}""",
+            $$"""{"tenantId":"{{own}}","name":"Acme","kind":"shared","roles":["dispatcher"],"isOwner":true}""",
+            $$"""{"tenantId":"{{bobs}}","name":"Bob crew","kind":"shared","roles":["dispatcher","technician"],"isOwner":false}""",
+        ]);
     }
 
     [Fact]

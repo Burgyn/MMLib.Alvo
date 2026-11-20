@@ -114,6 +114,23 @@ public class DeclaredLimitsTests
         => DeclaredLimits.UnshownLine("""{ "description": "", "branding": {}, "formats": { "sku": { "pattern": "^S" } } }""")
             .ShouldBeNull();
 
+    /// <summary>
+    /// <c>invitations</c> is honoured (S4 plan D14), so the Overview never lists it — not even where an older build still
+    /// reports it as warned, because a qualified slot this screen does not detect has no fallback.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": true } } }""")]
+    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": false } } }""")]
+    public void Invitations_are_never_listed(string descriptor)
+    {
+        var invitations = new ManagementWarnedBlock("tenancy.selfService.invitations", "owners cannot invite anyone in this build");
+        var older = new ManagementCapabilities(["entities"], [invitations], []);
+        var olderBesideTheRest = _capabilities with { Warned = [.. _capabilities.Warned, invitations] };
+
+        DeclaredLimits.Of(descriptor, older).ShouldBeEmpty();
+        DeclaredLimits.Of(descriptor, olderBesideTheRest).Select(block => block.Block).ShouldNotContain(invitations.Block);
+    }
+
     /// <summary>Every qualified slot this screen detects, which a Host test holds against the real build's report.</summary>
     [Fact]
     public void The_qualified_slots_are_the_three_the_build_reports()

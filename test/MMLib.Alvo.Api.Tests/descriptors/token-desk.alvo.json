@@ -1,0 +1,28 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "token-desk",
+  "description": "App tokens at Management (S5 D9): access.viewer admits any authenticated caller, so a personal or service token would pass the gate if the Management filter did not refuse it first.",
+  "auth": {
+    "providers": ["google"],
+    "roles": ["dispatcher"],
+    "signUp": { "mode": "open" },
+    "accessTokens": { "personal": true, "service": true }
+  },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "personalTenant": { "roles": ["dispatcher"] },
+      "createTenants": { "creatorRoles": ["dispatcher"] },
+      "assignableRoles": ["dispatcher"]
+    }
+  },
+  "access": { "viewer": "'authenticated' in @user.roles" },
+  "entities": {
+    "regions": {
+      "tenancy": "global",
+      "fields": { "code": { "type": "string", "maxLength": 8 } },
+      "rules": { "list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles" }
+    }
+  }
+}

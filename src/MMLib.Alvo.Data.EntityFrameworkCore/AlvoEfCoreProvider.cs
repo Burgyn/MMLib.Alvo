@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
@@ -16,6 +17,7 @@ using MMLib.Alvo.Rules;
 using MMLib.Alvo.Scheduling;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Tenants;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -112,6 +114,8 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IDeliveryStore>(CreateDeliveryStore);
         builder.Services.TryAddSingleton<ITimerStore>(CreateTimerStore);
         builder.Services.TryAddSingleton<IAccountStore>(CreateAccountStore);
+        builder.Services.TryAddSingleton<ITenantStore>(CreateTenantStore);
+        builder.Services.TryAddSingleton<IAppTokenStore>(CreateAppTokenStore);
         AddSecretStore(builder.Services);
 
         return builder;
@@ -219,6 +223,19 @@ public static class AlvoEfCoreProvider
         services.GetRequiredService<RelationalConnectionFactory>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,
         Cipher(services));
+
+    /// <summary>Creates the self-service tenant registry (accounts spec §6.1, S3 plan D2).</summary>
+    /// <remarks>
+    /// Registered whatever the descriptor says, like the account store: resolving it costs nothing until a call, and the
+    /// core consults it only when the applied descriptor has <c>tenancy.selfService</c>.
+    /// </remarks>
+    private static EfCoreTenantStore CreateTenantStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value);
+
+    private static EfCoreAppTokenStore CreateAppTokenStore(IServiceProvider services) => new(
+        services.GetRequiredService<RelationalConnectionFactory>(),
+        services.GetRequiredService<IOptions<AlvoOptions>>().Value);
 
     private static EfCoreHookRejectionLog CreateHookRejectionLog(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),

@@ -3,8 +3,8 @@
 namespace MMLib.Alvo.Admin.Components.Home;
 
 /// <summary>
-/// Which of the build's warned slots one descriptor really declares — a top-level block, or one of the three
-/// qualified keys inside an honoured block (<c>auth.providers</c>, <c>entity.storage</c>, <c>entity.realtime</c>).
+/// Which of the build's warned slots one descriptor really declares — a top-level block, or one of the qualified
+/// keys inside an honoured block (<c>auth.providers</c>, <c>entity.storage</c>, <c>entity.realtime</c>).
 /// </summary>
 /// <remarks>
 /// <para>

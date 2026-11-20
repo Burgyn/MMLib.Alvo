@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Accounts.Internal;
 
@@ -41,7 +42,7 @@ internal sealed class AccountsDocumentTransformer(IOptions<AlvoAccountsOptions> 
         ProblemComponents.AddTo(document);
         AccountsSchemas.AddTo(document);
         AlvoDocumentTransformer.AddBearer(document, options.Value.Prefix.TrimEnd('/') + "/token");
-        DescribeTag(document);
+        DescribeTags(document);
         foreach (var (description, operationId) in operations)
         {
             AccountsDocumentation.Describe(AlvoDocumentTransformer.FindOperation(document, description), operationId, document);
@@ -59,13 +60,37 @@ internal sealed class AccountsDocumentTransformer(IOptions<AlvoAccountsOptions> 
     private static string? NameOf(ApiDescription description) =>
         description.ActionDescriptor.EndpointMetadata.OfType<IEndpointNameMetadata>().FirstOrDefault()?.EndpointName;
 
-    private static void DescribeTag(OpenApiDocument document)
+    private static void DescribeTags(OpenApiDocument document)
     {
-        if (document.Tags?.FirstOrDefault(tag => string.Equals(tag.Name, AccountsEndpoints.Tag, StringComparison.Ordinal)) is { } tag)
+        DescribeTag(
+            document,
+            AccountsEndpoints.Tag,
+            "End-user sign-in: exchange an identity provider's ID token for an Alvo session, refresh it, read and name "
+            + "the signed-in person, sign out, and discover the issuer and its signing keys.");
+        DescribeTag(
+            document,
+            SelfServiceEndpoints.Tag,
+            "Self-service tenants: a signed-in person lists their tenants, creates shared ones, renames and manages the "
+            + "members of those they own, and invites people into them. Each route answers 404 `feature-disabled` naming the descriptor key that enables it "
+            + "while the descriptor leaves it off.");
+        DescribeTag(
+            document,
+            SelfServiceEndpoints.InvitationsTag,
+            "Invitations by code: anyone holding a code previews what it offers, and a signed-in person accepts it to join "
+            + "the tenant. The code travels only in request bodies. Every code that admits nobody answers the same 404.");
+        DescribeTag(
+            document,
+            SelfServiceEndpoints.TokensTag,
+            "App tokens: a signed-in person mints a personal token that acts as them, or a service token that acts as a tenant "
+            + "they own, and sees the credential once. A token never mints another and never manages a project. Each route answers "
+            + "404 `feature-disabled` naming the descriptor key that enables it while the descriptor leaves it off.");
+    }
+
+    private static void DescribeTag(OpenApiDocument document, string name, string description)
+    {
+        if (document.Tags?.FirstOrDefault(tag => string.Equals(tag.Name, name, StringComparison.Ordinal)) is { } tag)
         {
-            tag.Description =
-                "End-user sign-in: exchange an identity provider's ID token for an Alvo session, refresh it, read and name "
-                + "the signed-in person, sign out, and discover the issuer and its signing keys.";
+            tag.Description = description;
         }
     }
 }

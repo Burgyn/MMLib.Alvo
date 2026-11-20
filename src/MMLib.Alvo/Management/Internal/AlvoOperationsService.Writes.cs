@@ -110,7 +110,7 @@ internal sealed partial class AlvoOperationsService
         var events = await (runs ?? throw new ManagementRequestException(NoTimers)).EventsAsync(job, time.GetUtcNow(), manual: true, ct).ConfigureAwait(false);
         if (events.Count == 0)
         {
-            throw new ManagementConflictException($"'{schedule}' runs once per tenant, and the host's IAlvoTenantCatalog lists no tenant, so there is nothing to run.");
+            throw new ManagementConflictException($"'{schedule}' runs once per tenant, and its tenant list (the host's IAlvoTenantCatalog, or the self-service registry) names no tenant, so there is nothing to run.");
         }
 
         await StartRunAsync(schedule, events, ct).ConfigureAwait(false);

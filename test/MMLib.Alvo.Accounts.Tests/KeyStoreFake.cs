@@ -45,8 +45,7 @@ internal sealed class KeyStoreFake : IAccountStore
     public Task<SignInOutcome> SignInAsync(SignInRequest request, CancellationToken ct) => throw new NotSupportedException();
 
     /// <inheritdoc/>
-    public Task<bool> IsSessionLiveAsync(UserId account, Guid session, DateTimeOffset now, CancellationToken ct)
-        => throw new NotSupportedException();
+    public Task<CallerRead> ReadCallerAsync(CallerQuery query, CancellationToken ct) => throw new NotSupportedException();
 
     /// <inheritdoc/>
     public Task<AccountView?> GetAccountAsync(UserId account, CancellationToken ct) => throw new NotSupportedException();

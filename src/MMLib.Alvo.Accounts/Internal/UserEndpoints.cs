@@ -6,6 +6,7 @@ using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 
 namespace MMLib.Alvo.Accounts.Internal;
 
@@ -58,17 +59,18 @@ internal static class UserEndpoints
     }
 
     private static async Task<IResult> GetAsync(
-        HttpContext http, PersonSessions sessions, IAccountStore store, IOptions<AlvoAuthOptions> auth)
+        HttpContext http, PersonSessions sessions, IAccountStore store, SelfServiceMemberships memberships, IOptions<AlvoAuthOptions> auth)
     {
         var ct = http.RequestAborted;
         var (session, refusal) = await AuthenticateAsync(http.Request, sessions, auth.Value).ConfigureAwait(false);
-        return refusal ?? await UserAsync(store, session!.Account, ct).ConfigureAwait(false);
+        return refusal ?? await UserAsync(store, memberships, session!.Account, ct).ConfigureAwait(false);
     }
 
     private static async Task<IResult> PatchAsync(
         HttpContext http,
         PersonSessions sessions,
         IAccountStore store,
+        SelfServiceMemberships memberships,
         IOptions<AlvoAuthOptions> auth,
         IOptions<AlvoApiOptions> api)
     {
@@ -91,7 +93,7 @@ internal static class UserEndpoints
         }
 
         return await store.SetDisplayNameAsync(session!.Account, name, ct).ConfigureAwait(false)
-            ? await UserAsync(store, session.Account, ct).ConfigureAwait(false)
+            ? await UserAsync(store, memberships, session.Account, ct).ConfigureAwait(false)
             : Unusable();
     }
 
@@ -143,8 +145,9 @@ internal static class UserEndpoints
 
     private static IResult Unusable() => ProblemResultFactory.BearerUnauthenticated(InvalidToken);
 
-    private static async Task<IResult> UserAsync(IAccountStore store, UserId account, CancellationToken ct)
+    private static async Task<IResult> UserAsync(
+        IAccountStore store, SelfServiceMemberships memberships, UserId account, CancellationToken ct)
         => await store.GetAccountAsync(account, ct).ConfigureAwait(false) is { } view
-            ? UserResponse.From(view).Ok()
+            ? UserResponse.From(view, await memberships.ListAsync(account, ct).ConfigureAwait(false)).Ok()
             : Unusable();
 }

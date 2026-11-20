@@ -1,0 +1,30 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "time-tracker",
+  "auth": {
+    "providers": ["google"],
+    "signUp": { "mode": "open" }
+  },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "personalTenant": { "roles": [] }
+    }
+  },
+  "entities": {
+    "time_entries": {
+      "fields": {
+        "minutes": { "type": "integer", "required": true },
+        "note": { "type": "string", "maxLength": 200 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+        "delete": "'authenticated' in @user.roles"
+      }
+    }
+  }
+}

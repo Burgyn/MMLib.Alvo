@@ -4,8 +4,12 @@ using Microsoft.IdentityModel.Logging;
 using Microsoft.IdentityModel.Tokens;
 using MMLib.Alvo.Accounts.Internal;
 using MMLib.Alvo.Api.Tests;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 using MMLib.Alvo.Tests.Accounts;
 using System.Buffers.Text;
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,8 +18,9 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Accounts.Tests;
 
 /// <summary>
-/// No secret reaches a log, a problem body or a <c>ToString</c> (spec §14 AC6, S2 global constraints): ID tokens, access
-/// tokens, refresh tokens and their MACs, API keys, and key material — across every path a sign-in host runs.
+/// No secret reaches a log, a problem body or a <c>ToString</c> (spec §8, §14 AC6, S2 global constraints): ID tokens,
+/// access tokens, refresh tokens and their MACs, API keys, invitation codes, personal and service tokens, and key material —
+/// across every path a sign-in host runs.
 /// </summary>
 /// <remarks>
 /// The log facts read <see cref="AccountsWorld.Logs"/> at Trace: each entry's message, its exception's <c>ToString</c>,
@@ -30,6 +35,18 @@ public sealed class SecretsNeverLoggedTests
     private const string GrantType = "urn:ietf:params:oauth:grant-type:token-exchange";
 
     private const string IdTokenType = "urn:ietf:params:oauth:token-type:id_token";
+
+    private const string TeamTracker = "team-tracker.alvo.json";
+
+    private const string Preview = "/auth/v1/invitations/preview";
+
+    private const string Accept = "/auth/v1/invitations/accept";
+
+    private const string AppTokens = "/auth/v1/tokens";
+
+    private const string Jobs = "/api/jobs";
+
+    private const string Descriptor = "/management/projects/team-tracker/descriptor";
 
     private static readonly SqliteApiEngine _engine = SqliteApiEngine.Instance;
 
@@ -46,6 +63,61 @@ public sealed class SecretsNeverLoggedTests
         await ExchangeRefusalsAsync(world, secrets);
         await AdaSignsInRefreshesAndIsReplayedAsync(world, secrets);
         await BobSignsOutAndIsDisabledAsync(world, secrets);
+
+        world.Logs.Lines.ShouldNotBeEmpty("the capture must see the host's own log lines, or this fact measures nothing");
+        var leaks = (from line in world.Logs.Lines from secret in secrets.All where line.Contains(secret.Value, StringComparison.Ordinal) select $"{secret.Label}: {line}").ToList();
+        leaks.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Spec §8 for S4: an invitation code never reaches a log — not on the way in (preview, accept, a near-valid body the
+    /// validator refuses, the exchange's <c>invitation_code</c>, a 429), not on the way out (the one 201 that carries it),
+    /// and not as its hash, which is what the store sees. Each code is matched whole, by its 22-character random part, and
+    /// as its hash.
+    /// </summary>
+    [Fact]
+    public async Task No_invitation_code_appears_in_any_log()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Invitations = 30);
+        var secrets = new Secrets();
+        var (ada, _) = await SignedInAsync(world, secrets, "ada");
+        var acme = await AcmeAsync(world, ada);
+
+        await InvitationLifecycleAsync(world, secrets, ada, acme);
+        await InvitationOnlyExchangesAsync(world, secrets, ada, acme);
+        await PreviewUntilThrottledAsync(world, secrets.Invitation(InvitationCode.New().Value));
+
+        world.Logs.Lines.ShouldNotBeEmpty("the capture must see the host's own log lines, or this fact measures nothing");
+        var leaks = (from line in world.Logs.Lines from secret in secrets.All where line.Contains(secret.Value, StringComparison.Ordinal) select $"{secret.Label}: {line}").ToList();
+        leaks.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Spec §8 for S5: an app token's secret never reaches a log — not on the way out (the one 201 that carries it), not on
+    /// the way in (the Data API, a scope refusal, a wrong secret, Management's 403, a revoked token, a token presented to the
+    /// mint route until its budget answers 429, a near-valid body the validator refuses), and not as its hash, which is what
+    /// the registry stores. Each credential is matched whole, by its secret part, and as that part's hash.
+    /// </summary>
+    [Fact]
+    public async Task No_app_token_secret_appears_in_any_log()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Create = 6);
+        var secrets = new Secrets();
+        var (ada, _) = await SignedInAsync(world, secrets, "ada");
+        var acme = await AcmeAsync(world, ada);
+        var personal = await AppTokenMintedAsync(world, secrets, ada, AppTokenBody(world, acme, null));
+        var service = await AppTokenMintedAsync(world, secrets, ada, AppTokenBody(world, acme, ["dispatcher"]));
+
+        foreach (var token in new[] { personal, service })
+        {
+            await AppTokenAtWorkAsync(world, secrets, token, acme);
+        }
+
+        await AppTokenRefusedBodyAsync(world, ada, personal, acme);
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Get, AppTokens, ada), HttpStatusCode.OK);
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Delete, $"{AppTokens}/{KeyIdOf(personal)}", ada), HttpStatusCode.NoContent);
+        await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, Jobs, personal, Header(acme)), HttpStatusCode.Unauthorized);
+        await MintUntilThrottledAsync(world, service);
 
         world.Logs.Lines.ShouldNotBeEmpty("the capture must see the host's own log lines, or this fact measures nothing");
         var leaks = (from line in world.Logs.Lines from secret in secrets.All where line.Contains(secret.Value, StringComparison.Ordinal) select $"{secret.Label}: {line}").ToList();
@@ -89,6 +161,9 @@ public sealed class SecretsNeverLoggedTests
             var answer = $"{response.Headers} {response.Content.Headers} {await response.ReadTextAsync()}";
             Secrets.PartsOf(presented).ShouldAllBe(part => !answer.Contains(part, StringComparison.Ordinal), answer);
         }
+
+        await NoInvitationRefusalEchoesTheCodeAsync();
+        await NoAppTokenRefusalEchoesTheTokenAsync();
     }
 
     [Fact]
@@ -142,6 +217,204 @@ public sealed class SecretsNeverLoggedTests
         refused.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         IdentityModelEventSource.ShowPII.ShouldBeFalse();
         IdentityModelEventSource.LogCompleteSecurityArtifact.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The invitation half of <see cref="No_error_body_echoes_a_presented_token"/>: the dead-code 404 on preview and accept,
+    /// the exchange's <c>invalid_grant</c>, and a <c>/code</c> validation refusal whose code is one lone surrogate away from
+    /// valid — none of them repeats the code, its random part or its hash.
+    /// </summary>
+    private static async Task NoInvitationRefusalEchoesTheCodeAsync()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker);
+        var (ada, _) = await world.SignInAsync("ada");
+        var code = InvitationCode.New().Value;
+
+        var refusals = new Func<Task<HttpResponseMessage>>[]
+        {
+            () => world.Api.SendAsync(HttpMethod.Post, Preview, body: new JsonObject { ["code"] = code }),
+            () => world.AsPersonAsync(HttpMethod.Post, Accept, ada, new JsonObject { ["code"] = code }),
+            () => world.ExchangeAsync(world.IdToken("carol", "carol@gmail.com"), code),
+            () => world.Api.SendRawAsync(
+                HttpMethod.Post, Preview, content: new StringContent($$"""{"code":"{{code}}\ud800"}""", Encoding.UTF8, "application/json")),
+        };
+
+        foreach (var send in refusals)
+        {
+            using var response = await send();
+            ((int)response.StatusCode).ShouldBeGreaterThanOrEqualTo(400);
+            var answer = $"{response.Headers} {response.Content.Headers} {await response.ReadTextAsync()}";
+            Secrets.InvitationPartsOf(code).ShouldAllBe(part => !answer.Contains(part, StringComparison.Ordinal), answer);
+        }
+    }
+
+    /// <summary>
+    /// The app-token half of <see cref="No_error_body_echoes_a_presented_token"/>: Management's 403, the Data API's 401 for a
+    /// wrong secret, and a mint's 422 whose body carries the credential one control character away from a valid name — none
+    /// of them repeats the credential, its secret part or its hash, the real one or the wrong one.
+    /// </summary>
+    private static async Task NoAppTokenRefusalEchoesTheTokenAsync()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker);
+        var (ada, _) = await world.SignInAsync("ada");
+        var acme = await AcmeAsync(world, ada);
+        var token = await AppTokenMintedAsync(world, new Secrets(), ada, AppTokenBody(world, acme, null));
+        var wrong = WrongSecretOf(token);
+
+        var refusals = new (string Presented, Func<Task<HttpResponseMessage>> Send)[]
+        {
+            (token, () => world.AsTokenAsync(HttpMethod.Get, Descriptor, token)),
+            (wrong, () => world.AsTokenAsync(HttpMethod.Get, Jobs, wrong, Header(acme))),
+            (token, () => world.MintAsync(ada, NearValid(world, acme, token))),
+        };
+
+        foreach (var (presented, send) in refusals)
+        {
+            using var response = await send();
+            ((int)response.StatusCode).ShouldBeGreaterThanOrEqualTo(400);
+            var answer = $"{response.Headers} {response.Content.Headers} {await response.ReadTextAsync()}";
+            Secrets.AppTokenPartsOf(presented).Concat(Secrets.AppTokenPartsOf(token))
+                .ShouldAllBe(part => !answer.Contains(part, StringComparison.Ordinal), answer);
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="token"/> reads Acme's jobs, is refused <c>notes</c> (outside its scopes) and Management (D9), and is
+    /// presented with a wrong secret.
+    /// </summary>
+    private static async Task AppTokenAtWorkAsync(AccountsWorld world, Secrets secrets, string token, Guid acme)
+    {
+        await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, Jobs, token, Header(acme)), HttpStatusCode.OK);
+        await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, "/api/notes", token, Header(acme)), HttpStatusCode.Forbidden);
+        await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, Descriptor, token), HttpStatusCode.Forbidden);
+        var wrong = secrets.AppToken(WrongSecretOf(token));
+        await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, Jobs, wrong, Header(acme)), HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>A mint whose body is valid but for a control character after the credential it carries as its name.</summary>
+    private static async Task AppTokenRefusedBodyAsync(AccountsWorld world, string ada, string token, Guid acme)
+    {
+        using var response = await world.MintAsync(ada, NearValid(world, acme, token));
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.ReadTextAsync());
+    }
+
+    /// <summary>Presents <paramref name="token"/> to the mint route until the creation budget answers 429.</summary>
+    private static async Task MintUntilThrottledAsync(AccountsWorld world, string token)
+    {
+        for (var sent = 0; sent < 20; sent++)
+        {
+            using var response = await world.AsTokenAsync(HttpMethod.Post, AppTokens, token, body: new { kind = "personal" });
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("The creation budget never answered 429, so the throttled path was not exercised.");
+    }
+
+    private static async Task<string> AppTokenMintedAsync(AccountsWorld world, Secrets secrets, string access, JsonObject body)
+    {
+        using var response = await world.MintAsync(access, body);
+        var minted = await response.ReadJsonObjectAsync();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, minted.ToJsonString());
+        return secrets.AppToken(minted["token"]!.GetValue<string>());
+    }
+
+    /// <summary>A personal (<paramref name="roles"/> null) or service token body for Acme, scoped <c>jobs:read</c>.</summary>
+    private static JsonObject AppTokenBody(AccountsWorld world, Guid acme, string[]? roles)
+    {
+        var body = new JsonObject
+        {
+            ["name"] = "integration",
+            ["kind"] = roles is null ? "personal" : "service",
+            ["tenantId"] = Header(acme),
+            ["scopes"] = new JsonArray("jobs:read"),
+            ["expiresAt"] = world.Clock.GetUtcNow().AddDays(7).ToString("O", CultureInfo.InvariantCulture),
+        };
+        if (roles is not null)
+        {
+            body["roles"] = new JsonArray([.. roles.Select(role => JsonValue.Create(role))]);
+        }
+
+        return body;
+    }
+
+    private static JsonObject NearValid(AccountsWorld world, Guid acme, string token)
+    {
+        var body = AppTokenBody(world, acme, null);
+        body["name"] = $"{token}\u0007";
+        return body;
+    }
+
+    /// <summary>The credential's key id with a different, well-formed secret.</summary>
+    private static string WrongSecretOf(string token) =>
+        $"{KeyIdOf(token)}.{Secrets.SecretOf(AppTokenSecret.New(ApiKeyKind.Personal).Presented)}";
+
+    private static string KeyIdOf(string token) => token[..token.IndexOf('.', StringComparison.Ordinal)];
+
+    private static string Header(Guid tenant) => tenant.ToString("D");
+
+    /// <summary>
+    /// Ada invites twice; Carol previews the first, accepts it, accepts it again and sends it in a near-valid body; the
+    /// second is revoked, and Frank — no member, so the dead answer is his — accepts it dead.
+    /// </summary>
+    private static async Task InvitationLifecycleAsync(AccountsWorld world, Secrets secrets, string ada, Guid acme)
+    {
+        var (_, first) = await InvitedAsync(world, secrets, ada, acme);
+        var (secondId, second) = await InvitedAsync(world, secrets, ada, acme);
+        var (carol, _) = await SignedInAsync(world, secrets, "carol");
+        await ExpectAsync(world.Api.SendAsync(HttpMethod.Post, Preview, body: new JsonObject { ["code"] = first }), HttpStatusCode.OK);
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Post, Accept, carol, new JsonObject { ["code"] = first }), HttpStatusCode.OK);
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Post, Accept, carol, new JsonObject { ["code"] = first }), HttpStatusCode.OK);
+        await ExpectAsync(
+            world.AsPersonAsync(HttpMethod.Post, Accept, carol, new JsonObject { ["code"] = first, ["codes"] = second }),
+            HttpStatusCode.UnprocessableEntity);
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Get, $"/auth/v1/tenants/{acme:D}/invitations", ada), HttpStatusCode.OK);
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Delete, $"/auth/v1/tenants/{acme:D}/invitations/{secondId:D}", ada), HttpStatusCode.NoContent);
+        var (frank, _) = await SignedInAsync(world, secrets, "frank");
+        await ExpectAsync(world.AsPersonAsync(HttpMethod.Post, Accept, frank, new JsonObject { ["code"] = second }), HttpStatusCode.NotFound);
+    }
+
+    /// <summary>Under <c>invitationOnly</c>, a stranger signs up with a live <c>invitation_code</c>, another with a dead one.</summary>
+    private static async Task InvitationOnlyExchangesAsync(AccountsWorld world, Secrets secrets, string ada, Guid acme)
+    {
+        await world.ReapplyAsync(descriptor => descriptor["auth"]!["signUp"]!["mode"] = "invitationOnly");
+        var (_, live) = await InvitedAsync(world, secrets, ada, acme);
+        var dead = secrets.Invitation(InvitationCode.New().Value);
+        await ExpectAsync(world.ExchangeAsync(secrets.Jwt(world.IdToken("dave", "dave@gmail.com")), live), HttpStatusCode.OK);
+        await ExpectAsync(world.ExchangeAsync(secrets.Jwt(world.IdToken("erin", "erin@gmail.com")), dead), HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>Previews <paramref name="code"/> until the invitations budget answers 429.</summary>
+    private static async Task PreviewUntilThrottledAsync(AccountsWorld world, string code)
+    {
+        for (var sent = 0; sent < 60; sent++)
+        {
+            using var response = await world.Api.SendAsync(HttpMethod.Post, Preview, body: new JsonObject { ["code"] = code });
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("The invitations budget never answered 429, so the throttled path was not exercised.");
+    }
+
+    private static async Task<Guid> AcmeAsync(AccountsWorld world, string ada)
+    {
+        using var response = await world.AsPersonAsync(HttpMethod.Post, "/auth/v1/tenants", ada, new JsonObject { ["name"] = "Acme" });
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await response.ReadTextAsync());
+        return (await response.ReadJsonObjectAsync())["tenantId"]!.GetValue<Guid>();
+    }
+
+    private static async Task<(Guid Id, string Code)> InvitedAsync(AccountsWorld world, Secrets secrets, string access, Guid tenant)
+    {
+        using var response = await world.AsPersonAsync(
+            HttpMethod.Post, $"/auth/v1/tenants/{tenant:D}/invitations", access, new JsonObject { ["roles"] = new JsonArray("technician") });
+        var created = await response.ReadJsonObjectAsync();
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        return (created["id"]!.GetValue<Guid>(), secrets.Invitation(created["code"]!.GetValue<string>()));
     }
 
     /// <summary>Every refusal of the exchange: replay, an unknown issuer, a foreign audience, a forbidden algorithm, a stale token, a malformed request, a refused sign-up.</summary>
@@ -249,6 +522,16 @@ public sealed class SecretsNeverLoggedTests
         /// The token and the part that makes it a secret: a JWT's signature segment, a refresh token's MAC — the 43
         /// characters after <c>alvo_rt_</c>, the 32-digit id and its separator (a MAC may itself contain <c>_</c>).
         /// </summary>
+        /// <summary>An invitation code whole, its 22-character random part, and its hash — the form the store sees.</summary>
+        internal static IEnumerable<string> InvitationPartsOf(string code) =>
+            [code, code[InvitationCode.Prefix.Length..], InvitationCode.Hash(code)];
+
+        /// <summary>An app token whole, its secret part, and that part's hash — the form the registry stores.</summary>
+        internal static IEnumerable<string> AppTokenPartsOf(string token) => [token, SecretOf(token), ApiKeyHash.Compute(SecretOf(token))];
+
+        /// <summary>The part of a <c>keyId.secret</c> credential after its first separator.</summary>
+        internal static string SecretOf(string presented) => presented[(presented.IndexOf('.', StringComparison.Ordinal) + 1)..];
+
         internal static IEnumerable<string> PartsOf(string token) => token.StartsWith(RefreshTokenFormat.Prefix, StringComparison.Ordinal)
             ? [token, token[(RefreshTokenFormat.Prefix.Length + 33)..]]
             : token.Split('.') is { Length: 3 } jwt && jwt[2].Length > 0 ? [token, jwt[2]] : [token];
@@ -263,6 +546,26 @@ public sealed class SecretsNeverLoggedTests
         {
             Add("a refresh token", token);
             return token;
+        }
+
+        internal string Invitation(string code)
+        {
+            foreach (var part in InvitationPartsOf(code))
+            {
+                _all.Add(("an invitation code", part));
+            }
+
+            return code;
+        }
+
+        internal string AppToken(string presented)
+        {
+            foreach (var part in AppTokenPartsOf(presented))
+            {
+                _all.Add(("an app token", part));
+            }
+
+            return presented;
         }
 
         internal void ApiKey(string presented)

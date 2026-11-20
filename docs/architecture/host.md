@@ -152,11 +152,17 @@ host, path base and prefix — `http://localhost:5000/auth/v1` on a local run), 
 with `PUT /management/projects/{project}/accounts/{account}/disabled` (`admin`; see `management-api.md`, *Disabling an
 end user*).
 
-**`Alvo:Api:Cors:Origins`** and **`Alvo:Api:RateLimits:Token`** come with the `Alvo:Api` binding the host already
+**`Alvo:Api:Cors:Origins`**, **`Alvo:Api:RateLimits:Token`**, **`Alvo:Api:RateLimits:Create`** and **`Alvo:Api:RateLimits:Invitations`** come with the `Alvo:Api` binding the host already
 makes into `AlvoApiOptions` — nothing host-specific. `Cors:Origins` lists the exact browser origins
 (`https://app.example.com`, no path, no `*`) allowed to call the Data API and the auth routes; empty, which is the
 default, sends no CORS headers and answers no preflight. `RateLimits:Token` is the token endpoint's budget per client
-IP per minute (default 30). The client IP is the connection's, so behind a proxy it is honest only with
+IP per minute (default 30); `RateLimits:Create` is the same per-client budget for creating tenants and minting
+personal and service tokens, `POST /auth/v1/tenants` and `POST /auth/v1/tokens` (default 10, at least 1). The two
+routes **share** it — ten creations a minute is ten of either, in any mix (accounts S5 D15, spec §7.3's "tenant creation
+and token minting 10/min") — and no other self-service route is charged to it; `RateLimits:Invitations` is the
+per-client budget shared by the five invitation routes — creating, listing and revoking an invitation, previewing and
+accepting a code (default 20, at least 1). The token exchange keeps the `Token` budget even when it carries an
+`invitation_code`. The client IP is the connection's, so behind a proxy it is honest only with
 `Alvo:ForwardedHeaders:Enabled` — see *Behind a reverse proxy*. See `data-api.md`, *CORS and rate limits*.
 
 **`Alvo:Admin:Dashboard:Enabled`** (`Alvo__Admin__Dashboard__Enabled`) is the whole of the
@@ -221,7 +227,43 @@ reading the whole descriptor, applying a new one, rolling back. That is decision
 [`management-api.md`](./management-api.md#an-api-keys-scopes-govern-no-management-request-d7) and
 pinned over the wire — it is repeated here because an operator issuing a narrow key is entitled to
 read it where they issue one, not only where it was decided. Narrow a key's management reach by
-narrowing its **roles**.
+narrowing its **roles**. A personal or service token never reaches `/management`, whatever its roles: it is refused 403
+(accounts S5 D9).
+
+**Your own endpoints do not take personal or service tokens yet.** A host endpoint mapped with `.WithAlvoCaller()` names
+no entity, so no API-key scope is checked there — and a token's scopes are the boundary its owner drew around a
+credential handed to someone else. Rather than let a `jobs:read` token act there as its whole principal, the endpoint
+resolves the token (an unusable one is still 401) and then refuses it **403** `forbidden`, before the handler runs, with
+one fixed detail: *"Personal and service tokens are not accepted on custom endpoints yet: a custom endpoint names no
+entity a token's scopes could be checked against. Use the generated Data API or a command, or call this endpoint with a
+signed-in session or a configured API key."* Configured keys, Bearer people and the anonymous caller reach it exactly
+as before. A command mapped with `MapAlvoCommand` is different, because it names its entity: a token whose scopes read
+and write that entity is admitted, and the handler then writes with the command's own authority — judged by the
+descriptor's rules as the token's caller, not by the token's scopes. Letting a custom endpoint name the scope it needs
+is [#536](https://github.com/Burgyn/MMLib.Alvo/issues/536). Pinned by `AppTokenCallerTests`.
+
+**Two homes for an API key, one store in front of them** (accounts S5 D4). `X-Alvo-Api-Key` carries two kinds of
+credential: the dev keys configured under `Alvo:Auth:DevKeys`, held in memory, and the personal and service tokens people
+mint over `POST /auth/v1/tokens`, persisted in `{prefix}_api_keys` by the relational provider. The `IApiKeyStore` the
+resolver reads is a routing store, `ApiKeyStores`: a key id starting `alvo_pat_` or `alvo_svc_` goes to the persisted
+registry, every other id to the dev keys — one lookup, no fallback between them. Both prefixes are **reserved**: a
+dev key whose `KeyId` starts with either is refused at startup, naming `Alvo:Auth:DevKeys:{i}:KeyId`, so a configured key
+can never shadow a minted one. A provider with no registry (a host that is not relational) answers every prefixed id as
+unknown. The routing store is registered with `TryAddSingleton`. **A host that wants a key store of its own decorates
+Alvo's, it does not replace it**: a decorator that wraps the existing `IApiKeyStore` registration (its factory, or
+Scrutor's `Decorate<IApiKeyStore, …>()`) and delegates the ids it does not own keeps personal and service tokens
+working. A host that *replaces* the registration owns key resolution entirely: its store is the only one asked, it never
+reaches the token registry (whose port is internal), and no token can resolve there. Such a host's
+`POST /auth/v1/tokens` therefore refuses rather than mints — 404 `feature-disabled`, `descriptorKey`
+`auth.accessTokens`, with a fixed sentence naming the replaced store — because the route first asks the resolved store
+for a reserved probe id, **`alvo_pat_~reach`**, that only Alvo's routing store answers (with a dead record: revoked,
+expired, and a hash no secret matches — never a usable key). **A decorator owes that lookup one thing: pass it through
+to the inner store unchanged and return the inner store's answer as it came** — do not answer unknown `alvo_pat_…` ids
+itself, filter ids by shape, or rebuild the record. A decorator that returns a changed copy, or nothing, is judged a
+replacement, and the mint fails closed with the same `feature-disabled` refusal. It is a route refusal, not a boot one:
+a host that replaces the store and never turns `auth.accessTokens` on is legitimate. A store that issues its own ids under
+the reserved `alvo_pat_`/`alvo_svc_` prefixes is refused the same way by the Management API and by `.WithAlvoCaller()`
+endpoints, which judge any principal whose key id carries a prefix an app token: the prefixes are Alvo's.
 
 ## The bootstrap administrator
 

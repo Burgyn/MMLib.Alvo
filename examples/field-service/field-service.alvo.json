@@ -2,13 +2,20 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "field-service",
-  "description": "The advanced demo: a multi-tenant field-service dispatch backend — shared region reference data, per-tenant customers, per-tenant work orders that move through a guarded life cycle, and the technicians' booked visits — with gapless job numbers, an SLA timer, integrity the database enforces, and a completion webhook to billing. Every construct here exists so one end-to-end test can measure one behaviour — see README.md for the construct-to-behaviour table.",
+  "description": "The advanced demo: a multi-tenant field-service dispatch backend — shared region reference data, per-tenant customers, per-tenant work orders that move through a guarded life cycle, and the technicians' booked visits — with gapless job numbers, an SLA timer, integrity the database enforces, and a completion webhook to billing. People sign in with Google, create their own companies, invite technicians and mint tokens for integrations beside the five dev keys — see README.md, Self-service. Every construct here exists so one end-to-end test can measure one behaviour — see README.md for the construct-to-behaviour table.",
   "tenancy": {
-    "enabled": true
+    "enabled": true,
+    "selfService": {
+      "createTenants": { "creatorRoles": ["dispatcher"] },
+      "invitations": true,
+      "assignableRoles": ["dispatcher", "technician"]
+    }
   },
   "auth": {
-    "providers": ["local"],
-    "roles": ["dispatcher", "technician"]
+    "providers": ["local", "google"],
+    "roles": ["dispatcher", "technician"],
+    "signUp": { "mode": "open" },
+    "accessTokens": { "personal": true, "service": true }
   },
   "formats": {
     "work-order-ref": {

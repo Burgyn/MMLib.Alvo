@@ -14,7 +14,9 @@ internal static partial class SchedulePumpLog
     [LoggerMessage(
         Level = LogLevel.Error,
         Message = "Alvo held data migration {Id} at revision {Revision}: the schema now has a scoped entity, so it runs once per "
-            + "tenant, and this host registers no IAlvoTenantCatalog to list them. It starts once a host that registers one runs.")]
+            + "tenant, and nothing lists the tenants — this host registers no IAlvoTenantCatalog, and that revision does not "
+            + "declare tenancy.selfService over a tenant registry. It starts once a tenant list exists: a host that registers a "
+            + "catalog, or a revision that declares tenancy.selfService on a host with a registry.")]
     internal static partial void TenantCatalogMissing(ILogger logger, string id, int revision);
 
     [LoggerMessage(

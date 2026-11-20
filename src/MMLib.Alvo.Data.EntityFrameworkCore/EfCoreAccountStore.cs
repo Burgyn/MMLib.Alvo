@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Tenants;
 
 using System.Data.Common;
 using System.Globalization;
@@ -29,7 +30,27 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// matches no row, revokes nothing, and still answers that the account exists.
 /// </para>
 /// <para>
-/// The tables are created once per process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted;
+/// <b>The personal tenant is born in the transaction that needs it</b> (S3 plan D6): a sign-in or a refresh that asks for
+/// one ensures it with two <c>INSERT … SELECT … ON CONFLICT DO NOTHING</c>s over <see cref="TenantTables"/> — the tenant,
+/// unique by <c>personal_owner</c>, then its owner membership — so concurrent first sign-ins converge on one tenant and
+/// one membership, and a refusal, which commits nothing, leaves none.
+/// </para>
+/// <para>
+/// <b>An invited sign-in accepts in its own transaction</b> (S4 plan D5, D7): after the session and the personal tenant,
+/// <see cref="InvitationAcceptance"/> — the tenant store's own routine — accepts the sign-in's invitation for the account.
+/// A dead one answers <see cref="SignInStatus.InvitationRefused"/>, which carries no account, so the transaction rolls back
+/// the account, identity, session, refresh token and personal tenant with it: all or nothing, for a new account and an
+/// existing one alike — except for an account that already is a member of the code's tenant, which signs in with nothing
+/// accepted, however dead the code (<see cref="AcceptInvitationStatus.AlreadyMember"/>).
+/// </para>
+/// <para>
+/// <b>One read answers session and membership</b> (D4): <see cref="ReadCallerAsync"/> is one statement in each of its three
+/// shapes, the membership left-joined onto the live session.
+/// </para>
+/// <para>
+/// The tables — the tenant registry's and the tokens table too, which the personal tenant, the invitation, the caller read
+/// and the ban's sweep reach — are
+/// created once per process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted;
 /// <c>SystemSchemaInitializer</c> creates them at boot.
 /// </para>
 /// </remarks>
@@ -37,6 +58,9 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
 {
     private readonly RelationalConnectionFactory _connections;
     private readonly AuthTables _tables;
+    private readonly TenantTables _tenantTables;
+    private readonly InvitationTables _invitationTables;
+    private readonly AppTokenTables _appTokenTables;
     private readonly SecretCipher? _cipher;
     private readonly OnceDdl _ddl;
 
@@ -53,6 +77,9 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
         ArgumentNullException.ThrowIfNull(options);
         _connections = connections;
         _tables = new AuthTables(options.SchemaPrefix);
+        _tenantTables = new TenantTables(options.SchemaPrefix);
+        _invitationTables = new InvitationTables(options.SchemaPrefix);
+        _appTokenTables = new AppTokenTables(options.SchemaPrefix);
         _cipher = cipher;
         _ddl = new OnceDdl(EnsureTablesAsync);
     }
@@ -69,15 +96,19 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
     }
 
     /// <inheritdoc/>
-    public async Task<bool> IsSessionLiveAsync(UserId account, Guid session, DateTimeOffset now, CancellationToken ct)
+    public async Task<CallerRead> ReadCallerAsync(CallerQuery query, CancellationToken ct)
     {
-        var counts = await ReadAsync(
-            _tables.LiveSessionSql,
-            command => Bind(command, ("@session_id", Id(session)), ("@account_id", Id(account)), ("@now", Instant(now))),
-            reader => Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture),
-            ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(query);
+        var rows = query.Membership is { } membership
+            ? await ReadAsync(
+                _tenantTables.CallerSql(_tables, personal: membership.Tenant is null),
+                command => BindCaller(command, query),
+                reader => reader.IsDBNull(0) ? null : TenantTables.ReadMembership(reader),
+                ct).ConfigureAwait(false)
+            : await ReadAsync(_tables.LiveSessionSql, command => BindCaller(command, query), _ => (StoredMembership?)null, ct)
+                .ConfigureAwait(false);
 
-        return counts.Single() == 1;
+        return rows.Count == 0 ? new CallerRead(false, null) : new CallerRead(true, rows[0]);
     }
 
     /// <inheritdoc/>
@@ -125,9 +156,66 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
             return new SignInOutcome(SignInStatus.Disabled, null);
         }
 
-        return await SessionStartedAsync(connection, transaction, account, request, ct).ConfigureAwait(false)
-            ? new SignInOutcome(created ? SignInStatus.Created : SignInStatus.SignedIn, account)
-            : new SignInOutcome(SignInStatus.SubjectTokenReplayed, null);
+        if (!await SessionStartedAsync(connection, transaction, account, request, ct).ConfigureAwait(false))
+        {
+            return new SignInOutcome(SignInStatus.SubjectTokenReplayed, null);
+        }
+
+        await PersonalTenantEnsuredAsync(connection, transaction, account, request.PersonalTenant, request.Now, ct).ConfigureAwait(false);
+        if (!await InvitationAcceptedAsync(connection, transaction, account, request, ct).ConfigureAwait(false))
+        {
+            return new SignInOutcome(SignInStatus.InvitationRefused, null);
+        }
+
+        return new SignInOutcome(created ? SignInStatus.Created : SignInStatus.SignedIn, account);
+    }
+
+    /// <summary>
+    /// Accepts the sign-in's invitation, if it carries one, for <paramref name="account"/> with the tenant store's own
+    /// routine (S4 plan D4, D5); <see langword="true"/> too when the account already is a member of the code's tenant,
+    /// however dead the code; <see langword="false"/> when it is dead or the account could not be locked, and then the
+    /// caller answers <see cref="SignInStatus.InvitationRefused"/> and nothing commits. The account's email was refreshed
+    /// earlier in this transaction, so an email binding is judged by this sign-in's identity.
+    /// </summary>
+    private async Task<bool> InvitationAcceptedAsync(
+        DbConnection connection, DbTransaction transaction, UserId account, SignInRequest request, CancellationToken ct)
+    {
+        if (request.Invitation is not { } invitation)
+        {
+            return true;
+        }
+
+        var accepted = await InvitationAcceptance.AcceptAsync(
+            connection, transaction, _invitationTables, _tenantTables, _tables, invitation.CodeHash, account, request.Now, ct)
+            .ConfigureAwait(false);
+
+        return accepted.Status is AcceptInvitationStatus.Joined or AcceptInvitationStatus.AlreadyMember;
+    }
+
+    /// <summary>
+    /// Ensures <paramref name="account"/>'s personal tenant and its owner membership when <paramref name="personal"/> asks
+    /// for one (D6); whichever tenant a concurrent caller committed first stands.
+    /// </summary>
+    private async Task PersonalTenantEnsuredAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        UserId account,
+        PersonalTenantRequest? personal,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (personal is null)
+        {
+            return;
+        }
+
+        await ExecuteAsync(
+            connection, transaction, _tenantTables.EnsurePersonalTenantSql,
+            command => Bind(command, ("@tenant_id", Id(personal.Id.Value)), ("@now", Instant(now)), ("@account_id", Id(account))),
+            ct).ConfigureAwait(false);
+        await ExecuteAsync(
+            connection, transaction, _tenantTables.EnsurePersonalMemberSql,
+            command => Bind(command, ("@now", Instant(now)), ("@account_id", Id(account))), ct).ConfigureAwait(false);
     }
 
     private async Task<UserId?> AccountOfAsync(
@@ -243,6 +331,15 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
         ("@parent_id", parent is { } id ? Id(id) : null),
         ("@now", Instant(now)));
 
+    private static void BindCaller(DbCommand command, CallerQuery query)
+    {
+        Bind(command, ("@session_id", Id(query.Session)), ("@account_id", Id(query.Account)), ("@now", Instant(query.Now)));
+        if (query.Membership is { Tenant: { } tenant })
+        {
+            Bind(command, ("@tenant_id", Id(tenant.Value)));
+        }
+    }
+
     private static AccountView ReadAccount(DbDataReader reader) => new(
         UserIdOf(reader.GetString(0)),
         TextOrNull(reader, 1),
@@ -342,6 +439,9 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
             using (await _connections.WriteGate.EnterAsync(ct).ConfigureAwait(false))
             {
                 await _tables.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _tenantTables.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _invitationTables.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _appTokenTables.EnsureAsync(connection, ct).ConfigureAwait(false);
             }
         }
     }

@@ -35,7 +35,13 @@ internal readonly record struct CallerAdmission(AlvoPrincipal? Principal, IResul
 /// <list type="table">
 ///   <listheader><term>Presented</term><description>Data API, commands, <c>.WithAlvoCaller()</c> / Management API</description></listheader>
 ///   <item><term>nothing</term><description>anonymous / anonymous</description></item>
-///   <item><term>the API-key header</term><description>the API-key resolver / the API-key resolver</description></item>
+///   <item>
+///   <term>the API-key header</term>
+///   <description>
+///   the API-key resolver / the API-key resolver — where a personal or service token (<c>alvo_pat_</c>/<c>alvo_svc_</c>) is
+///   refused by the Management filter with a 403, after it resolved (S5 plan D9)
+///   </description>
+///   </item>
 ///   <item>
 ///   <term><c>Authorization: Bearer</c>, a person resolver registered</term>
 ///   <description>the person resolver / ignored — Management never reads <c>Authorization</c></description>

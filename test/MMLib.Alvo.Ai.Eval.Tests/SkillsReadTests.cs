@@ -26,6 +26,8 @@ public sealed class SkillsReadTests
     [InlineData("/entities/rules", "entities-and-fields")]
     [InlineData("/entities/bikes/fields/computed", "entities-and-fields")]
     [InlineData("/entities/bikes/fields/hooks/type", "entities-and-fields")]
+    [InlineData("/auth/signUp", "accounts")]
+    [InlineData("/tenancy/selfService", "accounts")]
     public void A_changed_path_belongs_to_its_area(string path, string area) =>
         SkillsRead.AreaOf(path, proposed: null).ShouldBe(area);
 

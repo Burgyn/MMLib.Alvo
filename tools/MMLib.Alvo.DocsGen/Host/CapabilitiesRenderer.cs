@@ -21,6 +21,7 @@ internal static class CapabilitiesRenderer
         ["trigger."] = "automation",
         ["auth."] = "auth",
         ["http."] = "entities-hooks",
+        ["tenancy."] = "tenancy",
     };
 
     private static readonly Dictionary<string, string> _slotPages = new(StringComparer.Ordinal)

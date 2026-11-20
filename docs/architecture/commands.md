@@ -34,7 +34,11 @@ composition without them refuses to boot with a command registered (Ruling 12).
 1. **The caller** — `CallerGate`, the code `.WithAlvoCaller()`'s `AlvoCallerFilter` shares: no credential is
    anonymous, an unusable key is `401`. A bound command needs the read **and** the write scope on its entity, because
    it reads the row before it writes; an unbound one needs `*:write` (Rulings 6, 39). Scopes are an HTTP narrowing of
-   the command's own entity; the handler's writes elsewhere are judged by the port's policy.
+   the command's own entity; the handler's writes elsewhere are judged by the port's policy. A personal or service
+   token (accounts S5) is judged the same way: admitted when its scopes read and write the bound entity, never by an
+   unbound command (no token holds `*:write`), and once admitted the handler acts with the command's own authority.
+   `.WithAlvoCaller()`'s filter shares this gate but refuses such a token outright (403 `forbidden`), because a plain
+   endpoint names no entity its scopes could be checked against (accounts.md, S5 final review I1; #536).
 2. **The key** — a malformed `Idempotency-Key` is `422` before anything is hashed; then the key is claimed. A replay,
    an in-flight key or a spent one is answered here (Ruling 7).
 3. **The row** — read as the caller through `IAlvoSessions`; unreadable or absent is the same `404`.

@@ -252,6 +252,31 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string RateLimited = "rate-limited";
 
+    /// <summary>The route answers only when the applied descriptor enables the feature it belongs to (404).</summary>
+    /// <remarks>
+    /// The document carries <c>descriptorKey</c>, the descriptor key that enables the route — <c>tenancy.selfService</c>
+    /// or <c>tenancy.selfService.createTenants</c> — so an agent learns what to declare rather than guessing why a route
+    /// it found in the OpenAPI document is missing. The self-service routes are always mapped (accounts spec §6.3); this
+    /// is what they answer while their feature is off. Answered only on a host that maps the sign-in routes.
+    /// </remarks>
+    public const string FeatureDisabled = "feature-disabled";
+
+    /// <summary>The change would leave a shared tenant without an owner (409).</summary>
+    /// <remarks>
+    /// The last owner cannot leave, be removed or lose ownership (accounts spec §6.4): another member has to be made an
+    /// owner first. Distinct from <see cref="Conflict"/> because the fix differs — promote someone, rather than send
+    /// another value. Answered only on the self-service routes.
+    /// </remarks>
+    public const string LastOwner = "last-owner";
+
+    /// <summary>The person has created as many shared tenants as the descriptor allows one account (409).</summary>
+    /// <remarks>
+    /// The document carries <c>maxPerAccount</c>, the cap (<c>tenancy.selfService.createTenants.maxPerAccount</c>). The
+    /// count is every shared tenant the account ever created, so handing one to someone else frees nothing. Answered only
+    /// on the self-service routes.
+    /// </remarks>
+    public const string TenantLimit = "tenant-limit";
+
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
     /// assert the catalogue and the code agree without the assertion being satisfied by its own subject.
@@ -280,6 +305,9 @@ public static class AlvoProblemTypes
         SignUpRefused,
         SignInRefused,
         RateLimited,
+        FeatureDisabled,
+        LastOwner,
+        TenantLimit,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

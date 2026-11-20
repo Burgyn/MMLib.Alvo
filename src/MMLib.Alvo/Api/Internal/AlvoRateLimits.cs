@@ -9,6 +9,12 @@ internal enum AlvoRateLimit
 {
     /// <summary>The token endpoint, <c>POST {prefix}/token</c>: <see cref="AlvoRateLimitOptions.Token"/> per minute.</summary>
     Token,
+
+    /// <summary>Tenant creation, <c>POST {prefix}/tenants</c>: <see cref="AlvoRateLimitOptions.Create"/> per minute.</summary>
+    Create,
+
+    /// <summary>Every invitation route, one budget for all five: <see cref="AlvoRateLimitOptions.Invitations"/> per minute.</summary>
+    Invitations,
 }
 
 /// <summary>
@@ -38,7 +44,13 @@ internal sealed class AlvoRateLimits : IDisposable
     public AlvoRateLimits(IOptions<AlvoApiOptions> options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _limits = new() { [AlvoRateLimit.Token] = new Charged(FixedWindows(options.Value.RateLimits?.Token ?? 0)) };
+        var budgets = options.Value.RateLimits;
+        _limits = new()
+        {
+            [AlvoRateLimit.Token] = new Charged(FixedWindows(budgets?.Token ?? 0)),
+            [AlvoRateLimit.Create] = new Charged(FixedWindows(budgets?.Create ?? 0)),
+            [AlvoRateLimit.Invitations] = new Charged(FixedWindows(budgets?.Invitations ?? 0)),
+        };
     }
 
     /// <summary>The filter that charges <paramref name="limit"/>'s budget before the handler runs.</summary>

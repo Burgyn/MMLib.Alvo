@@ -157,6 +157,38 @@ internal static class ProblemResultFactory
             + "decides who is; ask whoever administers it.");
 
     /// <summary>
+    /// The 403 for a personal or service token presented to the Management API (S5 plan D9, closing S1 D8).
+    /// </summary>
+    /// <remarks>
+    /// <b>The wording is fixed and names no caller</b> — identical for every token and every project, so it discloses
+    /// nothing a reader of the docs does not have, and it names the fix an agent can act on. The slug is
+    /// <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy refusal already carries.
+    /// </remarks>
+    internal static IResult AppTokenForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are app credentials and never manage a project. "
+            + "Use an operator session or a configured API key.");
+
+    /// <summary>
+    /// The 403 for a personal or service token presented to a host's own endpoint mapped with <c>.WithAlvoCaller()</c>
+    /// (accounts S5, the final review's I1).
+    /// </summary>
+    /// <remarks>
+    /// <b>Why refuse rather than admit unscoped:</b> a token's scopes are the boundary its owner drew around a credential
+    /// handed to a third party, and a custom endpoint names no entity they could be checked against — so admitting it
+    /// would let a <c>jobs:read</c> token act as its whole principal. Until an endpoint can name the scope it needs
+    /// (#536), it does not take app tokens at all. The wording is fixed and names no caller, like
+    /// <see cref="AppTokenForbidden"/>; the slug is <see cref="AlvoProblemTypes.Forbidden"/>.
+    /// </remarks>
+    internal static IResult AppTokenCustomEndpointForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are not accepted on custom endpoints yet: a custom endpoint names no entity a "
+            + "token's scopes could be checked against. Use the generated Data API or a command, or call this endpoint "
+            + "with a signed-in session or a configured API key.");
+
+    /// <summary>
     /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
     /// does not admit as an administrator.
     /// </summary>
@@ -432,6 +464,64 @@ internal static class ProblemResultFactory
             "Too many requests from this client. Wait for the time Retry-After names, then send the request again."),
         HeaderNames.RetryAfter,
         retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// The 404 a self-service route answers while the applied descriptor leaves its feature off (S3 plan D8), naming the
+    /// descriptor key that turns it on in a <c>descriptorKey</c> member.
+    /// </summary>
+    /// <param name="descriptorKey">The key that enables the route, e.g. <c>tenancy.selfService</c>.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey) =>
+        FeatureDisabled(descriptorKey, $"This route answers only when the applied descriptor declares {descriptorKey}.");
+
+    /// <summary>
+    /// The same 404 <c>feature-disabled</c>, naming <paramref name="descriptorKey"/>, for a feature the descriptor declares
+    /// but this host cannot honour; <paramref name="detail"/> is a fixed sentence naming why.
+    /// </summary>
+    /// <param name="descriptorKey">The descriptor key, carried in a <c>descriptorKey</c> member.</param>
+    /// <param name="detail">The fixed sentence.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey, string detail) => Problem(
+        StatusCodes.Status404NotFound,
+        AlvoProblemTypes.FeatureDisabled,
+        detail,
+        new Dictionary<string, object?>(StringComparer.Ordinal) { [DescriptorKeyMember] = descriptorKey });
+
+    /// <summary>The 409 for a person who has created as many shared tenants as the descriptor allows (S3 plan D9).</summary>
+    /// <param name="maxPerAccount">The cap, carried in a <c>maxPerAccount</c> member.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult TenantLimit(int maxPerAccount) => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.TenantLimit,
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"This account has already created {maxPerAccount} shared tenants, the most one account may create; leaving one does not free a place."),
+        new Dictionary<string, object?>(StringComparer.Ordinal) { [MaxPerAccountMember] = maxPerAccount });
+
+    /// <summary>The 409 for a change that would leave a shared tenant without an owner (spec §6.4).</summary>
+    /// <returns>The problem result.</returns>
+    internal static IResult LastOwner() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.LastOwner,
+        "A shared tenant always keeps an owner. Make another member an owner first; then this one can leave, be removed or be demoted.");
+
+    /// <summary>The 403 for a self-service change the caller may not make — not an owner, or not a person at all.</summary>
+    /// <param name="detail">The fixed sentence saying who may.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult PersonForbidden(string detail) =>
+        Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, detail);
+
+    /// <summary>The 409 for a membership change the tenant's own state refuses, e.g. a personal tenant's.</summary>
+    /// <param name="detail">The fixed sentence saying why.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult MembershipConflict(string detail) =>
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
+
+    /// <summary>The <see cref="FeatureDisabled(string, string)"/> member naming the descriptor key.</summary>
+    private const string DescriptorKeyMember = "descriptorKey";
+
+    /// <summary>The <see cref="TenantLimit"/> member carrying the cap.</summary>
+    private const string MaxPerAccountMember = "maxPerAccount";
 
     /// <summary>RFC 6749 §5.2's error-code member.</summary>
     private const string OAuthErrorMember = "error";

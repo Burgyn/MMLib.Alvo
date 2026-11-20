@@ -1,0 +1,19 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "self-service-admin-assignable",
+  "auth": { "providers": ["google"], "roles": ["dispatcher"], "signUp": { "mode": "open" } },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "createTenants": { "creatorRoles": ["dispatcher"] },
+      "assignableRoles": ["admin", "dispatcher"]
+    }
+  },
+  "entities": {
+    "notes": {
+      "fields": {
+        "title": { "type": "string", "required": true }
+      }
+    }
+  }
+}

@@ -22,7 +22,18 @@ internal static class TokenProblems
     /// <summary>The description of every refused refresh token, whatever made it dead.</summary>
     internal const string RefreshTokenDescription = "The refresh token is not valid. Sign in again.";
 
+    /// <summary>
+    /// The description of every dead <c>invitation_code</c> on an exchange (S4 plan D3) — unknown, expired, revoked, used up
+    /// or bound to another email read the same.
+    /// </summary>
+    internal const string InvitationDescription = "The invitation is not valid. Sign in without it, or ask for a new one.";
+
+    /// <summary>The description of an <c>invitation_code</c> sent while the descriptor takes no invitations (S4 plan D5).</summary>
+    internal const string InvitationsOffDescription = "This backend takes no invitations; send no invitation_code.";
+
     private const string InvalidRequestError = "invalid_request";
+
+    private const string InvalidGrantError = "invalid_grant";
 
     private const string AccessDeniedError = "access_denied";
 
@@ -63,7 +74,17 @@ internal static class TokenProblems
 
     /// <summary>A refresh token refused for any reason (RFC 6749 §5.2: <c>invalid_grant</c>).</summary>
     internal static IResult InvalidGrant() => OAuth(
-        StatusCodes.Status400BadRequest, AlvoProblemTypes.TokenRefused, "invalid_grant", RefreshTokenDescription);
+        StatusCodes.Status400BadRequest, AlvoProblemTypes.TokenRefused, InvalidGrantError, RefreshTokenDescription);
+
+    /// <summary>
+    /// An exchange whose <c>invitation_code</c> admits nobody (RFC 6749 §5.2: <c>invalid_grant</c> — "invalid, expired,
+    /// revoked"): nothing was written, and the description names no reason.
+    /// </summary>
+    internal static IResult InvitationRefused() => OAuth(
+        StatusCodes.Status400BadRequest, AlvoProblemTypes.TokenRefused, InvalidGrantError, InvitationDescription);
+
+    /// <summary>An exchange carrying an <c>invitation_code</c> while <c>tenancy.selfService.invitations</c> is off.</summary>
+    internal static IResult InvitationsOff() => InvalidRequest(InvitationsOffDescription);
 
     /// <summary>A new identity the sign-up policy does not admit, naming the policy that refused it.</summary>
     /// <param name="verdict">The refusing verdict.</param>
