@@ -52,6 +52,13 @@ Then try:
 The host runs on PostgreSQL only; the unit tests use `MMLib.Alvo.TestHost` (SQLite). The dev keys are demo
 authentication: a real embedded host plugs in its own.
 
+**Sign-in is the standalone stack's story, not this host's.** The descriptor lists `google` and turns on self-service
+tenants and tokens, but this host registers no `AddAlvoAccounts`. It logs, on every boot, that `auth.providers lists
+google, but this host registered no end-user sign-in`, and every request behaves as it did before (the standalone
+stack's `examples/field-service/README.md` *Self-service* runs it end to end). A host that does add sign-in should know
+that its own `.WithAlvoCaller()` endpoints refuse personal and service tokens until an endpoint can name the scope it
+needs (#536); a command such as `work_orders.dispatch` takes one within its entity's scopes.
+
 ## The slices
 
 The slices are vertical, over the types the build generates from the descriptor (`AdditionalFiles …
