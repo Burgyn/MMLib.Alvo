@@ -551,8 +551,10 @@ POST /auth/v1/token   application/x-www-form-urlencoded
 → 403 { "error": "access_denied", "policy": "invitationOnly" }                         no code at all
 ```
 
-The first owner has to come from somewhere: sign them in under `open`, or let the operator seed them, then re-apply
-with `invitationOnly`. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
+The first owner has to come from somewhere: sign them in under `open`, then re-apply with `invitationOnly`. No route
+or port creates an account for someone else, so an operator cannot seed one; an account exists only once its person
+has signed in. `invitationOnly` without `tenancy.selfService.invitations` applies with a warning at
+`/auth/signUp/mode` (`SignUpCheck.NobodyCanBeInvited`, stack review C-I6), since nobody new could ever sign up. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
 there as well. `InvitationEngineFacts.Level_three_with_invitations_end_to_end` and `…Invitation_only_end_to_end` are
 these two sections as tests, on SQLite and on PostgreSQL.
 
@@ -1323,3 +1325,11 @@ defects that no slice could see, because each sits where two slices meet. Each f
   there would stop an owner from demoting or removing a banned member. The in-transaction actor reads (a mint, an
   accept, a member write) need no change: each first locks the actor's account row with `disabled_at IS NULL`, or runs
   for a person whose live session already proved it. Enabling the account honours the memberships again.
+- **Apply warns when nobody could ever sign up** (C-I6, S2 × S4). `auth.signUp.mode: invitationOnly` with an end-user
+  provider and without `tenancy.selfService.invitations: true` — no tenancy at all, or self-service without
+  invitations — now draws a **warning**, not a refusal, at `/auth/signUp/mode` (`SignUpCheck.Warnings`), naming both
+  ways out. A warning, following `GlobalWriteWarnings`' precedent rather than `SelfServiceCheck`'s refusals: those
+  refuse descriptors that cannot work at all (invitations with no shared tenant to invite into), while this one is a
+  legitimate "registration closed" state in which existing accounts keep signing in. `examples/complex-crm`, the
+  schema showcase, had exactly this shape (S2 added `invitationOnly` before invitations existed), so it now declares
+  `tenancy.selfService` with `invitations: true`; its canonical snapshot moved by that block alone.

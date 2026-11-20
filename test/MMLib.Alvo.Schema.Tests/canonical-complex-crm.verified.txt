@@ -401,7 +401,20 @@
     }
   },
   "tenancy": {
-    "enabled": true
+    "enabled": true,
+    "selfService": {
+      "assignableRoles": [
+        "sales",
+        "manager",
+        "finance"
+      ],
+      "createTenants": {
+        "creatorRoles": [
+          "manager"
+        ]
+      },
+      "invitations": true
+    }
   },
   "webhooks": {
     "endpoints": {

@@ -16,7 +16,7 @@ public sealed class AccessTenantRoleRefusalTests
               "apiVersion": "alvo.dev/v1",
               "name": "access-tenant-roles",
               "auth": { "providers": ["google"], "roles": ["dispatcher", "technician", "owner"], "signUp": { "mode": "invitationOnly" } },
-              "tenancy": { "enabled": true, "selfService": { "createTenants": { "creatorRoles": ["dispatcher"] }, "assignableRoles": {{assignable}} } },
+              "tenancy": { "enabled": true, "selfService": { "createTenants": { "creatorRoles": ["dispatcher"] }, "invitations": true, "assignableRoles": {{assignable}} } },
               "access": {{access}},
               "entities": { "jobs": { "fields": { "title": { "type": "string" } } } }
             }

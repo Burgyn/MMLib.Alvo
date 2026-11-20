@@ -19,7 +19,8 @@ from a caller an operator provisioned to anyone Google vouches for. Shapes:
 
 - `auth.signUp` — `mode` `open` or `invitationOnly`, optional `allowedEmailDomains`. No default: once `providers`
   lists `google`, a missing one is refused at `/auth/signUp` ("auth.signUp says nothing about who may"). With
-  tenancy, `open` warns about each global entity write rule that admits `authenticated`.
+  tenancy, `open` warns about each global entity write rule that admits `authenticated`. `invitationOnly` without
+  `tenancy.selfService.invitations: true` warns at `/auth/signUp/mode`: nobody can be invited, so nobody new signs up.
 - `tenancy.selfService` — absent: tenants come only from API keys and operators. Needs `tenancy.enabled: true`, else
   refused ("self-service tenants are tenants").
   - `assignableRoles` — the tenant roles, the only roles a membership carries. Each is declared in `auth.roles` and is
@@ -63,7 +64,8 @@ give them a role through `creatorRoles`.
 
 Signing in decides who gets in, never which rows: every `list` and `get` rule admitting `authenticated` — six
 entities in `bike-workshop` — now admits any Google account. Narrow each in the same change
-(`alvo-descriptor-rules-and-cel`), or use `invitationOnly`.
+(`alvo-descriptor-rules-and-cel`). Do not offer `invitationOnly` here: it needs invitations, which need shared tenants,
+and `bike-workshop` has no tenancy, so nobody could ever sign up.
 
 <!-- example: tenant-role-in-access -->
 **Make manager a role people hold in their own workshop.**

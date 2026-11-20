@@ -19,7 +19,12 @@
     "viewer": "'sales' in @user.roles || 'manager' in @user.roles || 'finance' in @user.roles"
   },
   "tenancy": {
-    "enabled": true
+    "enabled": true,
+    "selfService": {
+      "assignableRoles": ["sales", "manager", "finance"],
+      "createTenants": { "creatorRoles": ["manager"] },
+      "invitations": true
+    }
   },
   "dynamicEntities": {
     "enabled": true,

@@ -378,6 +378,10 @@ The first owner has to come from somewhere: sign them in while the mode is `open
 with `invitationOnly`. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
 there as well.
 
+Codes exist only with `"invitations": true` under `tenancy.selfService`. Without it nobody can be invited, so nobody
+new can ever sign up. The apply still succeeds, because closed registration is a legitimate choice, but it warns at
+`/auth/signUp/mode` and names both fixes: turn invitations on, or sign people up under `open`.
+
 ## How it behaves
 
 - **Every dead invitation gets one answer.** Unknown, malformed, expired, revoked, used up, bound to another email,

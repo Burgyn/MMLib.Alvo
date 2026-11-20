@@ -48,7 +48,7 @@ providers therefore work the same whichever provider the person used.
    | `auth.signUp` | Who gets an account |
    |---|---|
    | `{ "mode": "open" }` | Anyone with a Google account. |
-   | `{ "mode": "invitationOnly" }` | Only a person who brings an invitation code (see [Tenants, members and invitations](/guides/tenants-and-invitations/#invitation-only-sign-up)). |
+   | `{ "mode": "invitationOnly" }` | Only a person who brings an invitation code (see [Tenants, members and invitations](/guides/tenants-and-invitations/#invitation-only-sign-up)). Codes need `tenancy.selfService.invitations`. Without it nobody new can ever sign up, and the apply warns. |
    | `{ "mode": "open", "allowedEmailDomains": ["example.com"] }` | Only people whose [trusted](#which-email-addresses-alvo-trusts) address is in one of these domains. Works with either mode. |
 
    The rules carry the rest. `audit: true` fills `created_by` from the caller, so `created_by == @user.id` limits
