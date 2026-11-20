@@ -1,16 +1,26 @@
-# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3), invitations (S4) and integrator tokens (S5)
+# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3), invitations (S4), integrator tokens (S5) and the field-service demo (S6)
 
 > The contributor's view of `MMLib.Alvo.Accounts` and the parts of the core and the EF adapter it uses: the tables, the
 > path a request takes, the invariants and the tests that hold them, and where Alvo deviates from the standards it
 > adopts. The design is `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
-> (§3–§7, §14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
+> (§3–§7, §12–§14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
 > tenants' D1–D15 in `docs/superpowers/plans/2026-11-13-accounts-s3-tenants.md`; the invitations' D1–D15 in
 > `docs/superpowers/plans/2026-11-13-accounts-s4-invitations.md`; the tokens' D1–D16 in
-> `docs/superpowers/plans/2026-11-13-accounts-s5-tokens.md`. The first half of this page is sign-in (level 1);
+> `docs/superpowers/plans/2026-11-13-accounts-s5-tokens.md`; the demo's and the docs' D1–D16 in
+> `docs/superpowers/plans/2026-11-13-accounts-s6-demo-docs.md`. The first half of this page is sign-in (level 1);
 > [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3,
 > [*Invitations and `invitationOnly` sign-up (S4)*](#invitations-and-invitationonly-sign-up-s4) is how a second person
-> joins them, and [*Tokens for integrators (S5)*](#tokens-for-integrators-personal-and-service-tokens-s5) is how a
-> program acts as a person or as a tenant. Users' guides arrive in S6.
+> joins them, [*Tokens for integrators (S5)*](#tokens-for-integrators-personal-and-service-tokens-s5) is how a
+> program acts as a person or as a tenant, and [*The demo (S6)*](#the-demo-s6) is all of it running in a real
+> container.
+>
+> **Users read the guides, not this page.** *Sign-in and accounts*
+> (`website/src/content/docs/guides/sign-in.mdx`, https://alvo.burgyn.online/guides/sign-in/), *Tenants, members and
+> invitations* (`…/guides/tenants-and-invitations.mdx`, https://alvo.burgyn.online/guides/tenants-and-invitations/) and
+> *Tokens for integrators* (`…/guides/tokens.mdx`, https://alvo.burgyn.online/guides/tokens/) say what an app author
+> can build and how; the routes are the generated *Sign-in, tenants and tokens API* reference
+> (https://alvo.burgyn.online/reference/accounts-api/). When a behaviour here changes, the guide that shows it changes
+> in the same commit.
 
 ## What you can build with it
 
@@ -1067,4 +1077,218 @@ And where the implementation answered differently from the plan's first wording,
   bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
   grows by this table).
 - Events and an audit trail for minting and revoking (spec D9).
-- The field-service demo, its TeaPie suite, the website guides and the descriptor skills (S6).
+- The field-service demo, its TeaPie suite, the users' guides and the descriptor skill — S6, [below](#the-demo-s6).
+
+## The demo (S6)
+
+S6 changes no product behaviour. It takes everything S2–S5 built and runs it the way an app's users would: in the
+published container, over PostgreSQL, through HTTP, with people who sign in rather than dev keys. The vehicle for it is
+`examples/field-service`, the advanced demo, which was already a multi-tenant dispatch backend driven by five dev keys.
+It became the spec's level-3 showcase (§12) **without losing a test**: the dev keys keep working beside sign-in, and
+every suite that ran against the stack before still runs unchanged.
+
+S6 also shipped what an app author reads — three guides, a generated reference page and a descriptor skill — and that
+is covered at the end of this section. The plan is `docs/superpowers/plans/2026-11-13-accounts-s6-demo-docs.md`
+(D1–D16); where the build answered differently, the deviation is recorded [below](#recorded-decisions-and-deviations-2).
+
+### What it proves
+
+A new TeaPie collection, `test/teapie-field-service/170-SelfService`, tells one story with three people: **Dana**, a
+dispatcher who founds a company; **Theo**, the technician she invites; and **Olga**, an outsider who belongs to nothing.
+Each is a brand-new Google account made for the run. The cases run in order, and each one leans on what the one before
+it set up:
+
+| Case | What happens, and what it pins |
+|---|---|
+| `001-sign-in` | The three people sign in. Each sign-in is an RFC 8693 token exchange that answers a 15-minute access token and a rotating refresh token, never cached. A token signed by a key the issuer never published is refused, a replayed ID token starts no second session, and a new person has an account and no membership. The admin key creates a region for the run. |
+| `002-invite-and-accept` | Dana creates *Acme Repairs* and is its owner and a `dispatcher`. She invites Theo as a `technician`: the code is answered once, the anonymous preview shows only the tenant, the inviter and the roles, and accepting twice changes nothing. Acme then has exactly two members, and the invitation list never carries a code. |
+| `003-assigned-work` | Dana creates a customer and two jobs, one assigned to Theo. A create without `tenant_id` in the body is refused (see D11 below). In Acme, Theo lists exactly his own job; naming no tenant, he is refused by the tenant guard. He cannot place a job or create a customer, and he walks his job through the state machine to `completed` with his tenant role. |
+| `004-billing-token` | Dana mints a `billing` service token (`dispatcher`, `work_orders:read`). It reads exactly Acme's completed job and cannot write (`403 out-of-scope`), whatever its role would allow. Theo's personal token reads only his job. Dana's token list carries no secret. |
+| `005-member-removed` | Dana removes Theo. His next request in Acme is `401 invalid_token`, and his personal token died with his membership. He stays signed in, and the billing token, which is Dana's, keeps reading. |
+| `006-foreign-tenant` | Olga naming Acme is refused outright (`401`); naming no tenant she meets the tenant guard (`403`). She still reads global data — the run's region. |
+| `007-roles-per-tenant` | Theo founds his own garage, where he is owner and dispatcher. A self-made dispatcher cannot write the global `regions`, in his tenant or in Dana's (the admin key's create is the control). Dana joins the garage as a technician, and the same body she sends is refused there and created in Acme. |
+| `008-dead-invitations` | A revoked invitation, and one that expires 15 seconds after it is made; the suite polls until it has lapsed. |
+| `009-dead-invitations-answer-alike` | Used-up, revoked, expired and unknown codes are one `404`, identical apart from the trace id, and none of them made Olga a member of anything. |
+| `010-tokens-reach` | A token cannot mint a token. An app token sent as `Authorization: Bearer` is `401 invalid_token` (the same secret in `X-Alvo-Api-Key` is the control). Personal and service tokens are refused at Management with its fixed sentence; a Bearer session there is an anonymous caller and gets the same refusal, never a `200`. An operator key is the control. |
+| `011-refresh-rotation` | A refresh rotates the token. Replaying the old one inside the 10-second grace window answers the same child. Replaying it after the window is `400 invalid_grant`; the suite polls until it is. |
+| `012-reuse-ends-the-session` | That reuse ended Dana's session: every refresh token of the family is dead and her newest access token is `401`. Theo, whose session it was not, is still signed in. |
+
+Every item of §12's list maps to a row: the story is `001`–`005`, and the adversarial half is `005` (a personal token
+dying with its owner's membership), `006` (a header naming a tenant you are not in), `007` (a role from one tenant absent
+in another and on `regions`, and a self-made dispatcher refused there), `009` (dead invitations answering alike) and
+`010` (a token minting a token, and a personal token refused by Management). Every scoped create carries both
+`X-Alvo-Tenant` and `tenant_id`, as a real client has to today.
+
+The two waits — an invitation's expiry and the grace window — are polls (`## RETRY-UNTIL-TEST-PASS`, at most 30 × 1 s),
+never sleeps, so a slow runner waits longer instead of failing. Measured: about 16 s and 11 s.
+
+### How to run it
+
+**The whole e2e:** `scripts/test-e2e`. It makes every secret fresh, starts all three stacks and runs every TeaPie
+suite, `170-SelfService` last in the field-service one. It is the required **Build & test** check's e2e half; it is in
+no ring.
+
+**Just this collection, while you work on it.** `170` does not need a fresh database: it creates its own people,
+region and tenants, so it runs alone and runs again on a live stack. The other field-service collections do not —
+they own the database and need `down --volumes` first.
+
+```bash
+set -a; . examples/field-service/demo-identities.env; set +a
+export ALVO_FS_DISPATCHER_NORTH_SECRET=$(openssl rand -hex 16)   # and the other four, as the example's README shows
+export ALVO_FS_SECRETS_KEY=$(openssl rand -base64 32)
+docker compose --env-file examples/field-service/demo-identities.env \
+  -f docker-compose.field-service.yml up --build --detach --wait
+# artifacts/teapie/env.json: scripts/test-e2e's shape (test/teapie-field-service/env.example.json shows it)
+dotnet tool run teapie -- test test/teapie-field-service/170-SelfService \
+  -e compose --env-file artifacts/teapie/env.json --no-cache-vars --no-logo
+```
+
+If something else holds port 8081, export `ALVO_FS_PORT` after sourcing the env file and use the same port in
+`fsBaseUrl`. `scripts/test-e2e` cannot be moved that way: it reads `demo-identities.env` again itself.
+
+### How the stack signs people in
+
+Nobody can sign in to a CI container with a real Google account, so the stack points Alvo's **Google provider at a
+test issuer** and the suite plays Google. Only configuration differs from a real deployment; the code path is the one
+production runs.
+
+- **The issuer is the `sink`** (D3). The WireMock that already plays the billing system shares Alvo's network
+  namespace, so `http://localhost:9090/oidc` is it. Compose sets
+  `Alvo__Accounts__Providers__Google__Authority` to that URL and `AllowHttpMetadata: "true"`. The discovery document is
+  a committed mapping (`examples/field-service/sink/mappings/test-oidc-issuer.json`, named TEST-ONLY); it says
+  `issuer: https://accounts.google.com`, because Google's preset finds its provider by that issuer, and names the key
+  set at `http://localhost:9090/oidc/jwks.json`. The ID tokens are RS256, the preset's only algorithm.
+- **The key is made per machine and registered per run** (D4, a recorded deviation). `_shared/TestIssuer.csx` creates
+  an RSA-2048 key the first time a run needs one and keeps it under `$TMPDIR/alvo-field-service-e2e/`; its `kid` is the
+  key's RFC 7638 thumbprint. The first request of `001-sign-in` publishes the key's public half to the sink through
+  WireMock's admin API, before anyone signs in. No private key is in the repository. The key is kept between runs
+  rather than made per run because Alvo refetches a provider's key set for an unknown `kid` at most once every five
+  minutes (`OidcMetadata.UnknownKidInterval`); a new key per run would refuse the third run inside five minutes on a
+  live stack.
+- **The stack runs `ASPNETCORE_ENVIRONMENT=Development`** (D5), because `AllowHttpMetadata` is refused in every other
+  environment (spec §11.2). `Alvo:Accounts:Issuer` stays unset, so Alvo names its tokens after the URL a request
+  reached; the audience defaults to the descriptor's name. Only `MMLib.Alvo.Accounts` reads the host environment, the
+  image ships no `appsettings.Development.json`, and Alvo's own exception handler masks the developer exception page,
+  so nothing else changes.
+- **A secrets key per run** (D6). Accounts refuses to start without `Alvo:Secrets:EncryptionKeyFile`.
+  `scripts/test-e2e` exports `ALVO_FS_SECRETS_KEY` fresh, and compose hands it over as a Compose secret mounted at
+  `/run/secrets/alvo_fs_secrets_key`; `${…:?}` refuses a start without it.
+- **Wider rate budgets** (D7): `Token` 120, `Create` 30 and `Invitations` 120 a minute per IP, instead of 30, 10 and 20.
+  One suite run comes from one address, and the limits themselves are pinned in process (`TokenRoutesTests`,
+  `TenantRoutesTests`, `InvitationRoutesTests`), so a `429` in the e2e would be a flake, not a finding.
+
+A consequence worth knowing: on a stack you start by hand, only the suite holds the signing key, so only a `170` run can
+sign anyone in. `examples/field-service/README.md`, *Self-service*, says how to point the provider at real Google
+instead.
+
+### What else the stack change reached
+
+- **The `090-Docs` path pin grew by exactly the sign-in surface** (D9): the 15 `/auth/v1` paths S5's Accounts OpenAPI
+  snapshot holds, beside the 16 entity paths, and no others.
+- **The load stack resets it all.** `test/load/docker-compose.load.yml` composes the demo's file, so it resets the
+  Development environment, the three Google settings, the secrets-key file and the three rate budgets (`!reset null`)
+  and the secret's mount (`secrets: !reset []`). The merged `alvo` service is identical to the one before S6, so load
+  stays comparable to its baselines. `scripts/test-load` also exports `ALVO_FS_SECRETS_KEY`, as a safeguard.
+- **`scripts/test-e2e`'s PostgreSQL partition check counts only the two seeded tenants.** It counted every distinct
+  `tenant_id` in `work_orders`, and `170` adds Acme's jobs as a third. The claim is unchanged: storing everything under
+  one discriminator would answer 1 or 0.
+- **The embedded sample serves the same descriptor without sign-in** (D1). `samples/MMLib.Alvo.Samples.FieldService`
+  registers no `AddAlvoAccounts`, so it logs the boot warning that the descriptor lists `google` and the host signs
+  nobody in, and every request there behaves as before. Sign-in is the standalone stack's story.
+
+### The guides, the reference and the skill
+
+- **Three guides under *Secure it*** (D15): *Sign-in and accounts*, *Tenants, members and invitations* and *Tokens for
+  integrators*. Each opens with what you will build, shows the smallest working thing, then explains the mechanics and
+  the limits. Stale claims elsewhere on the site ("only local accounts and API keys", Google "tracked in #36", the
+  generated routes taking "API keys only") were swept for the claim, not by file.
+- **The guides' exchanges are hand-written, and held three ways** (D12): every descriptor a guide shows is a snippet
+  `DocsSnippetTests` applies; every `METHOD /auth/v1/…` a guide names is checked against the generated reference; and
+  each worked flow names the `170` case that runs it for real (on the fuller field-service descriptor, with the same
+  answers).
+- **The reference** (D13): `tools/MMLib.Alvo.DocsGen` boots a second in-process host over the field-service descriptor
+  with Google configured (a placeholder client id, an `https` issuer, a key file in its temp directory — no network) and
+  publishes only the `/auth/v1` paths, as `reference/accounts-api`.
+- **A tenth descriptor skill, `alvo-descriptor-accounts`** (D14), the catalogue's last slot. `SkillAreas.Accounts`
+  owns `/auth/**` except `/auth/roles`, and `/tenancy/selfService/**`. Its line in the always-on skill list did not fit
+  the schema assistant's budget, so two sentences of the base prompt were cut (each repeated by a skill or by a
+  refusal's own fix) and the prompt is now **v10**.
+
+### Invariants, and the tests that hold them
+
+| Invariant | Held by |
+|---|---|
+| People sign in through the real container, and every wall of §12 holds there: tenant walls, roles per tenant, the global `regions`, dead invitations, a token's reach, refresh reuse (AC5, over HTTP) | `test/teapie-field-service/170-SelfService/001`–`012`, inside the required e2e check |
+| No private key is committed anywhere, and the sink serves only the public half of the run's key | `FieldServiceTestIssuerTests.No_private_key_is_committed` (every path `git ls-files` lists, staged ones included), `…The_committed_issuer_carries_no_key_material`; `170-SelfService/001`'s "The sink publishes the public half of the run's key, under its kid, and nothing private." (the live key set's members are exactly `alg`, `e`, `kid`, `kty`, `n`, `use`, and `n`/`e` are the run's key) |
+| Only the demo stack trusts `http` metadata, beside Development; the compose authority, the discovery document and the suite's registration agree; the stack and the suite read one client id; the secrets key comes from the run | `FieldServiceTestIssuerTests.The_demo_stack_trusts_http_metadata_only_in_development`, `…The_discovery_document_names_googles_issuer_and_the_sinks_key_set`, `…The_suite_registers_its_key_set_where_the_discovery_document_points`, `…The_stack_and_the_suite_read_one_client_id`, `…The_secrets_key_comes_from_the_run_and_is_never_committed`; the product side is `AccountsOptionsTests.Allowing_http_metadata_is_refused_outside_development_naming_the_setting` |
+| The load stack resets the demo's sign-in, so load measures the host its baselines describe | `FieldServiceTestIssuerTests.The_load_stack_resets_the_demos_sign_in` |
+| Every existing suite stays green under the grown descriptor and the Development + accounts stack (AC7) | `scripts/test-e2e` whole (`test/teapie` 22, `test/teapie-field-service` 632, `test/teapie-field-service-host` 69, the PostgreSQL checks); `090-Docs` pins the path set by equality |
+| Every route a guide names exists, and the reference holds exactly the sign-in routes | `AccountsReferenceTests.Every_route_a_guide_names_is_a_sign_in_operation`, `…The_reference_holds_exactly_the_sign_in_routes`, `…No_entity_route_reaches_the_sign_in_reference`, `…The_description_links_the_three_guides` |
+| Every descriptor a guide shows applies | `DocsSnippetTests` (the `website/src/snippets/{sign-in,tenants,tokens}/*.alvo.json` files) |
+| The skill's worked examples are real outcomes, it fits the caps, and the accounts paths load it | `SkillExampleOutcomeTests`, `SkillConformanceTests`, `SkillAreasTests.The_accounts_paths_belong_to_the_accounts_skill`, `AlvoAssistantTests.The_always_in_context_instructions_do_not_outgrow_the_v3_base_prompt` |
+
+### Recorded decisions and deviations
+
+From the plan (`2026-11-13-accounts-s6-demo-docs.md`, D1–D16), one line each:
+
+- **D1** — sign-in lives on the standalone stack only; the embedded sample serves the same descriptor with no
+  `AddAlvoAccounts`. **Correction to the plan's wording:** D1 said the sample's "`.WithAlvoCaller()` endpoints
+  (dispatch, technician app)" would refuse app tokens. The sample maps no `.WithAlvoCaller()` endpoint: dispatch is a
+  `MapAlvoCommand`, which takes a token within its entity's read and write scopes, and the technician app is a
+  `MapAlvoWebhookReceiver`, which authenticates by its signing secret. The sample's README states the general rule
+  (#536) and nothing about its own routes.
+- **D2** — the descriptor gains exactly §12's keys, with `local` kept and no `personalTenant`; `regions` is untouched,
+  so a self-made dispatcher's refusal there is pinned as a `403` with the admin's `201` as control.
+- **D3** — the test issuer is Google's preset under another authority.
+- **D4** — **Deviation from the plan and from spec §12**, which committed one test-only private key under `test/` and
+  had the sink serve a static key set. No key is committed: it is made per machine and registered per run, as
+  described above. The plan's reason for committing one ("a per-run key would leave a hand-started stack unable to
+  sign anyone in") no longer applies — any `170` run publishes the key on a hand-started stack too — and a public
+  repository then holds no private key for a secret scanner to flag. The cost: if the temp key file is deleted while a
+  stack stays up, two fresh keys inside five minutes fail on the refetch throttle; restarting the stack clears it.
+- **D5** — the stack runs Development, with `Issuer` unset.
+- **D6** — a secrets key per run, as a Compose secret.
+- **D7** — wider rate budgets. **Deviation from the plan's number:** `Invitations` is 120, not 60. All five
+  invitation routes share one budget, and one `170` run spends about 31 calls on it (the expiry poll alone about 16
+  previews), so two runs inside a minute on a live stack — how a contributor iterates — were refused `429` at 60.
+- **D8** — the grace window keeps its default and is waited out by polling; so is a 15-second invitation expiry.
+- **D9** — the `090-Docs` pin moves by exactly the 15 sign-in paths.
+- **D10** — three people per run, minted fresh; `170` creates its own region and tenants.
+- **D11** — the story runs in §12's order, and every scoped create carries `tenant_id` and `X-Alvo-Tenant`.
+  **Deviation from the plan's expected answer:** a scoped create without `tenant_id` is `403 forbidden`, *"The write
+  was rejected by policy."*, with no `violations` — not a `422` at `/tenant_id`. A candidate with no tenant fails the
+  synthesized tenant scope's `WITH CHECK`. `170-SelfService/003` pins the real answer and the guides quote it, as a
+  current limitation.
+- **D12** — the guides' exchanges are hand-written and held three ways (above).
+- **D13** — the reference publishes the sign-in routes from OpenAPI.
+- **D14** — a tenth descriptor skill. **Beyond the plan:** the skill list's new line did not fit the always-on budget
+  (`AlvoAssistantTests`, 22 758 bytes), so the base prompt lost two sentences rather than the budget growing, and its
+  version moved to **v10**.
+- **D15** — three guides under *Secure it*, each opening with what you will build.
+- **D16** — no public API moves and no product behaviour changes; every `PublicApi.*.verified.txt` is unchanged.
+
+And where the product answered differently from the plan's first wording (each pinned by the case named):
+
+- **A technician placing a job is `422 unresolved-reference` at `/customer_id`, not `403`** (`003`). Reference
+  resolution runs, as the caller, before the row-level `create` rule, and a technician reads no customer. A customer
+  create, which has no reference, reaches the rule and is the `403`.
+- **A token writing outside its scopes carries the `out-of-scope` type** (`004`).
+- **Management answers an anonymous caller `403`, not `401`**, so a Bearer session there is pinned as "the same refusal
+  as anonymous" (`010`).
+- **An app token sent as `Authorization: Bearer` is the generic `401 invalid_token`** (`010`): *"The presented bearer
+  token could not be used. …"*. It does not say the secret belongs in `X-Alvo-Api-Key`; the tokens guide says it.
+
+### Not in S6, and owed
+
+- **A scoped create's missing `tenant_id` names no field.** The `403` is correct but unhelpful to an agent: Alvo could
+  fill the column from the tenant the request acts in, or answer a structured violation at `/tenant_id`. A DX
+  follow-up.
+- **A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.** The `401` could name `X-Alvo-Api-Key` as its
+  fix. A DX follow-up.
+- **An `eval-assistant` run on the v10 prompt and the tenth skill** is owed (it costs tokens and is in no ring). Two
+  smaller gaps sit beside it: `SkillAreas.AreaOf("/tenancy", …)` does not look for a `selfService` inside an added
+  value, and the base prompt's "You can change" list names neither `auth` nor `tenancy.selfService`.
+- **No real browser signs in anywhere.** The Google console steps and `sign-in.js` follow Google's documented API;
+  the demo stack signs people in through the test issuer only.
+- App tokens on a host's own `.WithAlvoCaller()` endpoints ([#536](https://github.com/Burgyn/MMLib.Alvo/issues/536)),
+  and everything else under *Not in S5* above.

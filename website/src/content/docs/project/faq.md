@@ -22,7 +22,8 @@ v0.1 release; until then an embedded host references the projects or a local pac
 
 In an embedded host, yes: your users sign in to your app, and your own endpoints pass Alvo their id, roles and tenant,
 so the descriptor's rules decide what they may do ([Use your own authentication](/guides/own-authentication/)).
-The generated API itself accepts only Alvo's API keys today, and publishing your signed-in user to it is planned
+The generated API itself takes Alvo's own credentials only: an API key, or, with `MMLib.Alvo.Accounts`, an access token
+from [Alvo's sign-in](/guides/sign-in/). Handing it a user your app signed in itself is planned
 ([#210](https://github.com/Burgyn/MMLib.Alvo/issues/210)).
 
 ## Which databases does it support?

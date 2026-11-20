@@ -76,7 +76,9 @@ public partial class ReadmeTests
         var features = Section(_readme, "## What you get");
         var bullets = features.Split('\n').Where(line => line.StartsWith("- ", StringComparison.Ordinal)).ToList();
 
-        bullets.Count.ShouldBeInRange(6, 8);
+        // The F6 design's 6–8, plus one: sign-in and self-service tenants (accounts initiative, S6) is a feature of its
+        // own, and folding it into another bullet would hide it.
+        bullets.Count.ShouldBeInRange(6, 9);
         bullets.ShouldAllBe(line => line.Contains("](" + SiteUrl, StringComparison.Ordinal));
         features.ShouldNotMatch(@"\bF\d\b");
     }
