@@ -102,6 +102,12 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
         public System.Threading.Tasks.Task A_replace_the_callers_get_rule_excludes_answers_with_the_id_alone_on_both_branches() { }
+        public System.Threading.Tasks.Task A_scoped_batch_create_row_naming_another_tenant_is_refused_at_its_index() { }
+        public System.Threading.Tasks.Task A_scoped_batch_create_without_tenant_id_places_every_row_in_the_callers_own_tenant() { }
+        public System.Threading.Tasks.Task A_scoped_create_naming_another_tenant_is_refused_with_how_to_fix_it() { }
+        public System.Threading.Tasks.Task A_scoped_create_naming_the_callers_own_tenant_still_succeeds() { }
+        public System.Threading.Tasks.Task A_scoped_create_with_a_null_tenant_id_is_refused_the_same_way() { }
+        public System.Threading.Tasks.Task A_scoped_create_without_tenant_id_lands_in_the_callers_own_tenant() { }
         public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
@@ -116,6 +122,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task An_audited_create_stamps_the_caller_and_the_implementations_clock() { }
         public System.Threading.Tasks.Task An_audited_update_stamps_the_updater_and_never_rewrites_the_creator() { }
         public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
+        public System.Threading.Tasks.Task An_idempotent_scoped_create_without_tenant_id_lands_in_the_callers_own_tenant() { }
         public System.Threading.Tasks.Task An_in_list_longer_than_the_candidate_cap_is_rejected_rather_than_bound() { }
         public System.Threading.Tasks.Task An_operation_with_no_rule_denies_while_its_siblings_work() { }
         public System.Threading.Tasks.Task An_update_the_callers_get_rule_excludes_answers_with_the_id_alone() { }

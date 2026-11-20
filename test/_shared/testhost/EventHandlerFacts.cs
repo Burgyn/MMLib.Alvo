@@ -197,8 +197,8 @@ public abstract class EventHandlerFacts
 
         var seenA = peek.Seen[tenantA];
         (seenA.ReadForeign, seenA.Listed).ShouldBe((false, 1), "tenant A's handler sees tenant A's one note, and tenant B's note is not found");
-        ShouldBeTenantScopeRefusal(seenA.WriteRefusal);
-        ShouldBeTenantScopeRefusal(peek.Seen[tenantB].WriteRefusal);
+        ShouldBeForeignTenantRefusal(seenA.WriteRefusal);
+        ShouldBeForeignTenantRefusal(peek.Seen[tenantB].WriteRefusal);
         (await alvo.Data.QueryAsync(new AlvoQuery { Entity = "notes" }, Agent with { Tenant = new TenantId(tenantB) }, Ct)).Items.Count.ShouldBe(1);
     }
 
@@ -518,8 +518,8 @@ public abstract class EventHandlerFacts
     /// The synthesized tenant scope's refusal. Its message names no tenant on purpose, and tenant-desk's create rule admits
     /// the system caller's <c>admin</c> role, so the tenant scope is the only predicate left that can refuse.
     /// </summary>
-    private static void ShouldBeTenantScopeRefusal(Exception? refusal) =>
-        refusal.ShouldBeOfType<AlvoAuthorizationException>().Message.ShouldBe(AlvoAuthorizationException.WriteRejectedByPolicy);
+    private static void ShouldBeForeignTenantRefusal(Exception? refusal) =>
+        refusal.ShouldBeOfType<AlvoAuthorizationException>().Message.ShouldBe(AlvoAuthorizationException.ForeignTenant);
 
     private static async Task<DeliveryRow> SingleDeliveryAsync(HandlerDatabase database) =>
         (await DeliveryRows.ReadAsync(database.Connect, Ct)).ShouldHaveSingleItem();

@@ -39,7 +39,7 @@ namespace MMLib.Alvo.Testing.Data;
 /// long as each owns its own isolated data.
 /// </para>
 /// </remarks>
-public abstract class AlvoDataAdversarialTests
+public abstract partial class AlvoDataAdversarialTests
 {
     /// <summary>
     /// Builds a fresh <see cref="IAlvoData"/> over <paramref name="descriptor"/>/<paramref name="schema"/>,

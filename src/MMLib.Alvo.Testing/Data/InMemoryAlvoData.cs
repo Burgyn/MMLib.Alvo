@@ -187,9 +187,9 @@ public sealed class InMemoryAlvoData : IAlvoData
         var schema = EnsureFieldsDeclared(entity, values);
         EnsureNoManagedColumnWrite(values, schema, isUpdate: false, decision.HiddenFields);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
+        AlvoTenantPlacement.EnsurePlaceable(values, schema, context);
 
-        var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
-        var candidate = new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() };
+        var candidate = new Dictionary<string, object?>(CreatedRow(schema, values, context), StringComparer.Ordinal) { [IdField] = Guid.NewGuid() };
         var postImage = new AlvoRecord(candidate);
         EnsureWriteAllowed(decision, postImage, previous: null, context);
 
@@ -508,12 +508,10 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
 
-        var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
-        var candidate = new Dictionary<string, object?>(WholeRow(stamped, schema, decision), StringComparer.Ordinal)
+        var candidate = new Dictionary<string, object?>(WholeRow(CreatedRow(schema, values, context), schema, decision), StringComparer.Ordinal)
         {
             [IdField] = id,
         };
-        StampTenant(candidate, schema, context);
 
         var postImage = new AlvoRecord(candidate);
         EnsureWriteAllowed(decision, postImage, previous: null, context);
@@ -665,18 +663,18 @@ public sealed class InMemoryAlvoData : IAlvoData
             !managed.Contains(field.Name) && !field.IsMaintained() && !field.IsVirtual);
     }
 
-    /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
-    /// <param name="candidate">The candidate row being built.</param>
+    /// <summary>
+    /// The row a create composes from the caller's payload, on every create path — single, keyed, batch and a
+    /// replace's create branch: the declared defaults, the caller's own tenant (<see cref="AlvoTenantPlacement"/>),
+    /// then the audit stamp.
+    /// </summary>
     /// <param name="schema">The entity as the applied schema declares it.</param>
+    /// <param name="values">The caller's payload, already refused if it named what a caller may not write.</param>
     /// <param name="context">The caller performing the write.</param>
-    private static void StampTenant(
-        Dictionary<string, object?> candidate, EntitySchema schema, AlvoContext context)
-    {
-        if (AlvoManagedColumns.For(schema).Contains(AlvoManagedColumns.TenantId) && context.Tenant is { } tenant)
-        {
-            candidate[AlvoManagedColumns.TenantId] = tenant.Value;
-        }
-    }
+    private IReadOnlyDictionary<string, object?> CreatedRow(
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context) =>
+        AlvoAuditStamp.Applied(
+            schema, AlvoTenantPlacement.Placed(WholeRowValues(schema, values), schema, context), context, _time, isUpdate: false);
 
     /// <summary>The caller's decision for one operation, or the refusal it earned.</summary>
     /// <param name="entity">The entity name.</param>
@@ -1442,16 +1440,16 @@ public sealed class InMemoryAlvoData : IAlvoData
         for (var index = 0; index < rows.Count; index++)
         {
             var values = rows[index];
-            if (PayloadRefusal(entity, values, decision, isUpdate: false) is { } refused)
+            var schema = FindEntity(entity);
+            if ((PayloadRefusal(entity, values, decision, isUpdate: false)
+                ?? AlvoTenantPlacement.Refusal(values, schema!, context)) is { } refused)
             {
                 refusals.Add(Forbidden(index, refused));
                 continue;
             }
 
-            var schema = FindEntity(entity)!;
-            var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
             var postImage = new AlvoRecord(
-                new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() });
+                new Dictionary<string, object?>(CreatedRow(schema!, values, context), StringComparer.Ordinal) { [IdField] = Guid.NewGuid() });
 
             if (WriteRefusal(decision, postImage, previous: null, context) is { } rejected)
             {

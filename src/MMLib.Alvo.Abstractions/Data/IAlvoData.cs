@@ -190,11 +190,12 @@ namespace MMLib.Alvo.Data;
 /// <b>The framework-managed <c>id</c>/<c>tenant_id</c> columns are never caller-writable, but not
 /// symmetrically.</b> <c>id</c> is rejected in both a <see cref="CreateAsync"/> and an
 /// <see cref="UpdateAsync"/> payload — it is assigned once, by the implementation, and never
-/// rewritten. <c>tenant_id</c> is different: it is legitimately caller-supplied on
-/// <see cref="CreateAsync"/> (a tenant-scoped entity's <c>WITH CHECK</c>/<see cref="PolicyDecision.TenantScope"/>
-/// guards the candidate row's post-image there, exactly like every other field the check
-/// predicate constrains), but rejected outright on <see cref="UpdateAsync"/> — a row can never move
-/// to another tenant once created. Both rejections are checked against the payload alone, before
+/// rewritten. <c>tenant_id</c> is different: it is optional on <see cref="CreateAsync"/> and
+/// <see cref="CreateManyAsync"/>, where a row is always placed in the caller's own tenant — an omitted
+/// <c>tenant_id</c> is filled with it, and one naming any other value (an explicit <see langword="null"/>
+/// included) is refused, because the synthesized <see cref="PolicyDecision.TenantScope"/> admits no other —
+/// but rejected outright on <see cref="UpdateAsync"/>: a row can never move
+/// to another tenant once created. Every one of these rejections is checked against the payload alone, before
 /// any row lookup runs, so a caller cannot use "was my <c>id</c>/<c>tenant_id</c> write rejected or
 /// not" to learn whether a given row id exists; both raise <see cref="AlvoAuthorizationException"/>,
 /// never <see cref="AlvoRecordNotFoundException"/>, since the row (if any) was never consulted.
@@ -408,9 +409,9 @@ public interface IAlvoData
     /// No policy allows <c>create</c> on this entity for <paramref name="context"/>,
     /// <paramref name="values"/> supplies <c>id</c> (always rejected — see the type remarks),
     /// the candidate row fails its <c>WITH CHECK</c> predicate, or <paramref name="values"/> writes
-    /// a field the policy marks read-only. <c>tenant_id</c> is not rejected here — see the type
-    /// remarks — but a value that fails the tenant scope still raises this exception via
-    /// <c>WITH CHECK</c>.
+    /// a field the policy marks read-only. <c>tenant_id</c> may be omitted — the row is placed in the
+    /// caller's own tenant — but a value naming any other tenant raises this exception, with a message
+    /// that says to remove it (see the type remarks).
     /// </exception>
     /// <exception cref="AlvoIdempotencyConflictException">
     /// <paramref name="idempotency"/>'s key was already used for a request with a different fingerprint.
@@ -520,8 +521,8 @@ public interface IAlvoData
     /// <para>
     /// <b>On a tenant-scoped entity the create branch places the row in the caller's own tenant</b>, because
     /// <c>tenant_id</c> is refused from <paramref name="values"/> on this route whichever branch runs — a
-    /// branch-dependent answer to "may I write this column" would report whether the row exists. A caller
-    /// creating into another tenant uses <see cref="CreateAsync"/>.
+    /// branch-dependent answer to "may I write this column" would report whether the row exists. That is the
+    /// only tenant a create on <see cref="CreateAsync"/> can reach as well, so nothing is lost by refusing it here.
     /// </para>
     /// </remarks>
     /// <param name="entity">The entity name.</param>
