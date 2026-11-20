@@ -53,7 +53,12 @@ jobs:
     # 2, Data.PostgreSql 7), and on 2026-11-07 the same steps ran 35-60 % slower (build 1:42 -> 2:15, format 1:42 -> 2:47,
     # Api.Tests.Integration 5:02 -> 8:09): PRs #488 and #490 were both cancelled at 30 minutes six to seven minutes into
     # Data.PostgreSql.Tests.Integration, with nothing failed and nothing hung (the module completes in ~9.5 min locally).
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 40 }}
+    # 2026-11-20: the end-user accounts stack (S0–S6, PRs #524–#541) adds ~300 PostgreSQL facts (token/invitation
+    # race facts run 20 iterations each); PR #537's Linux leg was cancelled at 40 minutes eleven minutes into
+    # Data.PostgreSql.Tests.Integration with nothing failed, and its Windows leg at 45 — and #525/#529 needed reruns
+    # at the Windows cap before it. Raised to 60/70 so the cap stops cancelling healthy runs; cut it back once the
+    # integration suites are re-measured.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 70 || 60 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
