@@ -53,7 +53,7 @@ with their access token, refreshed when it is due. Extra headers such as `X-Alvo
 const acme = await (await api('/auth/v1/tenants', { method: 'POST', body: JSON.stringify({ name: 'Acme Repairs' }) })).json();
 const inAcme = { 'X-Alvo-Tenant': acme.tenantId };
 await (await api('/api/customers', {
-  method: 'POST', headers: inAcme, body: JSON.stringify({ tenant_id: acme.tenantId, name: "Acme's first customer" }),
+  method: 'POST', headers: inAcme, body: JSON.stringify({ name: "Acme's first customer" }),
 })).json();
 ```
 
@@ -145,8 +145,8 @@ the answers are the same.
    }
    ```
 
-   **Today a create on a scoped entity also carries the tenant in its body, as `tenant_id`.** Alvo checks the column
-   against the tenant the request acts in. It does not fill it in from the header. Send both:
+   **A create on a scoped entity needs nothing more than the header.** The body carries no `tenant_id`: Alvo places
+   the row in the tenant the request acts in, Acme here:
 
    ```http
    POST /api/customers
@@ -154,11 +154,12 @@ the answers are the same.
    X-Alvo-Tenant: 3c9e…
    Content-Type: application/json
 
-   { "tenant_id": "3c9e…", "name": "Acme's first customer" }
+   { "name": "Acme's first customer" }
    ```
 
-   Leave `tenant_id` out and the write is refused by the same check that stops a write into another tenant. The
-   answer names no field, so it is easy to misread:
+   A body may still name `tenant_id`, and a client written before this works unchanged when it sends the tenant the
+   request acts in. Any other value, `null` included, is refused before any row is read. The `detail` names the field
+   and the fix, and does not repeat the value you sent:
 
    ```http
    HTTP/1.1 403 Forbidden
@@ -166,14 +167,13 @@ the answers are the same.
    {
      "type": "https://alvo.dev/errors/forbidden",
      "status": 403,
-     "detail": "The write was rejected by policy.",
+     "detail": "Field 'tenant_id' names a tenant other than the one this call acts in, and a row can only be created in the caller's own tenant. Remove it from the payload: a created row is placed in the caller's tenant.",
      …
    }
    ```
 
-   This is a current limitation, not a policy you have to satisfy differently. Until Alvo fills the column in
-   ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)), put `tenant_id` in every scoped create your client sends. An update never sends it.
-   (`170-SelfService/003-assigned-work`, `DanaCreatesCustomer` and `DanaCreatesWithoutTenantId`.)
+   An update never sends `tenant_id`: a row does not move between tenants.
+   (`170-SelfService/003-assigned-work`, `DanaCreatesCustomer` and `DanaCreatesInAnotherTenant`.)
 
    A tenant the person does not belong to refuses the whole request with `401`, not a quieter request with no tenant
    that could still read something (`006-foreign-tenant`).
@@ -263,8 +263,8 @@ the answers are the same.
    revokes one with `DELETE /auth/v1/tenants/{tenantId}/invitations/{invitationId}`.
    (`170-SelfService/002-invite-and-accept`.)
 
-5. **Give Theo his work.** Dana creates a job assigned to Theo and one assigned to nobody, each with `tenant_id`
-   and `X-Alvo-Tenant` as in step 3. Theo lists jobs in Acme:
+5. **Give Theo his work.** Dana creates a job assigned to Theo and one assigned to nobody, each in Acme through
+   `X-Alvo-Tenant` as in step 3. Theo lists jobs in Acme:
 
    ```http
    GET /api/work_orders
@@ -404,8 +404,6 @@ new can ever sign up. The apply still succeeds, because closed registration is a
 
 ## Limits and what is not here yet
 
-- **The duplicated tenant on a create.** A scoped create sends both `X-Alvo-Tenant` and `tenant_id`, as step 3 shows
-  ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)).
 - **No deleting a tenant**, and no handing a personal tenant to someone else. `maxPerAccount` counts every shared
   tenant an account ever created.
 - **No emails.** Alvo never sends an invitation. Your app delivers the code.

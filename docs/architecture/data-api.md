@@ -1650,8 +1650,11 @@ oracle decided from the payload alone, before any row is read, and one a caller 
 naming the column. So the payload guard is told `isUpdate: true` unconditionally.
 
 The framework then has to supply the value, because the tenant scope *checks* a candidate's tenant and never
-produces one: a created row lands in the caller's own tenant. A caller creating into another tenant uses
-`POST`, which still takes the column and still judges it against the same scope.
+produces one: a created row lands in the caller's own tenant. Since #538 `POST` does the same when its body
+leaves `tenant_id` out, through the one helper every create path shares (`AlvoTenantPlacement`); a `POST` body
+may still name the column, but only as the caller's own tenant — any other value, `null` included, is refused
+with a `403` that says to remove it. No create, on either route, can reach another tenant, which the
+synthesized scope already guaranteed and now the answer says.
 
 ### What a replace discloses, and why it cannot disclose less
 
