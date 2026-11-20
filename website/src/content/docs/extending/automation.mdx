@@ -51,6 +51,15 @@ The write and a ledger key for the event commit in one transaction, so a retry, 
 - A rule that updates the row that triggered it stops at the chain-depth limit, dead `chain-depth-exceeded`.
 - The condition and `$cel` values may read the triggering row's `hidden` fields.
 
+:::caution[With self-service tenants, any member can trigger it]
+A tenant role a person holds in a tenant they created or joined
+([Tenants, members and invitations](/guides/tenants-and-invitations/#tenant-roles-and-project-roles)) never counts in
+a rule of a global entity. An `entity.update` action is not judged as that person, though: it writes as the system
+caller, with `admin`. So a rule on a scoped entity's event, whose condition a member's write satisfies, may update a
+global record that no member could write directly. That is your declared escalation, and anyone who signs up and
+creates a tenant can trigger it. Keep its condition and its `recordId` narrow.
+:::
+
 ## Secrets
 
 `secretRef` and `headersSecretRef` must be secret names (`^[a-z][a-z0-9._-]{0,63}$`); anything else is refused at apply,

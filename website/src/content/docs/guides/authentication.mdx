@@ -28,12 +28,12 @@ The responses below were captured from a real host when the site was built, so y
 ## 1. Give a caller a key
 
 A key is configuration, not data: the host reads a fixed list from `Alvo:Auth:DevKeys`, and each entry names the user
-the key acts as, the roles it holds and the scopes it may use. This build has no endpoint that issues or revokes keys,
-so treat it as a development mechanism: the secret lives in the process's configuration, and when it is passed as an
-environment variable it is readable from a process listing and from `docker inspect`. Until a real issuance path
-lands ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)) these keys are the only way to call a standalone host,
-so generate every secret, never reuse one across keys or environments, and prefer a configuration source that does
-not show up in `docker inspect`, such as a mounted file or a secret store.
+the key acts as, the roles it holds and the scopes it may use. Nothing issues or revokes such a key while the host
+runs, so treat it as an operator's mechanism: the secret lives in the process's configuration, and when it is passed
+as an environment variable it is readable from a process listing and from `docker inspect`. Generate every secret,
+never reuse one across keys or environments, and prefer a configuration source that does not show up in
+`docker inspect`, such as a mounted file or a secret store. The people who use your app do not need a key: they
+[sign in](#people-sign-in-to-your-app), and an integration gets a token one of them mints.
 
 <Steps>
 
@@ -126,6 +126,21 @@ Scopes govern the Data API only. The [Management API](/reference/management-api/
 descriptor's [`access`](/reference/descriptor/access/) block and the key's roles alone, so a key scoped to
 one entity still reaches management when its roles match an access level.
 
+## People sign in to your app
+
+Your app's users sign in with Google and call the Data API as themselves, with an access token sent as
+`Authorization: Bearer`. The same rules judge them as judge a key: a person holds the role `authenticated`, and
+`@user.id` is their account. Three guides cover it, in the order you will need them:
+
+- [Sign-in and accounts](/guides/sign-in/): who may sign up, the Google client, the browser code, sessions, and where
+  to keep the tokens.
+- [Tenants, members and invitations](/guides/tenants-and-invitations/): companies people create, invite each other
+  into and hold roles in.
+- [Tokens for integrators](/guides/tokens/): personal and service tokens, which travel in `X-Alvo-Api-Key` like a
+  key and are minted and revoked by people, not configuration.
+
+A configured key and a person's token on one request are refused with `401`, rather than one of them winning.
+
 ## People sign in to the dashboard
 
 The dashboard at `/admin` does not take API keys. People sign in with an email address and a password that Alvo
@@ -157,11 +172,12 @@ except `Cookie`: a browser attaches cookies to cross-site requests by itself, wh
 cross-site request forgery target, so the host refuses that configuration at startup.
 
 :::caution[Not in this build]
-The descriptor's [`auth.providers`](/reference/descriptor/auth/#auth.providers) is parsed and warned
-about, not honoured: Google, Microsoft, GitHub, Apple and OIDC sign-in are tracked in
-[#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)
-([Capabilities in this build](/reference/capabilities/#declared-but-not-run-in-this-build)). There is
-also no endpoint that issues, rotates or revokes an API key: keys come from configuration only.
+Of the sign-in providers [`auth.providers`](/reference/descriptor/auth/#auth.providers) accepts, only `google` signs
+people in. `microsoft`, `github`, `apple` and `oidc` are parsed and warned about, not honoured
+([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36);
+[Capabilities in this build](/reference/capabilities/#declared-but-not-run-in-this-build)). A configured API key is
+never issued, rotated or revoked at runtime: it comes from configuration only. The tokens people mint are issued and
+revoked at runtime ([Tokens for integrators](/guides/tokens/)).
 :::
 
 ## What can go wrong
@@ -189,4 +205,5 @@ the setting: an empty or short `Secret`, a duplicate `KeyId`, a `KeyId` with a `
 
 ## Next
 
-**[Access rules](/guides/access-rules/)**: decide, per operation, which callers may reach which rows.
+**[Access rules](/guides/access-rules/)**: decide, per operation, which callers may reach which rows. Or, to let people
+sign in to your app, **[Sign-in and accounts](/guides/sign-in/)**.

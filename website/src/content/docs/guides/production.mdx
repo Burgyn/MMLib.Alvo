@@ -27,10 +27,10 @@ twenty minutes, starting from the published image with Docker running.
   `examples/vehicle-registry`, and its `demo` key (`ALVO_DEMO_KEY_SECRET`).
 
 :::caution[Not in this build]
-Alvo is pre-v0.1, so **there is no release tag yet**: the only published tag is `edge`, which follows `main`. There is
-also no endpoint that issues or revokes API keys; keys come from `Alvo:Auth:DevKeys` in configuration until
-[#36](https://github.com/Burgyn/MMLib.Alvo/issues/36) lands. The environment-variable names below may still change
-before the first release ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
+Alvo is pre-v0.1, so **there is no release tag yet**: the only published tag is `edge`, which follows `main`.
+Configured API keys come from `Alvo:Auth:DevKeys` only, and nothing issues or revokes one at runtime; the tokens
+signed-in people mint are the kind that is ([Tokens for integrators](/guides/tokens/)). The environment-variable names
+below may still change before the first release ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
 :::
 
 ## 1. Get the image
@@ -176,6 +176,26 @@ API browser at `/scalar` behind a path base has not been verified
   [Configuration keys](/reference/configuration/#keys-read-outside-an-options-type). Behind a proxy without
   forwarded headers, every client shares the proxy's one budget.
 
+## 8. If people sign in
+
+[Sign-in and accounts](/guides/sign-in/) runs on localhost in Development. In production, four settings change:
+
+- **`Alvo__Accounts__Issuer`** is required: the public `https` URL of `/auth/v1`, as your clients reach it, for
+  example `https://api.example.com/auth/v1`. Without it the host refuses to start outside Development. Never run
+  production as Development to avoid setting it.
+- **`Alvo__Secrets__EncryptionKeyFile`**, which the override above already sets, also seals sign-in's signing keys,
+  which live in the database. Every instance must read the same key file, and keep it: the stored keys can be read
+  only with it.
+- **`Alvo__Api__Cors__Origins__0`** (and `__1`, …) lists your app's origins exactly, with scheme and port. A wildcard
+  is refused.
+- **The rate budgets** count requests per client address: `Alvo__Api__RateLimits__Token` (default 30 a minute),
+  `__Invitations` (20) and `__Create` (10, shared by creating a tenant and minting a token). Behind a proxy, turn on
+  `Alvo:ForwardedHeaders:Enabled` (section 6), or every user shares the proxy's one budget.
+
+The Google client id goes in `Alvo__Accounts__Providers__Google__ClientIds__0`, with the production origin among the
+client's authorised JavaScript origins. `AllowHttpMetadata` and a custom `Authority` exist for a test issuer only;
+`AllowHttpMetadata` is refused outside Development.
+
 ## Run more than one instance
 
 - **One instance drains the outbox.** Per-row event order holds only while a single process delivers events (and no two
@@ -219,7 +239,9 @@ Kerberos support, which the image does not carry; the host starts and serves nor
 ## Reference
 
 - Configuration: [`Alvo`](/reference/configuration/#alvo) (descriptor, database, path base, forwarded
-  headers, docs), [`Alvo:Schema`](/reference/configuration/#alvoschema),
+  headers, docs), [`Alvo:Accounts`](/reference/configuration/#alvoaccounts) and
+  [`Alvo:Api`](/reference/configuration/#alvoapi) (sign-in, CORS and rate budgets),
+  [`Alvo:Schema`](/reference/configuration/#alvoschema),
   [`Alvo:Secrets`](/reference/configuration/#alvosecrets),
   [`Alvo:Events`](/reference/configuration/#alvoevents),
   [keys read outside an options type](/reference/configuration/#keys-read-outside-an-options-type), and

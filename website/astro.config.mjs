@@ -140,6 +140,9 @@ export default defineConfig({
         ] },
         { label: 'Secure it', collapsed: true, items: [
           page('Authentication and API keys', 'guides/authentication'),
+          page('Sign-in and accounts', 'guides/sign-in'),
+          page('Tenants, members and invitations', 'guides/tenants-and-invitations'),
+          page('Tokens for integrators', 'guides/tokens'),
           page('Access rules', 'guides/access-rules'),
           page('Rules over relations', 'extending/relation-rules'),
           page('Multi-tenancy', 'guides/multi-tenancy'),

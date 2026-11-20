@@ -86,9 +86,12 @@ these candidates; none has a date:
 - **Custom function scripts**: a runtime to execute csx scripts. The C# functions an embedded host registers, and
   [automation](/extending/automation/) over events and cron, already run.
 - **Signed webhook deliveries**: deliveries from after-hooks and automation are made and retried today, but not signed.
-- **Full authentication**: sign-in providers beyond local passwords, and issuing and revoking API keys
-  ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)).
-- **Teams and permissions** on top of roles, and richer caller context in rules.
+- **More ways to sign in**: Microsoft, GitHub, Apple and a generic OpenID provider, and email and password for your
+  app's users ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)). Google sign-in, tenants people create,
+  invitations and tokens for integrators already run: [Sign-in and accounts](/guides/sign-in/).
+- **The rest of accounts**: deleting an account or a tenant, events for sign-ins and membership changes, a dashboard
+  view of the people who signed in and their tenants, an opt-in refresh cookie, sharing across tenants, OAuth consent
+  for third-party clients, and richer caller context in rules, such as `@user.email`.
 - **Realtime** change notifications and **file storage**.
 - **[Dynamic entities](/concepts/dynamic-entities/)**: record types your own users define at runtime, in one
   shared store.

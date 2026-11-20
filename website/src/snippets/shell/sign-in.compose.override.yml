@@ -1,0 +1,30 @@
+# Saved as docker-compose.override.yml next to docker-compose.quickstart.yml. With
+# COMPOSE_FILE=docker-compose.quickstart.yml:docker-compose.override.yml exported, every `docker compose`
+# command merges it over the quick start's stack. It serves ./time-tracker.alvo.json and lets people sign in
+# with Google: the client id of your Google *Web application* OAuth client, the key that seals what sign-in
+# stores at rest, and the origin your browser app is served from.
+name: alvo-time-tracker
+
+services:
+  alvo:
+    environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
+      # Trying it on localhost: in Development the tokens Alvo issues name the URL a request reached
+      # (http://localhost:8080/auth/v1). Anywhere else, drop this line and set Alvo__Accounts__Issuer to the
+      # public https URL of /auth/v1 — the host refuses to start without one.
+      ASPNETCORE_ENVIRONMENT: Development
+      # Alvo__Accounts__Issuer: https://api.example.com/auth/v1
+      Alvo__Accounts__Providers__Google__ClientIds__0: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID to your Web client id}
+      # 32 random bytes in base64, as a mounted file (the `secrets:` block below): sign-in refuses to start
+      # without it, and an environment variable would show up in `docker inspect`.
+      Alvo__Secrets__EncryptionKeyFile: /run/secrets/alvo_secrets_key
+      # The page that calls Alvo from a browser. No origin, no CORS headers: the browser blocks every call.
+      Alvo__Api__Cors__Origins__0: ${APP_ORIGIN:-http://localhost:5173}
+    secrets:
+      - alvo_secrets_key
+    volumes:
+      - ./time-tracker.alvo.json:/alvo/descriptor.json:ro
+
+secrets:
+  alvo_secrets_key:
+    environment: ALVO_SECRETS_KEY

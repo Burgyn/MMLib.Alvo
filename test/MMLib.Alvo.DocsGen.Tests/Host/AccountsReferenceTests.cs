@@ -1,9 +1,10 @@
 ﻿using MMLib.Alvo.DocsGen.Host;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.DocsGen.Tests.Host;
 
-public class AccountsReferenceTests
+public partial class AccountsReferenceTests
 {
     private static readonly string[] _signInPaths =
     [
@@ -30,6 +31,8 @@ public class AccountsReferenceTests
         "tenants.removeMember", "invitations.preview", "invitations.accept", "tenants.createInvitation",
         "tenants.listInvitations", "tenants.revokeInvitation", "tokens.create", "tokens.list", "tokens.revoke",
     ];
+
+    private static readonly string[] _guides = ["sign-in", "tenants-and-invitations", "tokens"];
 
     private static async Task<JsonNode> GeneratedAsync()
     {
@@ -84,4 +87,48 @@ public class AccountsReferenceTests
 
         Should.NotThrow(() => HostPagesGenerator.RequireLinkTargets(AccountsApiDocument.Description, docs));
     }
+
+    [Fact]
+    public void The_description_links_the_three_guides()
+    {
+        foreach (var guide in _guides)
+        {
+            AccountsApiDocument.Description.ShouldContain($"(/guides/{guide}/)", Case.Sensitive, guide);
+        }
+    }
+
+    /// <summary>
+    /// The guides' exchanges are hand-written (S6 plan D12), so every <c>METHOD /auth/v1/…</c> they name — in prose and in
+    /// code alike — must be an operation of the generated reference: a renamed route or a concrete id in a path fails here.
+    /// </summary>
+    [Fact]
+    public async Task Every_route_a_guide_names_is_a_sign_in_operation()
+    {
+        var paths = (await GeneratedAsync())["paths"]!.AsObject();
+        var named = GuideRoutes().ToList();
+
+        foreach (var guide in _guides)
+        {
+            named.ShouldContain(route => route.Page == guide, $"guides/{guide}.mdx names no /auth/v1 route, so this fact covers nothing there");
+        }
+
+        named.Where(route => paths[route.Path]?[route.Method.ToLowerInvariant()] is null)
+            .Select(route => $"{route.Page}: {route.Method} {route.Path}")
+            .ShouldBeEmpty();
+    }
+
+    private static IEnumerable<(string Page, string Method, string Path)> GuideRoutes()
+    {
+        var guides = Path.Combine(RepositoryRoot.Find(), "website", "src", "content", "docs", "guides");
+        foreach (var page in _guides.Append("advanced-demo"))
+        {
+            foreach (Match match in GuideRoute().Matches(File.ReadAllText(Path.Combine(guides, page + ".mdx"))))
+            {
+                yield return (page, match.Groups[1].Value, match.Groups[2].Value);
+            }
+        }
+    }
+
+    [GeneratedRegex("""\b(GET|POST|PATCH|DELETE) (/auth/v1/[^\s`'")?]+)""")]
+    private static partial Regex GuideRoute();
 }

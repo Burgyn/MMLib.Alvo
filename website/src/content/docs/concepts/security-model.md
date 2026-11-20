@@ -91,7 +91,7 @@ Three parties shape a running backend, and each can do only what its channel all
 |---|---|---|---|
 | **Descriptor author**: a developer, an agent, a dashboard user with the `developer` level | the descriptor: a file, the Management API, the dashboard | declare entities, rules, hooks, derived values and who may manage the project | express a loop, a network call or file access; reach past the [CEL profiles](/concepts/cel/); grant itself `admin`: a change to `access` needs the `admin` level |
 | **Host developer** (embedded mode) | C# in the host application | register CEL functions with `AddCelFunction`, add endpoints that call Alvo's data port, decide who the caller is for those endpoints, attach middleware to the generated routes | change what the descriptor's rules decide: an endpoint calling `IAlvoData` is judged by the same rules, for the caller it passes. Choosing that caller correctly, and any direct database access, is the host's responsibility |
-| **API caller** | an HTTP request with an API key | what the descriptor's rules allow for the key's user, roles and tenant, narrowed further by the key's scopes | see or change rows a rule excludes, write a framework-managed column, choose a tenant the key was not issued for |
+| **API caller** | an HTTP request with an API key, or a signed-in person's access token | what the descriptor's rules allow for the key's user, roles and tenant, narrowed further by the key's scopes | see or change rows a rule excludes, write a framework-managed column, choose a tenant the key was not issued for |
 
 Two more sit outside the descriptor on purpose. **The operator** sets infrastructure: connection strings, API keys,
 the bootstrap administrator, the AI connection. Credentials never enter the descriptor, so a descriptor can be shared
@@ -108,6 +108,15 @@ add one.
 
 An API key's scopes narrow what it reaches on the Data API only. On the Management API a key reaches whatever its
 **roles** reach, so narrow a key's management reach by narrowing its roles.
+
+When people sign in and create their own tenants, they hold two kinds of role. **Project roles** come from an
+operator, an API key, or signing in (`authenticated`) and count everywhere. **Tenant roles** come from a membership
+the person was given in a tenant, or took by creating it, and count only in that tenant's scoped data: never in a
+rule of a global entity or anything reached from one, and never on the Management API. Anyone can sign up and make
+themselves a `dispatcher` by creating a company, so a tenant role that reached shared data would hand it to anyone.
+Apply refuses a tenant role in the `access` block for the same reason, and the Management API refuses the personal
+and service tokens people mint. [Tenants, members and invitations](/guides/tenants-and-invitations/#tenant-roles-and-project-roles)
+has the full table.
 
 ## Rules in the data layer
 
@@ -213,8 +222,9 @@ client should branch on them in [Handle errors](/guides/handle-errors/).
 
 ## Credentials and requests
 
-- **The credential is a header**, `X-Alvo-Api-Key`, so a cross-site form post arrives with no credential and default-deny
-  answers it. Pointing the header at `Cookie` is refused at startup.
+- **The credential is a header**, `X-Alvo-Api-Key` or a signed-in person's `Authorization: Bearer`, never a cookie, so
+  a cross-site form post arrives with no credential and default-deny answers it. Pointing the key header at `Cookie`
+  is refused at startup, and sign-in's tokens travel in bodies and headers only.
 - **Every body must be declared as JSON.** A body sent as `text/plain`, as a form, or with no `Content-Type` is refused
   with `415`. A browser sends exactly those cross-site without asking first, so requiring JSON puts every write behind
   the browser's preflight. It matters most in an embedded host whose own cookie identifies the caller.
@@ -223,10 +233,11 @@ client should branch on them in [Handle errors](/guides/handle-errors/).
 
 :::caution[Not in this build]
 PostgreSQL's native row-level security as a second line under Alvo's own rules, a change feed that records writes made
-outside Alvo, an audit log of data changes, issuing and revoking API keys
-([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)), signed webhook deliveries, and rate limiting on the Data and
-Management APIs are not in this build ([Capabilities in this build](/reference/capabilities/)). Alvo ships no rate
-limiter of its own; an embedded host attaches ASP.NET Core's to Alvo's routes
+outside Alvo, an audit log of data changes, issuing and revoking a configured API key at runtime, signed webhook
+deliveries, and rate limiting on the Data and Management APIs are not in this build
+([Capabilities in this build](/reference/capabilities/)). Alvo rate-limits only the dashboard's sign-in forms and its
+own sign-in, tenant, invitation and token routes; an embedded host attaches ASP.NET Core's limiter to the rest of
+Alvo's routes
 ([HTTP conventions](/extending/http-conventions/#one-entitys-routes-forentity)).
 :::
 
@@ -234,6 +245,7 @@ limiter of its own; an embedded host attaches ASP.NET Core's to Alvo's routes
 
 - [Access rules](/guides/access-rules/): write rules and see where a 403 comes from.
 - [Authentication and API keys](/guides/authentication/): keys, roles and scopes.
+- [Sign-in and accounts](/guides/sign-in/): people as callers, and where their tokens are kept.
 - [Multi-tenancy](/guides/multi-tenancy/): isolation between tenants.
 - [Handle errors](/guides/handle-errors/): branch on the problem type.
 - [Running in production](/guides/production/): secrets, proxies and what to expose.

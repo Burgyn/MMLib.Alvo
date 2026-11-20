@@ -15,7 +15,9 @@ internal static class AccountsApiDocument
     internal const string Description =
         "The sign-in, self-service tenant and app-token routes Alvo generated for the field-service example descriptor "
         + "with Google sign-in configured. The routes exist only on a host that configures an identity provider. "
-        + "See [Authentication](" + SiteLinks.BasePath + "/guides/authentication/).";
+        + "The guides walk through them: [Sign-in and accounts](" + SiteLinks.BasePath + "/guides/sign-in/), "
+        + "[Tenants, members and invitations](" + SiteLinks.BasePath + "/guides/tenants-and-invitations/) and "
+        + "[Tokens for integrators](" + SiteLinks.BasePath + "/guides/tokens/).";
 
     /// <summary>Keeps the paths under <paramref name="prefix"/>, titles the document, and leaves its components as they are.</summary>
     internal static JsonNode Filter(JsonNode openApi, string prefix)

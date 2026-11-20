@@ -24,12 +24,16 @@ handler runs. The caller is also published through `IAlvoContextAccessor` while 
 
 <SourceExcerpt code={endpoints} from="new CallerView(caller.Context.User.Value" to=".WithAlvoCaller();" title="FrontDeskEndpoints.cs" />
 
-Because the endpoint names no entity, no API-key scope can be checked, so a personal or service token (`alvo_pat_…`,
-`alvo_svc_…`) is refused `403` before your handler runs; configured keys, signed-in people and the anonymous caller are
-not affected. Every `IAlvoData` call and every `IAlvoSessions.For(caller.Context)` session is still judged by the
-descriptor's rules:
+Every `IAlvoData` call and every `IAlvoSessions.For(caller.Context)` session is still judged by the descriptor's
+rules:
 
 <SourceExcerpt code={endpoints} from="async (AlvoCaller caller, IAlvoSessions sessions" to=".WithAlvoCaller();" title="FrontDeskEndpoints.cs" />
+
+Because the endpoint names no entity, no API-key scope can be checked, so a personal or service token (`alvo_pat_…`,
+`alvo_svc_…`) is refused `403` before your handler runs; configured keys, signed-in people and the anonymous caller are
+not affected. Letting an endpoint name the scope it needs is [#536](https://github.com/Burgyn/MMLib.Alvo/issues/536);
+until then, give an integration a [command](/extending/commands/) or the generated Data API
+([Tokens for integrators](/guides/tokens/#where-a-token-is-refused)).
 
 The clerk counts the room they created; the anonymous caller counts none, because the `list` rule admits clerks only:
 
