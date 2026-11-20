@@ -11,6 +11,7 @@
 #
 #   set -a; . examples/field-service/demo-identities.env; set +a
 #   export ALVO_FS_DISPATCHER_NORTH_SECRET=... (and the other four, see the README)
+#   export ALVO_FS_SECRETS_KEY="$(openssl rand -base64 32)"
 #   docker compose --env-file examples/field-service/demo-identities.env \
 #     -f docker-compose.field-service.yml up --wait
 #
@@ -102,6 +103,39 @@ services:
       Alvo__Auth__DevKeys__4__Scopes__0: "*:read"
       Alvo__Auth__DevKeys__4__Scopes__1: "*:write"
 
+      # People sign in (spec §12) through Google's preset pointed at a TEST issuer: the sink below serves
+      # its discovery document under http://localhost:9090/oidc, and the suite publishes the signing keys
+      # there at the start of every run (test/teapie-field-service/_shared/TestIssuer.csx). The ID tokens
+      # still say `iss: https://accounts.google.com` — the preset finds its provider by that issuer — but
+      # only the keys THIS authority publishes verify them, so a real deployment, whose Google provider
+      # reads Google's own keys, refuses every one. The client id is not a secret; it lives in
+      # demo-identities.env, where the suite reads the same value it puts in `aud`.
+      #
+      # Development, because AllowHttpMetadata is refused in every other environment (spec §11.2): the sink
+      # speaks plain http on loopback, and only a test issuer may. Development also leaves
+      # Alvo:Accounts:Issuer unset, so the tokens Alvo issues name the URL a request reached
+      # (http://localhost:8081/auth/v1). Nothing else in the image changes with it — it ships no
+      # appsettings.Development.json, and Alvo's own exception handler masks the developer exception page.
+      ASPNETCORE_ENVIRONMENT: Development
+      Alvo__Accounts__Providers__Google__ClientIds__0: ${ALVO_FS_GOOGLE_CLIENT_ID:?set ALVO_FS_GOOGLE_CLIENT_ID (see examples/field-service/demo-identities.env)}
+      Alvo__Accounts__Providers__Google__Authority: http://localhost:9090/oidc
+      Alvo__Accounts__Providers__Google__AllowHttpMetadata: "true"
+
+      # The key that seals what sign-in stores at rest (refresh tokens, signing keys, token secrets).
+      # Accounts refuses to start without one, so it arrives as a Compose secret (the `secrets:` block at
+      # the bottom) from ALVO_FS_SECRETS_KEY — fresh per run in scripts/test-e2e, never committed.
+      Alvo__Secrets__EncryptionKeyFile: /run/secrets/alvo_fs_secrets_key
+
+      # Wider per-IP budgets than the defaults (Token 30, Create 10, Invitations 20 a minute). One suite run
+      # comes from one address and signs in, creates tenants and invites inside a minute; the limits
+      # themselves are pinned in process (TokenRoutesTests, TenantRoutesTests, InvitationRoutesTests), so a
+      # 429 here would be a flake, not a finding.
+      Alvo__Api__RateLimits__Token: 120
+      Alvo__Api__RateLimits__Create: 30
+      Alvo__Api__RateLimits__Invitations: 60
+    secrets:
+      - alvo_fs_secrets_key
+
     # Loopback only, for the reason docker-compose.yml states at length: publishing 0.0.0.0 puts five
     # keys and an anonymous /openapi/v1.json describing them on the internet of any cloud VM whose
     # operator followed a quickstart.
@@ -140,3 +174,10 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+# Compose turns ALVO_FS_SECRETS_KEY (32 random bytes in base64, `openssl rand -base64 32`) into the file
+# Alvo__Secrets__EncryptionKeyFile names, the quick start's precedent, so the key never sits in the
+# container's environment.
+secrets:
+  alvo_fs_secrets_key:
+    environment: ALVO_FS_SECRETS_KEY

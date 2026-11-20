@@ -24,6 +24,8 @@ export ALVO_FS_TECH_NORTH_SECRET=$(openssl rand -hex 16)
 export ALVO_FS_SPARE_NORTH_SECRET=$(openssl rand -hex 16)
 export ALVO_FS_DISPATCHER_SOUTH_SECRET=$(openssl rand -hex 16)
 export ALVO_FS_ADMIN_SECRET=$(openssl rand -hex 16)
+# The key sign-in seals what it stores with (32 random bytes in base64), handed over as a Compose secret.
+export ALVO_FS_SECRETS_KEY=$(openssl rand -base64 32)
 
 docker compose --env-file examples/field-service/demo-identities.env \
   -f docker-compose.field-service.yml up --build --wait

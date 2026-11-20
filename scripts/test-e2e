@@ -20,7 +20,9 @@
 #       and six multi-step journeys — and, as the advanced demo, the work-order state machine, a
 #       gapless sequence, CHECK validations, a partial unique index, the visits calendar (exclusion,
 #       lookup check, rollup, relation rule) and a completion webhook to a WireMock billing sink that
-#       shares the alvo container's network namespace (so its http://localhost URL is loopback).
+#       shares the alvo container's network namespace (so its http://localhost URL is loopback). And sign-in:
+#       people sign in with an ID token from a test OpenID issuer the same sink serves (Google's preset under
+#       another authority, Development only), found tenants, invite and mint tokens (170-SelfService).
 #
 #   docker-compose.field-service-host.yml (:8082) — does the SAME descriptor plus host code behave as the
 #       sample claims? samples/MMLib.Alvo.Samples.FieldService, the embedded host over the same file: the
@@ -70,6 +72,9 @@ export ALVO_FS_ADMIN_SECRET="${ALVO_FS_ADMIN_SECRET:-$(openssl rand -hex 16)}"
 # The technician app's Standard Webhooks secret: `whsec_` + 32 random bytes in base64, the form the receiver requires
 # (at least 24 bytes). The suite signs its deliveries with the same value.
 export ALVO_FS_TECH_APP_SECRET="${ALVO_FS_TECH_APP_SECRET:-whsec_$(openssl rand -base64 32)}"
+# The key that seals what the field-service stack's sign-in stores at rest (32 random bytes in base64). Compose
+# hands it to the container as a secret file; TeaPie never needs it.
+export ALVO_FS_SECRETS_KEY="${ALVO_FS_SECRETS_KEY:-$(openssl rand -base64 32)}"
 
 # The field-service demo's non-secret constants — tenant ids, user ids, the published port. Sourced
 # rather than restated: compose interpolates the same file, so the environment TeaPie asserts
@@ -92,6 +97,7 @@ write_teapie_environment() {
 
     "fsBaseUrl": "http://localhost:$ALVO_FS_PORT",
     "fsSinkUrl": "http://localhost:$ALVO_FS_SINK_PORT",
+    "fsGoogleClientId": "$ALVO_FS_GOOGLE_CLIENT_ID",
 
     "fshBaseUrl": "http://localhost:$ALVO_FSH_PORT",
     "fshSinkUrl": "http://localhost:$ALVO_FSH_SINK_PORT",
