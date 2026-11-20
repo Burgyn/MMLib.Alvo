@@ -156,8 +156,10 @@ end user*).
 makes into `AlvoApiOptions` — nothing host-specific. `Cors:Origins` lists the exact browser origins
 (`https://app.example.com`, no path, no `*`) allowed to call the Data API and the auth routes; empty, which is the
 default, sends no CORS headers and answers no preflight. `RateLimits:Token` is the token endpoint's budget per client
-IP per minute (default 30); `RateLimits:Create` is the same per-client budget for creating tenants, `POST
-/auth/v1/tenants` (default 10, at least 1 — the only self-service route it charges); `RateLimits:Invitations` is the
+IP per minute (default 30); `RateLimits:Create` is the same per-client budget for creating tenants and minting
+personal and service tokens, `POST /auth/v1/tenants` and `POST /auth/v1/tokens` (default 10, at least 1). The two
+routes **share** it — ten creations a minute is ten of either, in any mix (accounts S5 D15, spec §7.3's "tenant creation
+and token minting 10/min") — and no other self-service route is charged to it; `RateLimits:Invitations` is the
 per-client budget shared by the five invitation routes — creating, listing and revoking an invitation, previewing and
 accepting a code (default 20, at least 1). The token exchange keeps the `Token` budget even when it carries an
 `invitation_code`. The client IP is the connection's, so behind a proxy it is honest only with
@@ -225,7 +227,20 @@ reading the whole descriptor, applying a new one, rolling back. That is decision
 [`management-api.md`](./management-api.md#an-api-keys-scopes-govern-no-management-request-d7) and
 pinned over the wire — it is repeated here because an operator issuing a narrow key is entitled to
 read it where they issue one, not only where it was decided. Narrow a key's management reach by
-narrowing its **roles**.
+narrowing its **roles**. A personal or service token never reaches `/management`, whatever its roles: it is refused 403
+(accounts S5 D9).
+
+**Two homes for an API key, one store in front of them** (accounts S5 D4). `X-Alvo-Api-Key` carries two kinds of
+credential: the dev keys configured under `Alvo:Auth:DevKeys`, held in memory, and the personal and service tokens people
+mint over `POST /auth/v1/tokens`, persisted in `{prefix}_api_keys` by the relational provider. The `IApiKeyStore` the
+resolver reads is a routing store, `ApiKeyStores`: a key id starting `alvo_pat_` or `alvo_svc_` goes to the persisted
+registry, every other id to the dev keys — one lookup, no fallback between them. Both prefixes are **reserved**: a
+dev key whose `KeyId` starts with either is refused at startup, naming `Alvo:Auth:DevKeys:{i}:KeyId`, so a configured key
+can never shadow a minted one. A provider with no registry (a host that is not relational) answers every prefixed id as
+unknown. The routing store is registered with `TryAddSingleton`, so **a host that registers its own `IApiKeyStore`
+owns key resolution entirely**: its store is the only one asked, and the persisted registry's port is
+internal, so that store cannot delegate to it — personal and service tokens never resolve on such a host. Its token
+routes would still mint them, so such a host leaves `auth.accessTokens` out of its descriptor.
 
 ## The bootstrap administrator
 

@@ -173,6 +173,11 @@ operator grants). Requires `tenancy.enabled: true`.
 | `service` | boolean | `false` | A tenant owner may mint tokens that act as the tenant. Requires `selfService`. |
 | `maxLifetimeDays` | integer 1–365 | `90` | The longest expiry a token may ask for. |
 
+**Recorded deviation (S5 plan D8):** apply refuses `service: true` without `tenancy.selfService.createTenants`, not
+only without `selfService` — stricter than the table's "Requires `selfService`", which it implies. A service token acts
+as a *shared* tenant: a personal tenant has exactly one member forever (§6.1), so a token there would outlive nothing a
+personal token does not, and minting one for a personal tenant is refused (409) as well.
+
 **Apply-time refusals** (structured, with a fix): `selfService` without tenancy; `invitations` without
 `createTenants`; an `assignableRoles` entry not declared in `auth.roles` or naming a built-in role;
 `personalTenant.roles`/`creatorRoles` not ⊆ `assignableRoles`; **an `assignableRoles` role named in the
@@ -593,6 +598,12 @@ keys. Key ids are prefixed `alvo_pat_…` / `alvo_svc_…` for secret scanning. 
 compatibly with its kind and minter; a personal token stores no roles, and its resolution goes through
 membership resolution rather than `RoleNames`.
 
+**Recorded deviation (S5 plan D10):** a service token also dies when its minter's **account is disabled** — beyond the
+table's "removed or demoted". A banned owner who kept a service token's secret would otherwise keep acting as the tenant
+(§16 B4's case). The ban revokes every token the account minted in its own transaction, and enabling the account
+revives none. Every death, of either kind, is a revocation stamp written in the transaction that kills its reason, so
+a person invited back does not get their old tokens back.
+
 ### 7.2 The self-service routes
 
 | Route | Who |
@@ -603,6 +614,10 @@ membership resolution rather than `RoleNames`.
 
 `expiresAt` is required and ≤ `maxLifetimeDays`. The secret is answered once and stored as its SHA-256.
 Scopes naming an entity the descriptor lacks are refused with the list of entities.
+
+**Recorded deviation (S5 plan D1):** the routes are mapped under the sign-in prefix, `{authPrefix}/tokens` (default
+`/auth/v1/tokens`), not under `{prefix}` — as S3 and S4 did for §6.3's routes. `/api/tokens` would collide with an
+entity named `tokens`, and minting needs a person's session, which exists only where sign-in is mapped.
 
 ### 7.3 Abuse limits and CORS
 

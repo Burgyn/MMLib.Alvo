@@ -106,6 +106,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Tests.** Invitations end to end, both races and the ownership sweep are proven on SQLite and PostgreSQL
     (`InvitationEngineFacts`, `InvitationStoreFacts`). A log scan at Trace finds no invitation code, no part of one and
     no hash of one. **Docs:** `docs/architecture/accounts.md`, *Invitations and `invitationOnly` sign-up (S4)*.
+- **Tokens for integrators: `auth.accessTokens`** (accounts initiative, slice S5; personal and service tokens). On a
+  host with sign-in:
+  - **Personal tokens act as their person.** A signed-in person mints one with `POST /auth/v1/tokens`
+    (`"kind": "personal"`), for one tenant they belong to or for none. It acts as them — `created_by` is theirs — with
+    the tenant roles of their current membership, read on every request: a demotion counts on the token's next request,
+    and a removal kills it for good, so inviting the person back does not revive it.
+  - **Service tokens act as a shared tenant.** An owner mints one (`"kind": "service"`) with tenant roles they hold
+    there. It has its own user id, which fills `created_by`, and its roles are tenant roles only, never project roles.
+    It dies when its minter is removed or stops being an owner, and a remaining owner mints the replacement.
+  - **Shown once, sent like an API key.** The 201 answers the credential once — `alvo_pat_…` / `alvo_svc_…`, a
+    recognisable prefix for secret scanning, then a 256-bit secret — and only its SHA-256 is stored. A client sends it
+    as `X-Alvo-Api-Key`, exactly as it sends an API key. `GET /auth/v1/tokens` lists a person's own tokens and the
+    service tokens of tenants they own, with minter and last use, never a secret; `DELETE /auth/v1/tokens/{keyId}`
+    revokes one.
+  - **Narrow by construction.** Scopes are `entity:read` / `entity:write`, at least one, only entities the descriptor
+    declares, no wildcard. Every token expires within `maxLifetimeDays` (1–365, default 90). A token's tenant is fixed
+    at mint, and `X-Alvo-Tenant` naming another one is 401. A token never mints, lists or revokes a token, never calls a
+    self-service route (403), and **the Management API refuses every personal and service token with 403**, whatever its
+    roles. At most 100 live tokens per account.
+  - **A token dies with its reason.** A member's removal or departure, an owner's demotion and an account ban revoke the
+    tokens they cut off in the same transaction; enabling the account again revives none.
+  - **The descriptor is the switch.** `auth.accessTokens` (`personal`, `service`, `maxLifetimeDays`); without it every
+    token route answers 404 `feature-disabled` and no persisted token resolves. Switching a kind off refuses its tokens
+    on their next request; switching it on revives the unexpired ones. **Apply refuses `service: true` without
+    `tenancy.selfService.createTenants`**, at `/auth/accessTokens/service`.
+  - **Minting is charged the `Create` budget** (`Alvo:Api:RateLimits:Create`, default 10 per client per minute), the one
+    tenant creation already uses: the two now share it.
+  - **New public API:** `Auth.AccessTokens` and `AuthAccessTokens` (the descriptor block); `ApiKeyKind` (`Configured`,
+    `Personal`, `Service`), `ApiKeyRecord.Kind` (default `Configured`, so existing and host-built keys keep their
+    meaning) and `ApiKeyRecord.MintedBy`. No new problem type. A dev key whose id starts `alvo_pat_` or `alvo_svc_` is
+    refused at startup.
+  - **A host with its own `IApiKeyStore`** keeps owning key resolution entirely; personal and service tokens do not
+    resolve there, so such a host leaves `auth.accessTokens` off.
+  - **Storage.** One framework table, `{prefix}_api_keys`, created on every relational host and empty until a token is
+    minted. Nothing deletes a revoked or expired row yet (#527).
+  - **Tests.** Both kinds end to end, a level-1 token, a ban, the tenant wall, a tenant role on global data and
+    Management, and the descriptor moving under live tokens, on SQLite and PostgreSQL (`AppTokenEngineFacts`); the races
+    of a mint against a demotion, a removal and a ban (`AppTokenStoreFacts`). A log scan at Trace finds no token, no
+    secret part and no hash of one. **Docs:** `docs/architecture/accounts.md`, *Tokens for integrators (S5)*.
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

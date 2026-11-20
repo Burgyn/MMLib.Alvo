@@ -124,7 +124,12 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   every dead code one 404, an owner's invitations dying with their ownership or their account, and `signUp.mode: invitationOnly` signing
   people up through `invitation_code` on the token exchange with account and membership in one transaction;
   `tenancy.selfService.invitations` is honoured; proven end to end and under both races on SQLite and PostgreSQL
-  (`InvitationEngineFacts`). The initiative's `← YOU ARE HERE` is **S5** — personal and service tokens.
+  (`InvitationEngineFacts`). **S5**: tokens for integrators — `auth.accessTokens`, personal tokens acting as their
+  person with live tenant roles and service tokens acting as a shared tenant with fixed ones, minted over
+  `/auth/v1/tokens` and shown once (`alvo_pat_`/`alvo_svc_`, `_api_keys`), sent as `X-Alvo-Api-Key`, refused by the
+  Management API, and revoked in the transaction that removes, demotes or bans their minter; proven end to end on SQLite
+  and PostgreSQL with no secret in any log (`AppTokenEngineFacts`). The initiative's `← YOU ARE HERE` is **S6** — the
+  field-service self-service demo, the users' guides and the descriptor skills.
 
 ## 3a. What closed F4
 

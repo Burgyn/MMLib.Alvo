@@ -1,14 +1,16 @@
-# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3) and invitations (S4)
+# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3), invitations (S4) and integrator tokens (S5)
 
 > The contributor's view of `MMLib.Alvo.Accounts` and the parts of the core and the EF adapter it uses: the tables, the
 > path a request takes, the invariants and the tests that hold them, and where Alvo deviates from the standards it
 > adopts. The design is `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
 > (§3–§7, §14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
 > tenants' D1–D15 in `docs/superpowers/plans/2026-11-13-accounts-s3-tenants.md`; the invitations' D1–D15 in
-> `docs/superpowers/plans/2026-11-13-accounts-s4-invitations.md`. The first half of this page is sign-in (level 1);
-> [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3, and
+> `docs/superpowers/plans/2026-11-13-accounts-s4-invitations.md`; the tokens' D1–D16 in
+> `docs/superpowers/plans/2026-11-13-accounts-s5-tokens.md`. The first half of this page is sign-in (level 1);
+> [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3,
 > [*Invitations and `invitationOnly` sign-up (S4)*](#invitations-and-invitationonly-sign-up-s4) is how a second person
-> joins them. Users' guides arrive in S6.
+> joins them, and [*Tokens for integrators (S5)*](#tokens-for-integrators-personal-and-service-tokens-s5) is how a
+> program acts as a person or as a tenant. Users' guides arrive in S6.
 
 ## What you can build with it
 
@@ -235,7 +237,7 @@ The S2 plan adds its own recorded deviations:
 
 - Tenants, memberships and every `selfService` refusal — S3, below.
 - Invitations (S4).
-- Personal and service tokens (S5).
+- Personal and service tokens — S5, [below](#tokens-for-integrators-personal-and-service-tokens-s5).
 - Key rotation (D12): one key per purpose, generation 1.
 - Auth events and role-change audit (spec D9).
 - A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
@@ -380,7 +382,7 @@ MembershipRules.Decide
 
 A personal membership is honoured only while `personalTenant` is applied, and only its owner's. The same
 `MembershipRules` serve `RegistryMembershipResolution`, which reads the registry for callers that have no session read
-(event actors here, personal tokens in S5).
+(event actors here, and personal tokens since S5 — see *How a token becomes a caller*).
 
 ### The routes
 
@@ -480,7 +482,7 @@ And where the implementation answered differently from the plan's first wording:
 ### Not in S3
 
 - Invitations — the only way a second member joins a shared tenant (S4, below).
-- Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person (S5).
+- Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person — S5, below.
 - Deleting a tenant, and transferring a personal one.
 
 ## Invitations and `invitationOnly` sign-up (S4)
@@ -708,7 +710,315 @@ And where the implementation answered differently from the plan's first wording,
 
 ### Not in S4
 
-- Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person (S5).
+- Personal and service tokens, and with them `X-Alvo-Api-Key` carrying a person — S5, below.
 - Membership events — spec D9 defers them.
 - Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.
+
+## Tokens for integrators: personal and service tokens (S5)
+
+### What you can build with it
+
+**A script that works as you.** Ada dispatches for Acme on the level-3 backend above. She wants a nightly export, a CLI
+or an automation step to read and create Acme's jobs as her, without a browser and without handing over her Google
+account. She mints a **personal token** for Acme. The script sends it as `X-Alvo-Api-Key`, exactly as it would send an
+API key, and every request it makes is Ada in Acme: `created_by` is Ada, and the token holds the tenant roles Ada holds
+in Acme *at that moment*. Demote her and the script loses what she lost, on its next request. Remove her from Acme and
+the token is dead for good; inviting her back does not revive it.
+
+**A billing system that works as the team.** Acme's billing system creates jobs as Acme, not as whoever set it up. An
+owner mints a **service token**. It acts in Acme with the tenant roles it was given — only roles its minter holds there
+— and the rows it writes carry the token's own id in `created_by`. It keeps working while members come and go, until
+its minter stops being an owner of Acme. Then it dies with that ownership, and a remaining owner mints the replacement:
+a token that outlives the person who chose its power is exactly the case spec §7.1 rules out.
+
+Both are switched on by one block in the level-3 descriptor's `auth`:
+
+```json
+"auth": {
+  "providers": ["google"],
+  "roles": ["dispatcher", "technician"],
+  "signUp": { "mode": "open" },
+  "accessTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }
+}
+```
+
+Every token expires, and `maxLifetimeDays` (1–365, default 90) is the furthest ahead its `expiresAt` may be. A service
+token needs a shared tenant to act as, so **apply refuses `"service": true` without `tenancy.selfService.createTenants`**,
+at `/auth/accessTokens/service` (D8). `personal` needs nothing else. At level 1 (`time-tracker` with
+`"accessTokens": { "personal": true }`) a personal token minted without a tenant acts as its person in no tenant, and
+`created_by == @user.id` keeps it to that person's rows, as it keeps their session.
+
+Ada mints with her session. `$ADA` is her access token, and `3c…` is Acme's id from `GET /auth/v1/tenants`:
+
+```sh
+curl -X POST https://api.example.com/auth/v1/tokens \
+  -H "Authorization: Bearer $ADA" -H "Content-Type: application/json" \
+  -d '{ "name": "nightly export", "kind": "personal", "tenantId": "3c…",
+        "scopes": ["jobs:read", "jobs:write"], "expiresAt": "2026-12-13T00:00:00Z" }'
+# 201 { "keyId": "alvo_pat_q8…", "token": "alvo_pat_q8….Zp…", "header": "X-Alvo-Api-Key",
+#       "kind": "personal", "name": "nightly export", "tenantId": "3c…", "roles": [],
+#       "scopes": ["jobs:read", "jobs:write"], "expiresAt": "…", "createdAt": "…" }
+```
+
+`token` is in this answer and in no other, ever: store it in the script's secret store now. `header` names the header
+to send it in (`Alvo:Auth:HeaderName`). The tenant is fixed at mint, so the script sends no `X-Alvo-Tenant`; a scoped
+create still echoes its `tenant_id`, as every scoped write does:
+
+```sh
+curl https://api.example.com/api/jobs -H "X-Alvo-Api-Key: $TOKEN"
+# 200, Acme's jobs
+
+curl -X POST https://api.example.com/api/jobs \
+  -H "X-Alvo-Api-Key: $TOKEN" -H "Content-Type: application/json" \
+  -d '{ "title": "Boiler service", "tenant_id": "3c…" }'
+# 201, created_by = Ada
+```
+
+An owner mints the billing system's token the same way, with `"kind": "service"` and the roles it acts with:
+
+```sh
+curl -X POST https://api.example.com/auth/v1/tokens \
+  -H "Authorization: Bearer $ADA" -H "Content-Type: application/json" \
+  -d '{ "name": "billing", "kind": "service", "tenantId": "3c…", "roles": ["dispatcher"],
+        "scopes": ["jobs:read", "jobs:write"], "expiresAt": "2026-12-13T00:00:00Z" }'
+# 201 { "keyId": "alvo_svc_7f…", "token": "alvo_svc_7f….Lw…", …, "roles": ["dispatcher"], … }
+```
+
+The list shows what each token is, who answers for it and when it was last used — never its secret. Revoking takes the
+key id, which is not secret:
+
+```sh
+curl https://api.example.com/auth/v1/tokens -H "Authorization: Bearer $ADA"
+# 200 [ { "keyId": "alvo_svc_7f…", "kind": "service", "name": "billing", "tenantId": "3c…",
+#         "roles": ["dispatcher"], "scopes": ["jobs:read", "jobs:write"],
+#         "mintedBy": { "id": "…", "displayName": "Ada Lovelace" }, "createdAt": "…", "expiresAt": "…",
+#         "lastUsedAt": "…", "revokedAt": null, "status": "active" }, … ]
+
+curl -X DELETE https://api.example.com/auth/v1/tokens/alvo_svc_7f… -H "Authorization: Bearer $ADA"
+# 204; the token's next request is 401
+```
+
+`AppTokenEngineFacts.Personal_token_end_to_end`, `…Service_token_end_to_end` and `…Level_one_personal_token` are this
+section as tests, on SQLite and on PostgreSQL.
+
+### Why it is shaped this way
+
+- **A token is an API key with a name you can scan for.** It travels on the existing `X-Alvo-Api-Key: keyId.secret`
+  channel, so a client, the scope gate and the rules handle it as they handle any API key, and Bearer stays a person's
+  session. The key id starts `alvo_pat_` (personal) or `alvo_svc_` (service), GitHub's secret-scanning precedent: a
+  leaked token is recognisable in a log, a paste or a commit. Both prefixes are reserved — a configured dev key may not
+  use them — so "has the prefix" and "is a persisted app token" are the same statement everywhere (D3).
+- **A personal token is its person, not a snapshot of them.** Its tenant is fixed at mint — one tenant, or none — and
+  it stores no roles at all. Each request reads the person's current membership through S3's `MembershipRules`, the
+  same honoured-membership predicate a session passes, so a demotion, a removal or a descriptor change counts on the
+  next request (spec §14 AC3). A tenantless token reads no membership and never falls back to the personal tenant.
+- **A service token is a member nobody signs in as.** It has its own `UserId`, so rows show that the integration wrote
+  them, and fixed tenant roles: at mint a subset of what its minter holds in that tenant, on each request what is left
+  of them in the current `assignableRoles`. They are tenant roles, never project roles, so they count only on the
+  tenant's scoped rows (spec §6.2). Ownership is never a role and is never carried (spec §16 B4).
+- **A token dies with its reason, in the same transaction.** Removing a member, or a member leaving, revokes their
+  personal tokens for that tenant and the service tokens they minted for it. Demoting an owner revokes the service
+  tokens they minted. Disabling an account revokes every token it minted. Each sweep runs inside the write that kills
+  the reason, and minting is serialised against those writes with S3's account-row and tenant-version idiom, so a mint
+  racing a removal either sees it or is swept by it. Death is a `revoked_at` stamp, not only a live check: a person
+  invited back does not get their old tokens back, and enabling a banned account revives none.
+- **The secret is shown once and stored as a hash.** 256 random bits; the registry stores only its SHA-256, unsalted —
+  a salt adds nothing to a 256-bit random secret (S4 D2's reasoning). It is in the 201 and in no list, refusal, log,
+  `ToString` or URL.
+- **A token is an app credential, never a manager.** It cannot mint, list or revoke a token or call any self-service
+  route — 403, those are a person's acts — and the Management API refuses it with 403 even when its roles would pass an
+  `access` level (D9, which closes S1 D8).
+- **The descriptor decides on every request** (D11). Remove `accessTokens` or switch one kind off, and the next request
+  of every token of that kind is 401. Remove `selfService`, and so is every service token's and every personal token's
+  in a tenant — no membership counts any more — while a tenantless personal token keeps working. Switch it back on and
+  every unexpired, unrevoked token works again: a descriptor decision, as S3 made it for memberships.
+- **Scopes are entity × read/write, and nothing wider.** At least one, each naming an entity the applied descriptor
+  declares. `*` is refused, because a wildcard would quietly grant every entity added after the mint (the GitHub
+  fine-grained token precedent); a person who wants everything uses their session.
+
+### The table
+
+`{prefix}_api_keys`, named through `AlvoFrameworkTables.ApiKeysSuffix`, one DDL text for both engines (ids and instants
+`TEXT`, roles and scopes JSON arrays), no foreign keys, indexed on `minted_by` and `tenant_id`. The SQL is in
+`Internal/AppTokenTables.cs`; the store is `IAppTokenStore`, internal to Abstractions and implemented by
+`EfCoreAppTokenStore`. Contract facts: `test/_shared/ef/AppTokenStoreFacts.cs`, both engines.
+
+| Column | Holds |
+|---|---|
+| `key_id` | the primary key: the prefix + 22 base64url characters (128 random bits). Not secret: it is listed, and it is the revoke route's path segment |
+| `kind`, `secret_hash` | `personal` or `service`; the base64 SHA-256 of the secret part, the form every `ApiKeyRecord.Sha256Hash` holds |
+| `name`, `scopes` | what the person called it; its `entity:read` / `entity:write` scopes |
+| `user_id`, `minted_by` | who it acts as — the person (personal) or a fresh id (service) — and the account that minted it |
+| `tenant_id`, `roles` | the tenant it acts in, `NULL` for a tenantless personal token; a service token's tenant roles, `[]` for a personal one |
+| `created_at`, `expires_at` | the newest-first list's order; always set |
+| `last_used_at`, `revoked_at` | minute-grained (below); set by a revocation or a sweep, the first stamp kept |
+
+A row reads back as an `ApiKeyRecord` with the two members S5 adds: `Kind` (`Configured` for every configured or
+host-built key, so they keep their meaning) and `MintedBy`. A row whose stored scope no longer parses reads back as no
+record at all, never as a token with fewer scopes.
+
+### How a token becomes a caller
+
+```
+X-Alvo-Api-Key: alvo_pat_…|alvo_svc_….<secret>        X-Alvo-Tenant: optional, and it only confirms
+   │  CallerResolution.Read — the one credential reading every API key goes through
+   ▼
+ApiKeyContextResolver (D5)
+   1. split at the first '.' → key id, secret
+   2. ApiKeyStores.FindAsync — the prefix routes: alvo_pat_/alvo_svc_ → the registry (one read); else → the dev keys
+   3. the secret, compared in constant time (an unknown id still compares against a dummy hash)
+   4. usable: not revoked, not expired
+   5. its kind is on in the applied descriptor (a service token also needs selfService)
+   6. TenantResolver: the token's own tenant; a header naming another refuses
+   7. AppTokenPrincipals
+        personal, no tenant → the person, in no tenant, no read
+        personal, a tenant  → IMembershipResolution (S3's rules, one read): refused → REFUSE; else its roles, live
+        service             → its own user id; stored roles ∩ the current assignableRoles
+   8. last_used_at — written at most once a minute per token per replica, best effort
+   ▼
+AlvoPrincipal: User = the person | the token's own id, Roles = {authenticated}, Tenant, TenantRoles,
+               ActorKind = User (personal) | ApiKey (service), Scopes and KeyId = the token's
+```
+
+Every refusal is the API key's ordinary 401, so a wrong secret, an expired token, a switched-off kind and an ended
+membership look alike. A service token or a tenantless personal token costs one read; **a personal token in a tenant
+costs two**, the token row and the membership. Spec §14 AC2's one round trip is about sessions — recorded here, not
+hidden. A failed `last_used_at` write is logged as a warning naming the key id, never the secret, and the request goes
+on.
+
+**A personal token is a `User` actor, a service token an `ApiKey` one** (D6). An event a personal token causes reports
+`authtype user` and the person as `authid`, so S3 D10's delivery narrowing applies to it unchanged: a queued delivery of
+a person removed since loses their tenant roles, whether they acted by session or by token. A service token's queued
+deliveries keep the tenant roles recorded at the event, bounded by `assignableRoles`, as any API key's do.
+
+### The routes
+
+All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
+other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (any `X-Alvo-Api-Key`, a
+token included → 403 `forbidden`; none → 401 `Bearer`; a key beside a Bearer → 401 ambiguous); `auth.accessTokens`
+(404 `feature-disabled`); then, for `POST`, the JSON body (415, then 422), the kind's own switch (404
+`feature-disabled` naming `auth.accessTokens.personal` or `.service`), the person's membership of the named tenant, and
+the registry.
+
+| Route | Who | Answers |
+|---|---|---|
+| `POST /tokens` `{name, kind, tenantId?, roles?, scopes, expiresAt}` | personal: any person; service: an owner of a shared tenant | 201 with `token`, the only answer that carries it, and no `Location`; 403 for a member who is not an owner; 404 for a tenant the person is not in, byte for byte an unknown tenant's; 409 `conflict` for a personal tenant or past 100 live tokens; 422 at the offending pointer; 429 past `Alvo:Api:RateLimits:Create` |
+| `GET /tokens` | any person | 200, newest first: their personal tokens and the service tokens of the shared tenants they own; `status` is `revoked` > `expired` > `active`; never `token`, never a hash |
+| `DELETE /tokens/{keyId}` | a personal token: its minter; a service token: its minter or any owner of its tenant | 204, also the second time (the first `revokedAt` is kept); one identical 404 for an unknown id, another person's personal token and a service token of a tenant the caller does not own |
+
+**The body is refused, never clamped.** `name` is 1–100 characters under the display name's rules (`SelfServiceName`).
+`kind` is `personal` or `service`. `tenantId` is a UUID — optional for a personal token, required for a service one.
+`roles` must be absent on a personal token (its roles are its person's); a service token names one or more, unique,
+each in `assignableRoles` and each held by the minter in that tenant ("You can only give a token roles you hold in this
+tenant", at `/roles`). `scopes` are one or more unique `entity:read` / `entity:write`, each entity declared — the
+refusal lists the descriptor's entities and repeats nothing that was sent. `expiresAt` is RFC 3339 with an offset,
+later than now and at most `maxLifetimeDays` ahead. An unknown member is refused at its own pointer.
+
+**Minting is charged the `Create` budget** (`Alvo:Api:RateLimits:Create`, default 10 per client per minute) — the one
+`POST /tenants` draws on, so the two share it (D15). Listing and revoking are not charged.
+
+Three behaviours, recorded so they read as decisions:
+
+- **A caller already at the live cap gets 409 before any tenant check.** The registry counts the minter's live tokens
+  under the account lock first, so a person holding 100 who asks for a service token in a stranger's tenant is told
+  409, not 404. The answer reveals only their own state.
+- **A service token the descriptor no longer honours is invisible to the token routes.** While `selfService` is off no
+  shared membership counts, so the list drops service tokens, and revoking one answers the unknown id's 404 without
+  touching the registry. Both use one predicate (`TokenRoutes.Honoured`, over S3's `MembershipRules.Honours`). Turn
+  `selfService` back on and the token is listed — and resolves — again.
+- **The key id is matched by prefix, ordinally, and `key_id` is compared case-sensitively.** `AppTokenSecret.KindOf`
+  reads the kind from the prefix with an ordinal comparison, and the revoke's `key_id = @key_id` is case-sensitive on
+  SQLite and PostgreSQL, so `ALVO_SVC_…` names no row. A third engine whose collation compares `key_id`
+  case-insensitively must keep this column case-sensitive: an upper-cased id is classified as a configured key, skips
+  the honoured check, and would otherwise find the row.
+
+### Invariants, and the tests that hold them
+
+| Invariant | Held by |
+|---|---|
+| Personal and service tokens end to end, and a tenantless personal token at level 1, on both engines | `AppTokenEngineFacts.Personal_token_end_to_end`, `…Service_token_end_to_end`, `…Level_one_personal_token` (`SqliteAppTokenEngineTests`, `PostgresAppTokenEngineTests`) |
+| A personal token's roles are its person's current ones: demoted → the lost role is gone on the next request; removed → 401; invited back → the old token is still 401 (Review Focus 1) | `AppTokenEngineFacts.Personal_token_end_to_end` (red on both engines without the removal sweep); `AppTokenResolutionTests.A_personal_token_acts_as_its_person_with_live_tenant_roles`, `…A_personal_token_whose_membership_ended_is_refused`; `AppTokenStoreFacts.A_rejoined_member_s_old_personal_token_stays_revoked` |
+| A token dies with its reason, in that transaction: removal and leaving, an owner's demotion, a ban; a role change and a refused write revoke nothing; enabling revives nothing | `AppTokenStoreFacts.Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only`, `…A_member_leaving_revokes_the_same`, `…Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s`, `…Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens`, `…Changing_a_member_s_roles_revokes_nothing`, `…A_refused_demotion_revokes_nothing`, `…Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none`; `AccountStoreFacts.Disabling_revokes_sessions_and_tokens_together`; `AppTokenEngineFacts.Service_token_end_to_end`, `…A_banned_person_s_tokens_die_and_stay_dead` |
+| A mint racing its minter's demotion, removal or ban never outlives it (Review Focus 2) | `AppTokenStoreFacts.A_service_mint_racing_its_minter_s_demotion_never_outlives_it`, `…A_personal_mint_racing_the_person_s_removal_never_outlives_it`, `…A_mint_racing_a_ban_never_outlives_it` (20 iterations, both engines; red on PostgreSQL without the tenant bump) |
+| Never more than 100 live tokens per account, also in parallel | `AppTokenStoreFacts.The_live_cap_counts_only_unexpired_unrevoked_tokens`, `…Concurrent_mints_at_the_cap_never_exceed_it` (red on PostgreSQL without the account lock); `TokenRoutesTests.The_live_cap_is_409` |
+| A token never mints, lists or revokes a token, never reaches Management, never acts in another tenant, never reads outside its scopes (Review Focus 3) | `TokenRoutesTests.A_token_cannot_mint_a_token`, `…A_token_cannot_list_or_revoke`, `…A_person_mints_a_personal_token_and_sees_it_once` (`notes` is 403 `out-of-scope`); `AppTokenManagementTests.A_token_is_refused_by_every_management_route`, `…A_bearer_beside_an_app_token_on_management_is_judged_by_the_token`; `AppTokenEngineFacts.A_token_never_acts_outside_its_tenant`; `AppTokenResolutionTests.A_header_naming_another_tenant_refuses_either_kind` |
+| A service token's tenant role never writes a global entity, directly or through a relation term, and never reaches Management (Review Focus 4) | `AppTokenEngineFacts.A_service_token_s_tenant_role_never_reaches_global_data_or_management` (red when its roles go into `Roles`) |
+| The descriptor moving under a live token counts on its next request: a role dropped from `assignableRoles`, a kind switched off and on, `selfService` removed (Review Focus 5) | `AppTokenEngineFacts.The_descriptor_moves_under_live_tokens`; `AppTokenResolutionTests.A_kind_the_descriptor_does_not_enable_is_refused`, `…Re_enabling_revives_an_unexpired_token`, `…A_service_token_acts_as_itself_with_its_roles_still_assignable` |
+| A service token acts as itself: its own user id, only roles its minter holds, only for a shared tenant, minted only by an owner | `TokenRoutesTests.An_owner_mints_a_service_token_that_acts_as_the_tenant`, `…A_service_token_carries_only_roles_its_owner_holds`, `…A_personal_tenant_takes_no_service_token`, `…A_member_who_is_not_an_owner_cannot_mint_a_service_token`; `AppTokenStoreFacts.A_service_token_needs_an_owner_of_a_shared_tenant`, `…A_mint_that_would_act_as_someone_other_than_its_minter_is_refused` |
+| A stranger learns nothing: a tenant they are not in and an unknown one are one 404; another person's token, a token the descriptor no longer honours and an unknown id are one 404 | `TokenRoutesTests.A_stranger_s_and_an_unknown_tenant_are_the_same_404`, `…Any_owner_revokes_a_service_token_and_nobody_else_s_personal_one`, `…A_plain_member_revoking_a_service_token_is_the_same_404_as_an_unknown_id`, `…A_service_token_the_descriptor_no_longer_honours_cannot_be_revoked`, `…A_member_s_list_after_self_service_is_switched_off_shows_only_personal_tokens` |
+| An unusable token is any key's 401 — a wrong secret (constant time, dummy hash), expired, revoked — decided before any membership read | `AppTokenResolutionTests.A_wrong_secret_is_refused_like_an_unknown_id`, `…An_expired_or_revoked_token_is_refused_before_any_membership_read`; `AppTokenManagementTests.An_unusable_app_token_is_401_like_any_key`; `TokenRoutesTests.Revoking_kills_the_token_on_its_next_request` |
+| The prefix means a persisted app token: dev keys may not use it; a prefixed id never reaches the dev keys, nor an unprefixed one the registry | `AlvoAuthOptionsValidatorTests.A_dev_key_with_a_reserved_prefix_is_refused`; `ApiKeyStoresTests.A_prefixed_id_never_reaches_the_dev_keys_and_an_unprefixed_one_never_the_registry`, `…Without_a_registry_an_app_token_is_unknown`; `AppTokenSecretTests.Kind_of_a_key_id` |
+| The secret is 256 bits, stored as its hash, answered once, and never in a URL, a list, a refusal, a `ToString` or a log (spec §14 AC6) | `AppTokenSecretTests`; `AppTokenResponseTests`; `TokenRoutesTests.The_list_shows_my_tokens_and_my_tenants_service_tokens_never_a_secret`; `AccountsOpenApiTests.The_token_route_is_in_the_document_once_and_only_its_201_carries_the_credential`, `…The_token_list_and_revoke_are_in_the_document_once_and_take_no_secret`; `AppTokenRequestTests.No_violation_echoes_what_was_sent`; `SecretsNeverLoggedTests.No_app_token_secret_appears_in_any_log` (the credential whole, its secret and its hash, at Trace; red when the resolver logs the presented key), `…No_error_body_echoes_a_presented_token` |
+| Default-deny: without `accessTokens` every token route is 404 naming its key, and a kind switched off is 404 naming its own; apply refuses `service` without `createTenants` | `TokenRoutesTests.Without_access_tokens_every_route_is_404_naming_its_key`, `…A_kind_switched_off_is_404_naming_its_key`, `…Without_access_tokens_list_and_revoke_are_404_naming_its_key`; `AccessTokensCheckTests.Service_tokens_without_self_service_are_refused`, `…Service_tokens_without_create_tenants_are_refused`; `AppTokenPolicyTests` |
+| Every bound of the body is refused at its pointer: scopes without a wildcard and only declared entities, listed in the refusal; expiry at most `maxLifetimeDays` ahead | `AppTokenRequestTests.Each_bound_is_refused_at_its_pointer`, `…An_unknown_entity_is_refused_with_the_descriptor_s_entities`, `…Exactly_max_lifetime_is_accepted`; `TokenRoutesTests.An_invalid_body_is_422_and_stores_nothing` |
+| Minting shares the `Create` budget with tenant creation | `TokenRoutesTests.Minting_answers_429_after_the_create_budget_and_shares_it_with_tenant_creation` |
+| `lastUsedAt` is minute-grained, and its write never fails a request | `ApiKeyStoresTests.App_token_touches_are_throttled_to_one_a_minute`; `TokenRoutesTests.Last_used_is_recorded_within_a_minute`; `AppTokenResolutionTests.A_failed_last_used_write_never_fails_a_request_whose_token_is_valid` |
+| A configured API key behaves exactly as before (AC7) | `AppTokenManagementTests.A_configured_key_still_manages_as_before`; `ApiKeyStoresTests.Dev_keys_resolve_from_configuration_and_app_tokens_from_the_registry`; `ApiKeyContextResolverTests`, unchanged |
+
+### Recorded decisions and deviations
+
+From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
+
+- **D1** — the routes live under the sign-in prefix (`/auth/v1/tokens`), not §7.2's `{prefix}`, as in S3 and S4:
+  `/api/tokens` would collide with an entity named `tokens`, and minting needs a person's session, which exists only
+  where sign-in is mapped. No TeaPie path pin moves.
+- **D2** — "app token" is the code's word for a personal or service token; no type is named `AccessToken*`
+  (`AccessTokens` is already the JWT issuer); only the descriptor key keeps the spec's `auth.accessTokens`.
+  **Deviation from the plan's names:** the route types are `AppTokenRequest`, `AppTokenResponse`, `AppTokenProblems`
+  and `AppTokenListItem`, not `TokenRequest`/`TokenResponse`/`TokenProblems`/`TokenListItem`.
+  `MMLib.Alvo.Accounts.Internal` already has the OAuth token endpoint's `TokenResponse` and `TokenProblems`, and a file
+  naming both needed a `using` alias. `TokenRoutes`, the operation ids and the schema names are unchanged.
+- **D3** — the credential is `alvo_pat_`/`alvo_svc_` + 128 random bits, a `.`, and a 256-bit secret, all base64url;
+  stored as `ApiKeyHash.Compute(secret)`. Both prefixes are reserved at startup.
+- **D4** — one `IApiKeyStore`, two homes: `ApiKeyStores` routes a prefixed id to the registry and every other id to the
+  dev keys, registered with `TryAddSingleton`. A host that registers its own `IApiKeyStore` owns key resolution
+  entirely (`host.md`). `last_used_at` is written at most once a minute per token per replica.
+- **D5** — the resolution order above; a personal token in a tenant costs two reads.
+- **D6** — a personal token's principal is a `User` actor, a service token's an `ApiKey` actor. **Deviation from the
+  master plan's description of `User`** ("a principal resolved from a person's session"): no route relied on it — the
+  self-service routes admit by channel, and Management refuses tokens by D9, not by kind.
+- **D7** — who mints: any person a personal token, an owner a service token, never a token.
+- **D8** — service tokens are for shared tenants only, so a personal tenant's is 409, and apply refuses `service`
+  without `createTenants`. **Deviation, stricter than spec §3.1's "requires `selfService`"**, which it implies: a
+  personal tenant has one member forever, so a service token there outlives nothing a personal token would not.
+- **D9** — the Management API refuses an app token with 403 `forbidden` and a fixed sentence, by its prefix and after it
+  resolved, so an unusable token is any key's 401. `AlvoPrincipal` does not grow. S1 D8 is closed.
+- **D10** — a token dies in the transaction that kills its reason, and every mint is serialised against those
+  transactions. **Deviation beyond spec §7.1** for the service half: §7.1 lists removal and demotion; a ban also
+  revokes the service tokens the account minted, because a banned owner who kept a secret is exactly spec §16 B4's case.
+- **D11** — default-deny, decided per request; switching a kind back on revives unexpired, unrevoked tokens.
+- **D12** — scopes are `entity:read|write`, at least one, unique, declared, no wildcard.
+- **D13** — bounds: name 1–100, `expiresAt` required and refused past `maxLifetimeDays`, at most 100 live tokens per
+  account. Lowering `maxLifetimeDays` bounds new mints only; an existing token keeps its expiry.
+- **D14** — create answers 201 with the credential and `header`, once, and no `Location`; the list never carries the
+  credential or a hash; revoke is 204 and idempotent; everything is `no-store`.
+- **D15** — minting is charged `Alvo:Api:RateLimits:Create`, the budget `POST /tenants` already draws on (spec §7.3).
+  One budget for both, recorded; listing and revoking are not charged.
+- **D16** — public growth is exactly `ApiKeyKind`, `ApiKeyRecord.Kind`, `ApiKeyRecord.MintedBy`, `Auth.AccessTokens` and
+  `AuthAccessTokens`. No new problem type.
+
+And where the implementation answered differently from the plan's first wording, or a test had to look further:
+
+- **`ApiKeyStores` takes no clock.** Its throttle judges the instant the resolver passes, so one request is judged on
+  one instant (`ApiKeyStoresTests.The_throttle_reads_the_instant_it_is_given_not_the_clock_again`).
+- **The registry refuses a mint whose actor contradicts its kind** — a personal token acting as anyone but its minter, a
+  service token acting as its minter — with an `ArgumentException`. The routes never send either; it is the guard
+  below them.
+- **A refused `PATCH /api/regions/{id}` through `jobs.exists(…)` is 404, not the plan's 403**, for S3's recorded
+  reason: an `update` rule filters the rows a caller may change.
+- **The engine facts join members by invitation.** "A dispatcher creates Acme … the owner demotes them" needs two
+  people, since nobody changes their own membership, so Carol joins as a dispatcher and Ada demotes her. Dropping
+  `dispatcher` from `assignableRoles` drops it from `creatorRoles` too, which must stay within it.
+- **`team-tracker`'s `jobs` gained `audit: true`**, so a fact can read `created_by`.
+
+### Not in S5
+
+- Scopes finer than entity × read/write — a field, an operation, "only my own rows".
+- A per-token IP allow-list.
+- OAuth client credentials (spec D3). A service token is an API key, not an OAuth client.
+- A sweep of revoked and expired rows. Nothing deletes an `_api_keys` row yet, so the table grows by every mint —
+  bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
+  grows by this table).
+- Events and an audit trail for minting and revoking (spec D9).
+- The field-service demo, its TeaPie suite, the website guides and the descriptor skills (S6).

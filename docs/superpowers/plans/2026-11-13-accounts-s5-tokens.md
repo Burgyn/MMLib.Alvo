@@ -61,6 +61,12 @@ only a hash of a high-entropy secret; one answer for every failed lookup); the C
   `enum ApiKeyKind { Configured, Personal, Service }` and `ApiKeyRecord.Kind { get; init; }` (default `Configured`, so every
   existing record and every host-built one keeps its meaning) and `ApiKeyRecord.MintedBy { get; init; }` (`UserId?`, `null`
   for `Configured`) — spec §7.1 "widened compatibly with its kind and minter". `PrintMembers` prints both, never the hash.
+  **Recorded deviation (Task 7 review, controller ruling):** the route types this plan first named `TokenRequest`,
+  `TokenResponse`, `TokenProblems` and `TokenListItem` shipped as `AppTokenRequest`, `AppTokenResponse`,
+  `AppTokenProblems` and `AppTokenListItem` (their test, `AppTokenRequestTests`), and the names below use them.
+  `MMLib.Alvo.Accounts.Internal` already holds the OAuth token endpoint's `TokenResponse` and `TokenProblems`, so the
+  plan's names clashed — two test files needed a `using` alias to name both — and "app token" is this decision's own
+  word. `TokenRoutes`, `TokenRules`, the operation ids and the OpenAPI schema names are unchanged.
 - **D3 — The credential.** Key id = `alvo_pat_` | `alvo_svc_` + base64url (no padding) of 16 bytes from
   `RandomNumberGenerator` (22 chars; not secret, listed by `GET /tokens`). Secret = base64url of 32 bytes (43 chars,
   256 bits). Presented as `keyId.secret` — the existing `X-Alvo-Api-Key` format, so the whole credential starts with the
@@ -195,9 +201,9 @@ only a hash of a high-entropy secret; one answer for every failed lookup); the C
 - **Mutation carry-over:** every new EF file (`EfCoreAppTokenStore.cs`, `Internal/AppTokenTables.cs`) goes into
   `stryker-config.accounts-store.json`'s `mutate` and is excluded (`!…`) from `stryker-config.data-ef-rest.json` in the task
   that creates it (its facts compile into Data.Sqlite.Tests, never into EntityFrameworkCore.Tests — `mutation.yml`'s
-  header). Every new **route** file (`TokenRoutes.cs`, `TokenResponse.cs`, `TokenListItem.cs`) goes into
+  header). Every new **route** file (`TokenRoutes.cs`, `AppTokenResponse.cs`, `AppTokenListItem.cs`) goes into
   `stryker-config.self-service.json` and is excluded from `stryker-config.json` (the core leg cannot map them; S3's
-  reasoning). The pure files (`TokenRequest.cs`, `AppTokenPolicy.cs`, `AppTokenSecret.cs`, `ApiKeyStores.cs`,
+  reasoning). The pure files (`AppTokenRequest.cs`, `AppTokenPolicy.cs`, `AppTokenSecret.cs`, `ApiKeyStores.cs`,
   `AppTokenPrincipals.cs`) stay on the core leg, whose suite (`MMLib.Alvo.Tests`) tests them directly. Each task updates
   `mutation.yml`'s comment and `mutants:` estimate (code lines × 0.16, "still an estimate").
 - **Prototype fixtures:** any schema change is followed by `scripts/gen-prototype-fixtures --check` (regenerate and commit
@@ -533,37 +539,37 @@ internal sealed class AppTokenPrincipals(IMembershipResolution memberships, IPol
 ### Task 7: `POST /tokens` — a person mints, the secret is shown once
 
 **Files:**
-- Create: `src/MMLib.Alvo/Tenants/SelfService/TokenRequest.cs` (the body reader, pure), `TokenRoutes.cs`,
-  `TokenResponse.cs`, `TokenProblems.cs` (feature keys `auth.accessTokens`, `.personal`, `.service`; status → problem)
+- Create: `src/MMLib.Alvo/Tenants/SelfService/AppTokenRequest.cs` (the body reader, pure), `TokenRoutes.cs`,
+  `AppTokenResponse.cs`, `AppTokenProblems.cs` (feature keys `auth.accessTokens`, `.personal`, `.service`; status → problem)
 - Modify: `SelfServiceEndpoints.cs` (`MapTokens`, tag `tokens`, `limits.For(AlvoRateLimit.Create)` on the POST)
 - Modify: `src/MMLib.Alvo.Accounts/Internal/AccountsDocumentation.Tokens.cs` (new), `AccountsSchemas.cs`,
   `AccountsDocumentTransformer.cs`
-- Modify: `stryker-config.self-service.json` (+ `TokenRoutes.cs`, `TokenResponse.cs`, `TokenProblems.cs`),
+- Modify: `stryker-config.self-service.json` (+ `TokenRoutes.cs`, `AppTokenResponse.cs`, `AppTokenProblems.cs`),
   `stryker-config.json` (their `!…`), `mutation.yml` (`self-service` comment + estimate)
 - Modify: `test/_shared/accounts/descriptors/team-tracker.alvo.json` (`"accessTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }`),
   `time-tracker.alvo.json` (`"accessTokens": { "personal": true }`), `test/_shared/accounts/AccountsWorld.Tenants.cs`
   (`MintAsync(string access, object body)`, `AsTokenAsync(HttpMethod, string path, string token, string? tenant = null, object? body = null)`)
-- Test: `test/MMLib.Alvo.Tests/Tenants/TokenRequestTests.cs`, `test/MMLib.Alvo.Accounts.Tests/TokenRoutesTests.cs`,
+- Test: `test/MMLib.Alvo.Tests/Tenants/AppTokenRequestTests.cs`, `test/MMLib.Alvo.Accounts.Tests/TokenRoutesTests.cs`,
   `test/MMLib.Alvo.Accounts.Tests/AccountsOpenApiTests.cs`
 
 **Interfaces:**
-- `internal sealed record TokenRequest(string Name, ApiKeyKind Kind, TenantId? Tenant, IReadOnlyList<string> Roles,
+- `internal sealed record AppTokenRequest(string Name, ApiKeyKind Kind, TenantId? Tenant, IReadOnlyList<string> Roles,
   IReadOnlyList<ApiKeyScope> Scopes, DateTimeOffset ExpiresAt)`;
-  `TokenRequest.ReadAsync(HttpRequest, AlvoApiOptions, TokenRules rules, CancellationToken) → (TokenRequest?, IReadOnlyList<AlvoViolation>)`
+  `AppTokenRequest.ReadAsync(HttpRequest, AlvoApiOptions, TokenRules rules, CancellationToken) → (AppTokenRequest?, IReadOnlyList<AlvoViolation>)`
   through `SelfServiceBody`, where `internal sealed record TokenRules(AppTokenPolicy Tokens, SelfServicePolicy SelfService,
   IReadOnlySet<string> Entities, DateTimeOffset Now)`. Members: `name` (required), `kind` (`"personal"`|`"service"`),
   `tenantId` (uuid string; required for service), `roles` (service: required 1+, unique, each assignable; personal:
   must be absent), `scopes` (D12), `expiresAt` (D13); an unknown member → a violation at its pointer. Fixed sentences only.
 - Order (S3 Task 7's gate contract): CORS → no-store → `Create` budget → `SelfServiceCall.EnterAsync(http, _ =>
-  TokenProblems.Off(tokens))` (person, then `auth.accessTokens`) → JSON content type → body (422) → the kind's feature
+  AppTokenProblems.Off(tokens))` (person, then `auth.accessTokens`) → JSON content type → body (422) → the kind's feature
   (404 `auth.accessTokens.personal`/`.service`) → personal + `tenantId`: `call.MembershipAsync` (404) → mint through the
   store with `AppTokenSecret.New(kind)` (only `Hash` goes down; `Actor` = the person for personal, `UserId.New()` for
   service; `MaxLive` 100) → status → problem (`NoAccount` → 401 `invalid_token`, `NotFound` → `NoSuchTenant()`,
   `NotOwner` → 403, `PersonalTenant` → 409 `conflict`, `RolesNotHeld` → 422 `/roles`, `LimitReached` → 409 `conflict`) →
-  201 `TokenResponse` (D14). `TokenResponse` overrides `PrintMembers`: `Token = alvo_pat_***`.
+  201 `AppTokenResponse` (D14). `AppTokenResponse` overrides `PrintMembers`: `Token = alvo_pat_***`.
 
 - [ ] **Step 1: Write the failing facts.**
-  `TokenRequestTests` (pure): `A_personal_request_needs_no_tenant_and_no_roles`; theory
+  `AppTokenRequestTests` (pure): `A_personal_request_needs_no_tenant_and_no_roles`; theory
   `Each_bound_is_refused_at_its_pointer` (`name` missing/empty/101 chars/control char; `kind` missing/`"owner"`;
   `tenantId` not a uuid; service without `tenantId`; `roles` on personal → `/roles`; service `roles` missing/empty/
   duplicate/`admin`/undeclared/not assignable → `/roles` or `/roles/{i}`; `scopes` missing/empty/`"jobs"`/`"jobs:READ"`/
@@ -587,7 +593,7 @@ internal sealed class AppTokenPrincipals(IMembershipResolution memberships, IPol
   then 429 with `Retry-After`); `The_live_cap_is_409` (seeded through the store with `MaxLive` reached);
   `A_non_json_body_is_415`; `An_allowed_origin_gets_cors_headers_on_the_token_routes`.
   `AccountsOpenApiTests`: `tokens.create` appears once; its 201 schema is the only one with a `token` property.
-- [ ] **Step 2: Run to see them fail** — `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*TokenRequestTests*'` and
+- [ ] **Step 2: Run to see them fail** — `dotnet test --project test/MMLib.Alvo.Tests -- --filter-class '*AppTokenRequestTests*'` and
   `dotnet test --project test/MMLib.Alvo.Accounts.Tests -- --filter-class '*TokenRoutesTests*' --filter-class '*AccountsOpenApiTests*'`; Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** the Step 2 commands, every S3/S4 class that loads `team-tracker` (`--filter-class '*TenantRoutesTests*'
@@ -599,14 +605,14 @@ internal sealed class AppTokenPrincipals(IMembershipResolution memberships, IPol
 ### Task 8: `GET /tokens` and `DELETE /tokens/{keyId}`
 
 **Files:**
-- Create: `src/MMLib.Alvo/Tenants/SelfService/TokenListItem.cs`; Modify: `TokenRoutes.cs`, `SelfServiceEndpoints.cs`,
-  `AccountsDocumentation.Tokens.cs`, `stryker-config.self-service.json` / `stryker-config.json` (`TokenListItem.cs`)
+- Create: `src/MMLib.Alvo/Tenants/SelfService/AppTokenListItem.cs`; Modify: `TokenRoutes.cs`, `SelfServiceEndpoints.cs`,
+  `AccountsDocumentation.Tokens.cs`, `stryker-config.self-service.json` / `stryker-config.json` (`AppTokenListItem.cs`)
 - Test: `test/MMLib.Alvo.Accounts.Tests/TokenRoutesTests.cs`, `AccountsOpenApiTests.cs`
 
 **Interfaces:**
-- `GET {prefix}/tokens` (`tokens.list`): CORS → no-store → `SelfServiceCall.EnterAsync(http, _ => TokenProblems.Off(tokens))`
+- `GET {prefix}/tokens` (`tokens.list`): CORS → no-store → `SelfServiceCall.EnterAsync(http, _ => AppTokenProblems.Off(tokens))`
   → `ListAsync(person)` → drop service tokens whose tenant membership the descriptor does not honour (`selfService` off →
-  none; S3's "every listing honours what a request honours") → 200 array of `TokenListItem` (D14), `status` at `call.Now`.
+  none; S3's "every listing honours what a request honours") → 200 array of `AppTokenListItem` (D14), `status` at `call.Now`.
 - `DELETE {prefix}/tokens/{keyId}` (`tokens.revoke`): same gates → `RevokeAsync` → `Revoked` → 204, `NotFound` →
   `ProblemResultFactory.NotFound()`. `{keyId}` is a plain string segment (not secret; never the `.secret` part — a path
   containing `.` beyond the key id is simply an unknown id).
@@ -713,7 +719,7 @@ internal sealed class AppTokenPrincipals(IMembershipResolution memberships, IPol
   `needs-deep-review`**.
 - [ ] **Step 6: Hand back** to the controller (plan-guard, PR report, PR targeting `accounts/s4-invitations`). Flag for the
   post-merge mutation run: `accounts-store` grows by two files and the sweeps, `self-service` by the token route files,
-  the core leg by `ApiKeyStores`/`AppTokenPrincipals`/`TokenRequest` — every leg's `mutants` stays an estimate until the
+  the core leg by `ApiKeyStores`/`AppTokenPrincipals`/`AppTokenRequest` — every leg's `mutants` stays an estimate until the
   first real run re-probes it, and every other shard's declared counts with it (the *re-probe all shards* lesson).
 
 ## Self-review against the spec
