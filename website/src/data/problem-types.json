@@ -250,7 +250,8 @@
   },
   "feature-disabled": {
     "causes": [
-      "Only on a host that maps the sign-in routes. A self-service route (`/auth/v1/tenants…`) was called while the applied descriptor leaves its feature off; the document's `descriptorKey` names the key that enables it — `tenancy.selfService`, or `tenancy.selfService.createTenants` for creating a tenant."
+      "Only on a host that maps the sign-in routes. A self-service route was called while the applied descriptor leaves its feature off; the document's `descriptorKey` names the key that enables it: `tenancy.selfService` for any route under `/auth/v1/tenants` or `/auth/v1/invitations`; `tenancy.selfService.createTenants` for creating a tenant (`POST /auth/v1/tenants`); `tenancy.selfService.invitations` for every invitation route (`/auth/v1/tenants/{id}/invitations`, `/auth/v1/invitations/preview`, `/auth/v1/invitations/accept`).",
+      "Under `/auth/v1/tokens`, `descriptorKey` is `auth.accessTokens` while the descriptor switches on neither kind of token, and `auth.accessTokens.personal` or `auth.accessTokens.service` while it switches on only the other kind. It is also `auth.accessTokens`, with a detail saying why, when this host replaced Alvo's `IApiKeyStore` instead of decorating it, so a minted token could never be used: decorate the store, or remove `auth.accessTokens`."
     ],
     "fix": "Declare the key `descriptorKey` names in the descriptor and apply it, or stop calling the route; no request alone changes the answer.",
     "violationCodes": [],
