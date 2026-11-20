@@ -27,9 +27,14 @@ await tp.Test("Both invitations were real until they died: created with a code, 
     foreach (var request in new[] { "RevokedInvite", "ExpiringInvite" })
     {
         var invitation = await BodyOf(tp.Responses[request]);
-        StartsWith("alvo_inv_", invitation.GetProperty("code").GetString());
+        True(invitation.GetProperty("code").GetString()?.StartsWith("alvo_inv_", StringComparison.Ordinal) == true, $"{request}'s code starts with alvo_inv_");
         Equal("active", invitation.GetProperty("status").GetString());
     }
 
     Equal(204, (int)tp.Responses["RevokeIt"].StatusCode);
+});
+
+await tp.Test("Control: the expiring invitation previewed as alive before it lapsed.", async () =>
+{
+    Equal("Acme Repairs", (await BodyOf(tp.Responses["StillAlivePreview"])).GetProperty("tenantName").GetString());
 });

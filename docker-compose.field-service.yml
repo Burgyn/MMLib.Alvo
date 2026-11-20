@@ -129,10 +129,12 @@ services:
       # Wider per-IP budgets than the defaults (Token 30, Create 10, Invitations 20 a minute). One suite run
       # comes from one address and signs in, creates tenants and invites inside a minute; the limits
       # themselves are pinned in process (TokenRoutesTests, TenantRoutesTests, InvitationRoutesTests), so a
-      # 429 here would be a flake, not a finding.
+      # 429 here would be a flake, not a finding. Invitations is the widest: every invitation route shares its
+      # budget, and 170-SelfService spends ~31 calls a run (the expiry poll alone ~16 previews), so a contributor
+      # re-running it on a live stack inside a minute needs room for two runs.
       Alvo__Api__RateLimits__Token: 120
       Alvo__Api__RateLimits__Create: 30
-      Alvo__Api__RateLimits__Invitations: 60
+      Alvo__Api__RateLimits__Invitations: 120
     secrets:
       - alvo_fs_secrets_key
 

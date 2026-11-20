@@ -15,8 +15,12 @@ await tp.Test("A removed member's next request in the tenant is refused as an in
 
 await tp.Test("His personal token died with his membership.", async () =>
 {
+    // Control: the same captured token read exactly his job a moment before the removal.
+    Equal(new[] { tp.GetVariable<string>("TheoJobReference") }, await PageSet(tp.Responses["TheosTokenBefore"], "reference"));
+
     var refused = tp.Responses["TheosTokenAfter"];
     Equal(401, (int)refused.StatusCode);
+    Equal("https://alvo.dev/errors/unauthenticated", await ProblemType(refused));
     DoesNotContain("items", await refused.Content.ReadAsStringAsync());
 });
 

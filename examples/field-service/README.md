@@ -224,7 +224,7 @@ suite. Point the provider at real Google (below) to sign in yourself.
 
 Each sign-in is an RFC 8693 token exchange. A client sends the Google ID token as `subject_token` to
 `POST /auth/v1/token` and receives a 15-minute access token (`Authorization: Bearer …`) and a rotating refresh
-token. The stack also raises the per-IP rate budgets (Token 120, Create 30, Invitations 60 a minute), because one
+token. The stack also raises the per-IP rate budgets (Token 120, Create 30, Invitations 120 a minute), because one
 suite run comes from one address. The limits themselves are tested in process.
 
 **Pointing it at real Google.**

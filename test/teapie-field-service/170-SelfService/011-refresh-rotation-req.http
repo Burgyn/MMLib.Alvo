@@ -14,6 +14,12 @@ Content-Type: application/x-www-form-urlencoded
 
 grant_type=refresh_token&refresh_token={{DanaRefresh}}
 
+### The newest access token works — so its 401 in the next case is the reuse, not a token that never did
+# @name LatestAccessBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{DanaReplaysInsideWindow.response.body.$.access_token}}
+
 ### The same rotated token after the window is reuse. Polled — never slept — until the window (10 s) has passed;
 ### a replay still inside it answers the same child again, so the poll cannot fork the family. At most ~30 s.
 # @name ReuseAfterWindow

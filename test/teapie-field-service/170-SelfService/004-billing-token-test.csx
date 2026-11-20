@@ -22,7 +22,7 @@ await tp.Test("A service token answers its secret once, the header it goes in, a
     var response = tp.Responses["DanaMintsBilling"];
     var billing = await BodyOf(response);
 
-    StartsWith("alvo_svc_", billing.GetProperty("token").GetString());
+    True(billing.GetProperty("token").GetString()?.StartsWith("alvo_svc_", StringComparison.Ordinal) == true, "DanaMintsBilling's token starts with alvo_svc_");
     Equal("X-Alvo-Api-Key", billing.GetProperty("header").GetString());
     Equal("service", billing.GetProperty("kind").GetString());
     Equal(Constant("AcmeId"), billing.GetProperty("tenantId").GetString());
@@ -51,7 +51,7 @@ await tp.Test("A personal token acts as its person, with no roles of its own.", 
     var response = tp.Responses["TheoMintsPersonal"];
     var token = await BodyOf(response);
 
-    StartsWith("alvo_pat_", token.GetProperty("token").GetString());
+    True(token.GetProperty("token").GetString()?.StartsWith("alvo_pat_", StringComparison.Ordinal) == true, "TheoMintsPersonal's token starts with alvo_pat_");
     Equal("personal", token.GetProperty("kind").GetString());
     Equal(Constant("AcmeId"), token.GetProperty("tenantId").GetString());
     Empty(token.GetProperty("roles").EnumerateArray());

@@ -1,3 +1,10 @@
+### Before: Theo's personal token, as the earlier case captured it, reads his job — so the 401 below is the removal,
+### not a token that never worked
+# @name TheosTokenBefore
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+X-Alvo-Api-Key: {{TheoToken}}
+
 ### Dana removes Theo from Acme
 # @name DanaRemovesTheo
 ## TEST-EXPECT-STATUS: [204]

@@ -22,12 +22,18 @@ await tp.Test("The rotated token, replayed after the grace window, is refused as
     Equal("invalid_grant", (await BodyOf(tp.Response)).GetProperty("error").GetString());
 });
 
+await tp.Test("Control: the newest access token is Dana's session, alive before the reuse.", async () =>
+{
+    Equal(Constant("DanaId"), (await BodyOf(tp.Responses["LatestAccessBefore"])).GetProperty("id").GetString());
+});
+
 await tp.Test("A refresh rotates the refresh token.", async () =>
 {
     var child = (await BodyOf(tp.Responses["DanaRefreshes"])).GetProperty("refresh_token").GetString();
 
-    StartsWith("alvo_rt_", child);
-    NotEqual(tp.GetVariable<string>("DanaRefresh"), child);
+    // The values are compared, never printed: a failing Equal would echo two live refresh tokens.
+    True(child?.StartsWith("alvo_rt_", StringComparison.Ordinal) == true, "DanaRefreshes' refresh_token starts with alvo_rt_");
+    True(!string.Equals(tp.GetVariable<string>("DanaRefresh"), child, StringComparison.Ordinal), "DanaRefreshes' refresh_token differs from DanaRefresh");
 });
 
 await tp.Test("A replay inside the window answers the same child, not a second one.", async () =>
@@ -35,5 +41,5 @@ await tp.Test("A replay inside the window answers the same child, not a second o
     var first = (await BodyOf(tp.Responses["DanaRefreshes"])).GetProperty("refresh_token").GetString();
     var replay = (await BodyOf(tp.Responses["DanaReplaysInsideWindow"])).GetProperty("refresh_token").GetString();
 
-    Equal(first, replay);
+    True(string.Equals(first, replay, StringComparison.Ordinal), "DanaReplaysInsideWindow's refresh_token equals DanaRefreshes'");
 });

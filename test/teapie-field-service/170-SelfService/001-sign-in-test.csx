@@ -65,7 +65,8 @@ await tp.Test("A sign-in answers RFC 8693's shape, and is never cached.", async 
         Equal(900, body.GetProperty("expires_in").GetInt32());
         Equal("urn:ietf:params:oauth:token-type:access_token", body.GetProperty("issued_token_type").GetString());
         Equal(3, body.GetProperty("access_token").GetString().Split('.').Length);
-        StartsWith("alvo_rt_", body.GetProperty("refresh_token").GetString());
+        // Never StartsWith(prefix, secret): a failing assertion would print the secret (no secret in a printed line).
+        True(body.GetProperty("refresh_token").GetString()?.StartsWith("alvo_rt_", StringComparison.Ordinal) == true, $"{request}'s refresh_token starts with alvo_rt_");
         True(response.Headers.CacheControl?.NoStore ?? false, $"{request} must answer Cache-Control: no-store");
     }
 
@@ -84,7 +85,7 @@ await tp.Test("A token signed by a key the issuer never published is refused.", 
     var forged = tp.Responses["ForgedSignIn"];
     Equal(400, (int)forged.StatusCode);
     Equal("invalid_request", (await BodyOf(forged)).GetProperty("error").GetString());
-    DoesNotContain("access_token", await forged.Content.ReadAsStringAsync());
+    True(!(await forged.Content.ReadAsStringAsync()).Contains("access_token"), "ForgedSignIn answers no access_token");
 
     // Control: the same pipeline, the same issuer and the same `kid`, signed by the published key, is a session.
     Equal(200, (int)tp.Responses["OlgaSignIn"].StatusCode);

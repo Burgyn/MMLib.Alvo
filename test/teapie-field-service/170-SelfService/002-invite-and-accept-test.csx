@@ -34,7 +34,7 @@ await tp.Test("An invitation answers its code once, for one person.", async () =
 {
     var invitation = await BodyOf(tp.Responses["DanaInvitesTheo"]);
 
-    StartsWith("alvo_inv_", invitation.GetProperty("code").GetString());
+    True(invitation.GetProperty("code").GetString()?.StartsWith("alvo_inv_", StringComparison.Ordinal) == true, "DanaInvitesTheo's code starts with alvo_inv_");
     Equal(1, invitation.GetProperty("maxUses").GetInt32());
     Equal(0, invitation.GetProperty("uses").GetInt32());
     Equal(new[] { "technician" }, Roles(invitation));

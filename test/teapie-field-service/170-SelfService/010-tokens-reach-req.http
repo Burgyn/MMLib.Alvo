@@ -29,6 +29,19 @@ Content-Type: application/json
   "expiresAt": "{{TokenExpiresAt}}"
 }
 
+### The pitfall a reader hits first: an app token sent the way a person's session is. Personal and service tokens go
+### in X-Alvo-Api-Key (the `header` their mint answered); as `Authorization: Bearer` the secret is not a JWT Alvo issued.
+# @name BillingAsBearer
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{BillingToken}}
+
+### The control: the same secret in the header its mint named
+# @name BillingAsKey
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+X-Alvo-Api-Key: {{BillingToken}}
+
 ### Neither kind of token manages a project: the Management API names the credential and the fix
 # @name PersonalAtManagement
 ## TEST-EXPECT-STATUS: [403]

@@ -22,6 +22,15 @@ Content-Type: application/json
 
 { "roles": ["technician"], "expiresAt": "{{ExpiresSoon}}" }
 
+### Still alive: the same preview answers now — so the 404 the poll waits for is the expiry, not a code that never
+### resolved
+# @name StillAlivePreview
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/invitations/preview
+Content-Type: application/json
+
+{ "code": "{{ExpiringInvite.response.body.$.code}}" }
+
 ### Its preview, polled (anonymous and side-effect free) until the code is dead — at most ~30 s
 # @name ExpiredPreview
 ## RETRY-UNTIL-TEST-PASS: The expiring invitation has expired.
