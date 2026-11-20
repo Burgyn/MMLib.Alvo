@@ -453,10 +453,20 @@ internal static class ProblemResultFactory
     /// </summary>
     /// <param name="descriptorKey">The key that enables the route, e.g. <c>tenancy.selfService</c>.</param>
     /// <returns>The problem result.</returns>
-    internal static IResult FeatureDisabled(string descriptorKey) => Problem(
+    internal static IResult FeatureDisabled(string descriptorKey) =>
+        FeatureDisabled(descriptorKey, $"This route answers only when the applied descriptor declares {descriptorKey}.");
+
+    /// <summary>
+    /// The same 404 <c>feature-disabled</c>, naming <paramref name="descriptorKey"/>, for a feature the descriptor declares
+    /// but this host cannot honour; <paramref name="detail"/> is a fixed sentence naming why.
+    /// </summary>
+    /// <param name="descriptorKey">The descriptor key, carried in a <c>descriptorKey</c> member.</param>
+    /// <param name="detail">The fixed sentence.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey, string detail) => Problem(
         StatusCodes.Status404NotFound,
         AlvoProblemTypes.FeatureDisabled,
-        $"This route answers only when the applied descriptor declares {descriptorKey}.",
+        detail,
         new Dictionary<string, object?>(StringComparer.Ordinal) { [DescriptorKeyMember] = descriptorKey });
 
     /// <summary>The 409 for a person who has created as many shared tenants as the descriptor allows (S3 plan D9).</summary>
@@ -489,7 +499,7 @@ internal static class ProblemResultFactory
     internal static IResult MembershipConflict(string detail) =>
         Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
 
-    /// <summary>The <see cref="FeatureDisabled"/> member naming the descriptor key.</summary>
+    /// <summary>The <see cref="FeatureDisabled(string, string)"/> member naming the descriptor key.</summary>
     private const string DescriptorKeyMember = "descriptorKey";
 
     /// <summary>The <see cref="TenantLimit"/> member carrying the cap.</summary>

@@ -486,6 +486,8 @@ name: Mutation
 # S5 Task 8 adds `GET {prefix}/tokens` and `DELETE {prefix}/tokens/{keyId}`: TokenRoutes grows and
 # AppTokenListItem joins the leg (~74 code lines, ~577 in all); `mutants:` is now ~577 code lines x 0.16
 # -> 92 (upper end x 0.48 -> 277), still an estimate; `suite:` is MTP's Accounts.Tests count after it (383).
+# S5 Task 9's fix adds AppTokenReach (~15 code lines, the mint route's "would this token ever resolve"
+# guard), judged by AppTokenReachTests in the same suite; ~592 code lines x 0.16 -> 95.
 #
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
@@ -1040,7 +1042,7 @@ jobs:
           - name: self-service
             config: stryker-config.self-service.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 92     # ESTIMATED lower bound, not a probe (~577 code lines x 0.16, S5 included); re-probe on the first run
+            mutants: 95     # ESTIMATED lower bound, not a probe (~592 code lines x 0.16, S5 included); re-probe on the first run
             suite: 383      # MTP's own Accounts.Tests count after S5 task 8, 2026-11-20 — not yet Stryker's
             timeout: 90     # ESTIMATED: one assembly (Accounts.Tests over TestHost), up to ~179 mutants at
                             # concurrency 4. commands-http's TestHost suite cost ~42 s per mutant of wall

@@ -17,6 +17,14 @@ namespace MMLib.Alvo.Auth.Internal;
 /// is a hint for the owner's listing, not an audit trail, and a write per request would turn every read into a write. A dev
 /// key's touch is in memory and stays unthrottled.
 /// </para>
+/// <para>
+/// <b>It answers one reserved id itself, so the token routes can ask whether a minted token would ever resolve</b> (Task 9
+/// fix round 1). A host may replace this store (<see cref="IApiKeyStore"/> is a public port) or decorate it. The mint route
+/// asks the <em>resolved</em> store for <see cref="ReachProbeKeyId"/>: a decorator that delegates passes
+/// <see cref="ReachProbe"/> through, while a replacement — or this store with no registry — does not, and the route
+/// refuses rather than showing a credential nothing will accept. The probe is answered without touching the registry, and
+/// the record is dead as a credential: revoked, expired, and with a hash no secret's SHA-256 can equal.
+/// </para>
 /// </remarks>
 /// <param name="devKeys">The configured dev keys.</param>
 /// <param name="appTokens">The persisted app-token registry, or <see langword="null"/> where none is registered.</param>
@@ -25,7 +33,25 @@ internal sealed class ApiKeyStores(InMemoryApiKeyStore devKeys, IAppTokenStore? 
     /// <summary>The shortest gap between two persisted touches of one app token from this replica.</summary>
     internal static TimeSpan TouchInterval { get; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// The reserved id the mint route probes with. <c>~</c> is outside base64url, so no minted key id can ever equal it.
+    /// </summary>
+    internal const string ReachProbeKeyId = AppTokenSecret.PersonalPrefix + "~reach";
+
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTouched = new(StringComparer.Ordinal);
+
+    /// <summary>The record answered for <see cref="ReachProbeKeyId"/> while a registry is present; never a usable key.</summary>
+    internal static ApiKeyRecord ReachProbe { get; } = new()
+    {
+        KeyId = ReachProbeKeyId,
+        Sha256Hash = "~",
+        User = new UserId(Guid.Empty),
+        RoleNames = [],
+        Scopes = new HashSet<ApiKeyScope>(),
+        ExpiresAt = DateTimeOffset.MinValue,
+        RevokedAt = DateTimeOffset.MinValue,
+        Kind = ApiKeyKind.Personal,
+    };
 
     /// <inheritdoc/>
     public ValueTask<ApiKeyRecord?> FindAsync(string keyId, CancellationToken cancellationToken)
@@ -36,7 +62,14 @@ internal sealed class ApiKeyStores(InMemoryApiKeyStore devKeys, IAppTokenStore? 
             return devKeys.FindAsync(keyId, cancellationToken);
         }
 
-        return appTokens is null ? ValueTask.FromResult<ApiKeyRecord?>(null) : appTokens.FindAsync(keyId, cancellationToken);
+        if (appTokens is null)
+        {
+            return ValueTask.FromResult<ApiKeyRecord?>(null);
+        }
+
+        return string.Equals(keyId, ReachProbeKeyId, StringComparison.Ordinal)
+            ? ValueTask.FromResult<ApiKeyRecord?>(ReachProbe)
+            : appTokens.FindAsync(keyId, cancellationToken);
     }
 
     /// <inheritdoc/>

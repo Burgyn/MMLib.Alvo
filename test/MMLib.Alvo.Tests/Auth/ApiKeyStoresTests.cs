@@ -106,6 +106,25 @@ public sealed class ApiKeyStoresTests
         _registry.Touches.Select(touch => touch.UsedAt).ShouldBe([first, first.AddSeconds(60)]);
     }
 
+    /// <summary>
+    /// The mint route's reach probe (Task 9 fix round 1): answered by this store itself, only while a registry is present,
+    /// without asking the registry — and the record it answers is no key: revoked, expired, matched by no secret.
+    /// </summary>
+    [Fact]
+    public async Task The_reach_probe_is_answered_only_with_a_registry_and_is_never_a_key()
+    {
+        var probe = await Stores().FindAsync(ApiKeyStores.ReachProbeKeyId, Ct);
+        var without = await Stores(withRegistry: false).FindAsync(ApiKeyStores.ReachProbeKeyId, Ct);
+
+        probe.ShouldBeSameAs(ApiKeyStores.ReachProbe);
+        without.ShouldBeNull();
+        _registry.Finds.ShouldBeEmpty();
+        ApiKeyStores.ReachProbe.IsUsable(_clock.GetUtcNow()).ShouldBeFalse();
+        ApiKeyHash.Matches(string.Empty, ApiKeyStores.ReachProbe.Sha256Hash).ShouldBeFalse();
+        ApiKeyHash.Matches("~", ApiKeyStores.ReachProbe.Sha256Hash).ShouldBeFalse();
+        AppTokenSecret.IsAppTokenId(ApiKeyStores.ReachProbeKeyId).ShouldBeTrue("the prefix routes the probe to this store's app-token branch");
+    }
+
     [Fact]
     public async Task Dev_key_touches_are_unthrottled()
     {

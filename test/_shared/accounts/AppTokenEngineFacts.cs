@@ -204,7 +204,8 @@ public abstract class AppTokenEngineFacts
     /// S5 Review Focus 4, spec §6.2's table through a token: a <c>dispatcher</c> service token holds a tenant role, which
     /// counts on Acme's scoped rows only. It cannot create a region, nor change one through <c>jobs.exists(…)</c> — true
     /// here, since an Acme job references the region — though its scopes allow both; and Management refuses it outright
-    /// (S5 plan D9). The integration key's project <c>dispatcher</c> is admitted, so the rule is live.
+    /// (S5 plan D9). The integration key's project <c>dispatcher</c> is admitted, so the rule is live. Every status is
+    /// judged together, so a run that breaks the role wall reports each answer it flips, not only the first.
     /// </summary>
     [Fact]
     public async Task A_service_token_s_tenant_role_never_reaches_global_data_or_management()
@@ -224,12 +225,17 @@ public abstract class AppTokenEngineFacts
         using var project = await world.Api.SendAsync(
             HttpMethod.Patch, $"{Regions}/{region:D}", _integration, body: new JsonObject { ["code"] = "NORTH2" });
 
-        created.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await created.ReadTextAsync());
-        changed.StatusCode.ShouldBe(HttpStatusCode.NotFound, await changed.ReadTextAsync());
-        management.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await management.ReadTextAsync());
-        (await management.ReadProblemDetailAsync()).ShouldBe(ManagementDetail);
-        job.StatusCode.ShouldBe(HttpStatusCode.Created, "the tenant role is held, on the tenant's scoped rows");
-        project.StatusCode.ShouldBe(HttpStatusCode.OK, await project.ReadTextAsync());
+        var (createdText, changedText, managementText) = (await created.ReadTextAsync(), await changed.ReadTextAsync(), await management.ReadTextAsync());
+        var managementDetail = await management.ReadProblemDetailAsync();
+        var projectText = await project.ReadTextAsync();
+
+        this.ShouldSatisfyAllConditions(
+            () => created.StatusCode.ShouldBe(HttpStatusCode.Forbidden, createdText),
+            () => changed.StatusCode.ShouldBe(HttpStatusCode.NotFound, changedText),
+            () => management.StatusCode.ShouldBe(HttpStatusCode.Forbidden, managementText),
+            () => managementDetail.ShouldBe(ManagementDetail),
+            () => job.StatusCode.ShouldBe(HttpStatusCode.Created, "the tenant role is held, on the tenant's scoped rows"),
+            () => project.StatusCode.ShouldBe(HttpStatusCode.OK, projectText));
     }
 
     /// <summary>
