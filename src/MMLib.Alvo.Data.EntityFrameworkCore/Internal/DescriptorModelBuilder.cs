@@ -29,12 +29,17 @@ internal static class DescriptorModelBuilder
     /// Renders an index's <c>where</c> to this driver's partial-index predicate, or <see langword="null"/> when the container
     /// registered no expression services — see <see cref="EnsureFiltersAreRenderable"/>.
     /// </param>
+    /// <param name="guards">
+    /// How the tenant guards of references between scoped entities are shaped — see <see cref="ConfigureReferences"/>; or
+    /// <see langword="null"/> for every site guarded with <see cref="ScopedSetNullShape.SeparateGuard"/>.
+    /// </param>
     public static IModel Build(
         SchemaModel model,
         Func<ModelBuilder> newBuilder,
         ComputedColumnSql? computed = null,
         CheckConstraintSql? checks = null,
-        IndexFilterSql? filters = null)
+        IndexFilterSql? filters = null,
+        TenantGuardShape? guards = null)
     {
         var builder = newBuilder();
 
@@ -43,10 +48,11 @@ internal static class DescriptorModelBuilder
             ConfigureEntity(builder, entity, computed, checks, filters);
         }
 
-        var knownEntityNames = model.Entities.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
+        var entities = model.Entities.ToDictionary(e => e.Name, StringComparer.Ordinal);
+        var shape = guards ?? TenantGuardShape.For(ScopedSetNullShape.SeparateGuard);
         foreach (var entity in model.Entities)
         {
-            ConfigureReferences(builder, entity, knownEntityNames);
+            ConfigureReferences(builder, entity, entities, shape);
         }
 
         return builder.FinalizeModel();
@@ -323,24 +329,79 @@ internal static class DescriptorModelBuilder
         }
     }
 
-    private static void ConfigureReferences(ModelBuilder builder, EntitySchema entity, HashSet<string> knownEntityNames)
+    /// <summary>
+    /// Declares the foreign key of every <c>ref</c> field of <paramref name="child"/> whose target is in the model — and on a
+    /// reference between two scoped entities, the <em>tenant guard</em> that keeps it inside the child's tenant (#161).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the guard exists.</b> A key over the target's <c>id</c> alone only asks whether the row <em>exists</em>, so a
+    /// child of tenant A could name tenant B's row: an existence oracle in #137's family, and a reference its owner can
+    /// never dereference. The guard is the foreign key <c>(child.tenant_id, child.ref) → (target.tenant_id, target.id)</c>
+    /// over an alternate key on the target, so another tenant's row is refused exactly as a row that exists nowhere.
+    /// A reference that is not scoped on both ends keeps its single-column key: a global entity has no tenant to match.
+    /// </para>
+    /// <para>
+    /// <b>D1 — <c>restrict</c> and <c>cascade</c>:</b> the reference's key <em>becomes</em> the guard, carrying the
+    /// declared action; no single-column key remains.
+    /// </para>
+    /// <para>
+    /// <b>D2 — <c>setNull</c> is the engine's question</b> (<see cref="IAlvoSqlDialect.ScopedSetNull"/>), because two
+    /// measured shapes fail. One composite key with <c>SET NULL</c> nulls <c>tenant_id</c> too, and both SQLite and
+    /// PostgreSQL refuse that delete with a <c>NOT NULL</c> failure. A single-column <c>SET NULL</c> key beside a
+    /// <c>NO ACTION</c> guard is correct on SQLite in either constraint order, but on PostgreSQL it is order-dependent:
+    /// when the guard's trigger fires first, the delete fails with 23503. So
+    /// <see cref="ScopedSetNullShape.SeparateGuard"/> builds that pair, and <see cref="ScopedSetNullShape.NamedColumns"/>
+    /// builds one composite <c>SET NULL</c> key whose column list the engine's migrations SQL generator spells.
+    /// </para>
+    /// </remarks>
+    private static void ConfigureReferences(
+        ModelBuilder builder, EntitySchema child, Dictionary<string, EntitySchema> entities, TenantGuardShape guards)
     {
-        var refFields = entity.Fields.Where(f => f.Type == FieldType.Ref && f.Reference is not null);
-        foreach (var field in refFields)
+        foreach (var field in TenantGuards.References(child))
         {
-            var reference = field.Reference!;
-            if (!knownEntityNames.Contains(reference.TargetEntity))
+            if (entities.TryGetValue(field.Reference!.TargetEntity, out var target))
             {
-                continue;
+                ConfigureReference(builder, child, field, target, guards);
             }
-
-            builder.Entity(entity.Name)
-                .HasOne(reference.TargetEntity)
-                .WithMany()
-                .HasForeignKey(field.Name)
-                .OnDelete(ToDeleteBehavior(reference.OnDelete));
         }
     }
+
+    private static void ConfigureReference(
+        ModelBuilder builder, EntitySchema child, FieldSchema field, EntitySchema target, TenantGuardShape guards)
+    {
+        var behavior = ToDeleteBehavior(field.Reference!.OnDelete);
+        if (!TenantGuards.Applies(child, target))
+        {
+            ConfigureSingle(builder, child, field, target, behavior);
+        }
+        else if (behavior == DeleteBehavior.SetNull && guards.SetNull == ScopedSetNullShape.SeparateGuard)
+        {
+            ConfigureSingle(builder, child, field, target, behavior);
+            ConfigureGuard(builder, child, field, target, DeleteBehavior.NoAction);
+        }
+        else
+        {
+            ConfigureGuard(builder, child, field, target, behavior);
+        }
+    }
+
+    private static void ConfigureSingle(
+        ModelBuilder builder, EntitySchema child, FieldSchema field, EntitySchema target, DeleteBehavior behavior) =>
+        builder.Entity(child.Name)
+            .HasOne(target.Name)
+            .WithMany()
+            .HasForeignKey(field.Name)
+            .OnDelete(behavior);
+
+    private static void ConfigureGuard(
+        ModelBuilder builder, EntitySchema child, FieldSchema field, EntitySchema target, DeleteBehavior behavior) =>
+        builder.Entity(child.Name)
+            .HasOne(target.Name)
+            .WithMany()
+            .HasForeignKey(AlvoManagedColumns.TenantId, field.Name)
+            .HasPrincipalKey(AlvoManagedColumns.TenantId, AlvoManagedColumns.Id)
+            .OnDelete(behavior);
 
     private static DeleteBehavior ToDeleteBehavior(OnDelete onDelete) => onDelete switch
     {

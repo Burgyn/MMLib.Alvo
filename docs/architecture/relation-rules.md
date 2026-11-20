@@ -57,6 +57,16 @@ function of tree and caller.
   at render. *Has-identity* is `RequiredContext.HasIdentity`, the required-context gate's own test, so the
   all-zero user id is anonymous and an anonymous caller is never served a scope bound for an authenticated one.
 - A lookup check is bound the same way, under slot `checks/<i>`, on `create` and `update` decisions only.
+- **Which roles `@user.roles` holds is decided at render, not at binding.** A caller has *project roles*
+  (`AlvoContext.Roles`) and, inside the tenant a request acts in, *tenant roles* (`AlvoContext.TenantRoles`). The
+  renderer and the interpreter fold `Roles ∪ TenantRoles` only while **every entity on the decision's path is
+  `tenancy: scoped`**, and `Roles` alone everywhere else: in a global entity's rule, in anything reached from it
+  (including a relation term into a scoped entity and that entity's own bound `list` rule), and in a scoped entity's
+  term into a global one. The cache key above did not have to change for that. A related decision's allow or deny
+  never reads a role (it turns on the rule being present, the tenant guard, the required-context gate and the depth),
+  and role literals stay in the bound tree; so a caller with tenant roles and one without share one bound tree and
+  never share a fold. Putting the split into the key would have meant a per-caller decision cache, which is what the
+  key exists to avoid. `RoleProvenance` is the one place that decides, and the path flag travels with the render.
 
 ## Writes
 

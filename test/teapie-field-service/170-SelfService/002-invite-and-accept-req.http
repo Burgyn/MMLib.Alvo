@@ -1,0 +1,57 @@
+### Dana founds Acme Repairs. `tenancy.selfService.createTenants.creatorRoles` makes its founder a `dispatcher`, and
+### the founder owns what she created.
+# @name DanaCreatesAcme
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tenants
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{ "name": "Acme Repairs" }
+
+### She invites a technician. The code is in this answer and in no later one.
+# @name DanaInvitesTheo
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tenants/{{DanaCreatesAcme.response.body.$.tenantId}}/invitations
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{ "roles": ["technician"] }
+
+### Whoever holds the code may see what it is an invitation to — with no credential at all, so a sign-up page can show
+### "Dana invited you to Acme Repairs" before the person has an account.
+# @name AnyonePreviews
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/invitations/preview
+Content-Type: application/json
+
+{ "code": "{{DanaInvitesTheo.response.body.$.code}}" }
+
+### Theo accepts it, signed in as himself
+# @name TheoAccepts
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{TheoAccess}}
+Content-Type: application/json
+
+{ "code": "{{DanaInvitesTheo.response.body.$.code}}" }
+
+### And again — a double click, a retried request. A member accepting is answered with the membership he holds.
+# @name TheoAcceptsAgain
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{TheoAccess}}
+Content-Type: application/json
+
+{ "code": "{{DanaInvitesTheo.response.body.$.code}}" }
+
+### Acme's members, as its owner sees them
+# @name DanaListsMembers
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/tenants/{{DanaCreatesAcme.response.body.$.tenantId}}/members
+Authorization: Bearer {{DanaAccess}}
+
+### Acme's invitations, as its owner sees them — the used one included, its code nowhere
+# @name DanaListsInvitations
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/tenants/{{DanaCreatesAcme.response.body.$.tenantId}}/invitations
+Authorization: Bearer {{DanaAccess}}

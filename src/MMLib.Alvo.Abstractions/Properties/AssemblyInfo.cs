@@ -70,3 +70,20 @@
 // HX-09's write-hook vocabulary: the default runner (NoWriteExtensions), the budget refusal's factory and the reserved
 // rejection table are internal, and their facts live beside the public port they belong to, in Abstractions' own suite.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Abstractions.Tests")]
+
+// End-user accounts (spec 2026-11-13 §5, S2 D1/D2): IAccountStore and its records are an internal port the EF driver
+// implements (granted above) and MMLib.Alvo.Accounts consumes — the ledger precedent: one in-family producer, one
+// in-family consumer, so publishing the seam would be a commitment no third party has asked for. The package also reads
+// AlvoFrameworkTables for the five _auth_* names it never spells itself, and implements IAlvoAccountAdministration, the
+// port the core's gated management route disables an account through (spec §5.6). Its suite names the same records to
+// stub the store. An architecture fact in the Accounts suite holds that it references none of the guarded internals these grants
+// expose; the same forgeability caveat applies (an unsigned grant is a name match).
+[assembly: InternalsVisibleTo("MMLib.Alvo.Accounts")]
+
+// And to its suite, which stubs IAccountStore and builds its records to reach the token endpoint's refusals without an
+// engine; the store's own contract facts run on both engines from the driver suites granted above.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
+
+// The self-service tenant registry (spec 2026-11-13 §6.1, S3 plan D2): ITenantStore and its records ride on the grants
+// above and need none of their own — the EF driver implements it, the core and MMLib.Alvo.Accounts consume it, and its
+// contract facts (test/_shared/ef/TenantStoreFacts.cs) run on both engines from the driver suites already granted.

@@ -6,7 +6,8 @@
 /// </summary>
 /// <remarks>
 /// One member per <em>fix</em>, and nothing else: a <see cref="Unique"/> collision is repaired by sending another
-/// value, a <see cref="Referenced"/> one by removing the records that point at this one, and a <see cref="Check"/>
+/// value, a <see cref="Referenced"/> one by removing the records that point at this one (or, on a create or update, by
+/// pointing the reference at a record that exists), and a <see cref="Check"/>
 /// one by sending a value the field's validation accepts, an <see cref="Exclusion"/> one by choosing a range no other record
 /// overlaps. A member encoding <em>which</em> constraint, or a string
 /// carrying the engine's own constraint name, would key the refusal on its reason rather than its kind — the
@@ -18,8 +19,9 @@ public enum AlvoConstraintKind
     Unique,
 
     /// <summary>
-    /// The record cannot be removed while other records still reference it — the refusal a <c>ref</c> field
-    /// declaring <c>onDelete: "restrict"</c> asked the store for.
+    /// A reference constraint refused the write: the record cannot be removed while other records still reference it —
+    /// the refusal a <c>ref</c> field declaring <c>onDelete: "restrict"</c> asked the store for — or a create or update
+    /// names, in a <c>ref</c> field, a record it cannot point at: one that does not exist, or another tenant's (#161).
     /// </summary>
     Referenced,
 

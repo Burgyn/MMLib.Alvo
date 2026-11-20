@@ -1,0 +1,43 @@
+### Dana invites someone, then thinks better of it
+# @name RevokedInvite
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tenants/{{AcmeId}}/invitations
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{ "roles": ["technician"] }
+
+###
+# @name RevokeIt
+## TEST-EXPECT-STATUS: [204]
+DELETE {{fsBaseUrl}}/auth/v1/tenants/{{AcmeId}}/invitations/{{RevokedInvite.response.body.$.id}}
+Authorization: Bearer {{DanaAccess}}
+
+### An invitation that lapses within the run
+# @name ExpiringInvite
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tenants/{{AcmeId}}/invitations
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{ "roles": ["technician"], "expiresAt": "{{ExpiresSoon}}" }
+
+### Still alive: the same preview answers now — so the 404 the poll waits for is the expiry, not a code that never
+### resolved
+# @name StillAlivePreview
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/invitations/preview
+Content-Type: application/json
+
+{ "code": "{{ExpiringInvite.response.body.$.code}}" }
+
+### Its preview, polled (anonymous and side-effect free) until the code is dead — at most ~30 s
+# @name ExpiredPreview
+## RETRY-UNTIL-TEST-PASS: The expiring invitation has expired.
+## RETRY-MAX-ATTEMPTS: 30
+## RETRY-BACKOFF-TYPE: Constant
+## RETRY-MAX-DELAY: 00:00:01
+POST {{fsBaseUrl}}/auth/v1/invitations/preview
+Content-Type: application/json
+
+{ "code": "{{ExpiringInvite.response.body.$.code}}" }

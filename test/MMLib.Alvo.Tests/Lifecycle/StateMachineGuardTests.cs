@@ -4,7 +4,9 @@ using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Lifecycle;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
+using MMLib.Alvo.Tests.Rules;
 
 namespace MMLib.Alvo.Tests.Lifecycle;
 
@@ -105,6 +107,19 @@ public sealed class StateMachineGuardTests
     }
 
     [Fact]
+    public void A_tenant_role_takes_a_role_gated_transition_of_a_scoped_entity() =>
+        Should.NotThrow(() => Update(Dispatched(TenancyMode.Scoped), from: "draft", to: "done", TenantRoleCallers.Person));
+
+    [Theory]
+    [InlineData(TenancyMode.Global)]
+    [InlineData(null)]
+    public void A_tenant_role_never_takes_a_role_gated_transition_of_a_global_entity(TenancyMode? tenancy)
+    {
+        Should.Throw<AlvoAuthorizationException>(() => Update(Dispatched(tenancy), from: "draft", to: "done", TenantRoleCallers.Person));
+        Should.NotThrow(() => Update(Dispatched(tenancy), from: "draft", to: "done", TenantRoleCallers.ProjectDispatcher));
+    }
+
+    [Fact]
     public void A_delete_is_no_transition() =>
         Should.NotThrow(() => StateMachineGuard.Ensure(Machine(), DataOperation.Delete, Row("done"), Row("done"), _member));
 
@@ -141,6 +156,9 @@ public sealed class StateMachineGuardTests
     }
 
     private static AlvoContext Caller(params Role[] roles) => new() { User = UserId.New(), Roles = roles.ToHashSet() };
+
+    private static CompiledStateMachine Dispatched(TenancyMode? tenancy) =>
+        new("status", null, null, [new CompiledTransition("dispatch", null, "done", TenantRoleCallers.Dispatcher, null)], tenancy);
 
     private static CompiledStateMachine Machine(string? initial = null, bool defaulted = true, params CelFunction[] functions)
     {

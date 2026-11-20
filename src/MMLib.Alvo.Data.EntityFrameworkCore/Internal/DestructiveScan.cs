@@ -126,11 +126,12 @@ internal static class DestructiveScan
     private static string? TableOf(MigrationOperation operation) =>
         operation.GetType().GetProperty("Table")?.GetValue(operation) as string;
 
+    // A tenant guard's columns are [tenant_id, ref] (#161): it is the reference's change, never tenant_id's.
     private static SchemaChange ForeignKeyChange(string table, string[]? columns, bool added) => new()
     {
         Kind = SchemaChangeKind.AlterField,
         Entity = table,
-        Field = columns is { Length: > 0 } ? columns[0] : null,
+        Field = columns is { Length: > 0 } ? TenantGuards.GuardedField(columns) ?? columns[0] : null,
         Detail = added ? "Add foreign key." : "Drop foreign key.",
     };
 

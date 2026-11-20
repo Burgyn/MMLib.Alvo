@@ -22,6 +22,7 @@ internal static class SkillAreas
     internal const string TraitsAndTenancy = "traits-and-tenancy";
     internal const string ComputedAndRollups = "computed-and-rollups";
     internal const string EntitiesAndFields = "entities-and-fields";
+    internal const string Accounts = "accounts";
 
     /// <summary>The entity keys that are traits: each is <c>traits-and-tenancy</c>'s.</summary>
     internal static IReadOnlySet<string> Traits { get; } =
@@ -41,7 +42,9 @@ internal static class SkillAreas
     /// <remarks>
     /// <b>By position, not by name anywhere in the path</b>: <c>/entities/{entity}/{facet}</c> and
     /// <c>/entities/{entity}/fields/{field}/{facet}</c>. An entity or a field that happens to be called <c>audit</c>,
-    /// <c>rules</c> or <c>computed</c> is still an entity or a field.
+    /// <c>rules</c> or <c>computed</c> is still an entity or a field. <c>/auth/**</c> and <c>/tenancy/selfService/**</c>
+    /// are <c>accounts</c>' (S6 plan D14), except <c>/auth/roles</c>, which belongs to no one skill; <c>/tenancy</c>
+    /// itself stays <c>traits-and-tenancy</c>'s.
     /// </remarks>
     internal static string? AreaOf(string path, JsonNode? proposed)
     {
@@ -54,7 +57,8 @@ internal static class SkillAreas
         return tokens[0] switch
         {
             "access" => ProjectAccess,
-            "tenancy" => TraitsAndTenancy,
+            "auth" => tokens.Count > 1 && tokens[1] == "roles" ? null : Accounts,
+            "tenancy" => tokens.Count > 1 && tokens[1] == "selfService" ? Accounts : TraitsAndTenancy,
             "entities" => tokens.Count < 3 ? EntitiesAndFields : EntityFacetArea(tokens, proposed),
             _ => null,
         };

@@ -1,4 +1,5 @@
 ﻿[assembly: Microsoft.AspNetCore.Mvc.ApplicationParts.ApplicationPart("MMLib.Alvo")]
+[assembly: Microsoft.AspNetCore.Mvc.ApplicationParts.ApplicationPart("MMLib.Alvo.Accounts")]
 [assembly: Microsoft.AspNetCore.Mvc.ApplicationParts.ApplicationPart("Microsoft.AspNetCore.OpenApi")]
 [assembly: Microsoft.Extensions.Configuration.UserSecrets.UserSecretsId("mmlib-alvo-host")]
 [assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]

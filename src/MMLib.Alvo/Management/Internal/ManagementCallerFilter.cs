@@ -26,10 +26,23 @@ namespace MMLib.Alvo.Management.Internal;
 /// must have one home.
 /// </para>
 /// <para>
+/// <b>It never reads <c>Authorization</c></b> (spec §5.7): it reads on <see cref="CredentialSurface.Management"/>,
+/// so a person's Bearer token — or a host's own scheme — is ignored here even when a person resolver is
+/// registered, and a request carrying one beside an API key is judged by the key alone. Management stays the
+/// surface of operators and dev keys.
+/// </para>
+/// <para>
 /// <b>The scope gate is deliberately not applied here</b>, unlike on a Data API route — the F5 design's D7.
 /// An <see cref="ApiKeyScope"/> is <c>&lt;entity|*&gt;:&lt;read|write&gt;</c> and the management surface is
 /// not an entity, so there is no scope for it to narrow; what a caller may do to a project's configuration
 /// is the descriptor's <c>access</c> block, evaluated behind the gate.
+/// </para>
+/// <para>
+/// <b>An app token is refused here, after it resolved</b> (S5 plan D9, closing S1 D8): a principal whose key id carries
+/// the <c>alvo_pat_</c>/<c>alvo_svc_</c> prefix — sound because <see cref="AlvoAuthOptionsValidator"/> reserves both, so
+/// no configured key can carry one — is a 403 whatever the project's <c>access</c> block says. The prefix is read, not a
+/// flag on <see cref="AlvoPrincipal"/>, which stays unchanged. It is resolved first, so an unusable token is the ordinary
+/// 401 of any key. In-process <see cref="IAlvoManagement"/> callers publish their own principal and never pass here.
 /// </para>
 /// <para>
 /// <b>Three outcomes, the same three the Data API's filter has.</b> No credential at all is anonymous rather
@@ -39,11 +52,11 @@ namespace MMLib.Alvo.Management.Internal;
 /// block that does not name them.
 /// </para>
 /// </remarks>
-/// <param name="resolver">Resolves a presented credential into a principal.</param>
+/// <param name="resolvers">Resolve a presented API key into a principal; the person resolver is never consulted here.</param>
 /// <param name="accessor">Where the resolved caller is published for the gate and the delegate.</param>
 /// <param name="authOptions">Carries the header names a credential and a requested tenant are read from.</param>
 internal sealed class ManagementCallerFilter(
-    IAlvoContextResolver resolver,
+    CallerResolvers resolvers,
     IAlvoContextAccessor accessor,
     IOptions<AlvoAuthOptions> authOptions) : IEndpointFilter
 {
@@ -54,19 +67,14 @@ internal sealed class ManagementCallerFilter(
         ArgumentNullException.ThrowIfNull(next);
         using var instant = RequestInstant.Enter(context.HttpContext);
 
-        var options = authOptions.Value;
-        var request = context.HttpContext.Request;
-        var presented = CallerResolution.Presented(request, options.HeaderName);
-        if (presented is null)
-        {
-            return await CallerResolution.PublishingAsync(accessor, null, context, next).ConfigureAwait(false);
-        }
+        var admission = await CallerResolution.AdmitAsync(
+            context.HttpContext.Request, resolvers, authOptions.Value, CredentialSurface.Management).ConfigureAwait(false);
 
-        var principal = await CallerResolution.ResolveAsync(resolver, presented, request, options)
-            .ConfigureAwait(false);
-
-        return principal is null
-            ? ProblemResultFactory.Unauthenticated(options.HeaderName)
-            : await CallerResolution.PublishingAsync(accessor, principal, context, next).ConfigureAwait(false);
+        return admission.Refusal
+            ?? AppTokenRefusal(admission.Principal)
+            ?? await CallerResolution.PublishingAsync(accessor, admission.Principal, context, next).ConfigureAwait(false);
     }
+
+    private static IResult? AppTokenRefusal(AlvoPrincipal? principal) =>
+        AppTokenSecret.IsAppToken(principal) ? ProblemResultFactory.AppTokenForbidden() : null;
 }

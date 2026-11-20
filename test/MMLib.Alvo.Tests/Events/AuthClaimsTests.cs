@@ -30,6 +30,55 @@ public class AuthClaimsTests
         => AlvoEventProvenance.RolesIn(claims).ShouldBeNull();
 
     [Fact]
+    public void A_caller_without_tenant_roles_writes_exactly_today_s_claims()
+    {
+        var caller = new AlvoContext
+        {
+            User = UserId.New(),
+            Roles = new HashSet<Role> { Role.Authenticated },
+            Tenant = new TenantId(Guid.NewGuid()),
+        };
+
+        AlvoEventProvenance.AuthClaimsOf(caller).ShouldBe("""{"roles":["authenticated"]}""");
+        AlvoEventProvenance.AuthClaimsOf(caller with { Tenant = null, TenantRoles = Tenanted("dispatcher") })
+            .ShouldBe("""{"roles":["authenticated"]}""", "tenant roles without a tenant count nowhere, so they are not recorded");
+    }
+
+    [Fact]
+    public void The_tenant_roles_round_trip_beside_the_roles()
+    {
+        var claims = AlvoEventProvenance.AuthClaimsOf(new AlvoContext
+        {
+            User = UserId.New(),
+            Roles = new HashSet<Role> { Role.Authenticated },
+            Tenant = new TenantId(Guid.NewGuid()),
+            TenantRoles = Tenanted("manager", "dispatcher"),
+        });
+
+        claims.ShouldBe("""{"roles":["authenticated"],"tenantRoles":["dispatcher","manager"]}""");
+        AlvoEventProvenance.RolesIn(claims).ShouldBe(["authenticated"]);
+        AlvoEventProvenance.TenantRolesIn(claims).ShouldBe(["dispatcher", "manager"]);
+    }
+
+    [Fact]
+    public void Claims_without_tenant_roles_read_as_none() =>
+        AlvoEventProvenance.TenantRolesIn("""{"roles":["authenticated"]}""").ShouldBeNull();
+
+    public static TheoryData<string> DamagedTenantRoles { get; } = new()
+    {
+        """{"roles":[],"tenantRoles":"x"}""",
+        """{"roles":[],"tenantRoles":[1]}""",
+        "{\"roles\":[],\"tenantRoles\":[\"" + new string('\uD800', 1) + "\"]}",
+    };
+
+    [Theory]
+    [MemberData(nameof(DamagedTenantRoles))]
+    public void A_damaged_tenant_roles_member_reads_as_absent(string claims) =>
+        AlvoEventProvenance.TenantRolesIn(claims).ShouldBeNull();
+
+    [Fact]
     public void A_claims_string_holding_a_lone_surrogate_reads_as_absent()
         => AlvoEventProvenance.RolesIn("{\"roles\":[\"" + new string('\uD800', 1) + "\"]}").ShouldBeNull();
+
+    private static IReadOnlySet<Role> Tenanted(params string[] names) => RoleCatalog.Create(names).Resolve(names);
 }

@@ -100,4 +100,9 @@ internal enum ManagementOperation
 
     /// <summary>Read how each extension ran on this instance.</summary>
     GetExtensionStats,
+
+    /// <summary>
+    /// Disable an end user's account — ending every session it has — or enable it again (accounts spec §5.6).
+    /// </summary>
+    ManageAccounts,
 }

@@ -520,6 +520,25 @@ public interface IAlvoSqlDialect
     internal bool IsLockTimeout(DbException failure) => false;
 
     /// <summary>
+    /// How this engine keeps <c>onDelete: setNull</c> on a reference between two scoped entities, whose foreign key spans
+    /// <c>(tenant_id, id)</c> (#161) — <see cref="ScopedSetNullShape.SeparateGuard"/> by default.
+    /// </summary>
+    /// <remarks>
+    /// <b>Internal</b>, for <see cref="ApplyLockTimeoutStatement"/>'s reason: the published dialect port does not grow. An engine
+    /// answers <see cref="ScopedSetNullShape.NamedColumns"/> only when its migrations SQL generator spells the column list.
+    /// </remarks>
+    internal ScopedSetNullShape ScopedSetNull => ScopedSetNullShape.SeparateGuard;
+
+    /// <summary>
+    /// Why this server cannot keep <c>onDelete: setNull</c> between two scoped entities in the shape
+    /// <see cref="ScopedSetNull"/> names, or <see langword="null"/> when it can (#161). Asked only when a plan adds such a guard.
+    /// </summary>
+    /// <param name="connection">An open connection to the database being planned against.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <remarks><b>Internal</b>, like <see cref="ScopedSetNull"/>: the published dialect port does not grow.</remarks>
+    internal ValueTask<string?> ScopedSetNullRefusalAsync(DbConnection connection, CancellationToken ct) => ValueTask.FromResult<string?>(null);
+
+    /// <summary>
     /// Whether <paramref name="failure"/> is this engine's deadlock detector failing the statement's transaction to break a
     /// lock cycle — PostgreSQL's <c>40P01</c> — so a write answers a retryable <see cref="AlvoTransientConflictException"/>
     /// and an apply a retryable lock refusal instead of a 500 (issue 443, the residual of HX-11 Ruling 74).

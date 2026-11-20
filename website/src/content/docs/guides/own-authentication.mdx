@@ -96,7 +96,8 @@ redirect to a sign-in page. Stop the sample with `kill %1`.
 
 `IAlvoData` takes the caller as an explicit `AlvoContext` parameter on every call, so your endpoint states who it acts
 as and Alvo enforces the rules inside the call, over the same compiled policy the generated API uses. The generated
-routes resolve their own caller from the API-key header and ignore whatever your middleware does.
+routes resolve their own caller from Alvo's own credentials (an API key, or an access token from
+[Alvo's sign-in](/guides/sign-in/)) and ignore whatever your middleware does.
 [Standalone and embedded](/concepts/modes/) compares the two modes.
 
 :::caution[Not in this build]

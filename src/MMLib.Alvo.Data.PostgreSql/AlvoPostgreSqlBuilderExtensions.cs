@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
@@ -144,7 +145,10 @@ public static class AlvoPostgreSqlBuilderExtensions
         {
             ConnectionString = ResolveConnectionString,
             ConfigureProvider = static (options, connectionString) =>
-                options.UseNpgsql(connectionString, static npgsql => npgsql.UseRelationalNulls()),
+            {
+                options.UseNpgsql(connectionString, static npgsql => npgsql.UseRelationalNulls());
+                options.ReplaceService<IMigrationsSqlGenerator, PostgreSqlMigrationsSqlGenerator>();
+            },
             CreateModelBuilder = static () => new ModelBuilder(NpgsqlConventionSetBuilder.Build()),
             CreateDatabaseModelFactory = CreateDatabaseModelFactory,
             CreateConnection = static connectionString => new NpgsqlConnection(connectionString),

@@ -18,6 +18,6 @@ public enum AlvoActorKind
     /// <summary>An API key authenticated the caller; reported as <c>api_key</c>.</summary>
     ApiKey,
 
-    /// <summary>A signed-in person authenticated the caller; reported as <c>user</c>.</summary>
+    /// <summary>A signed-in person authenticated the caller, by session or by a personal token; reported as <c>user</c>.</summary>
     User,
 }

@@ -36,6 +36,15 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <see cref="Result.ReleasedExclusions"/> — the migrator drops each by its old definition before the renames, through the
 /// dialect that created it, and creates the desired one after the DDL.
 /// </para>
+/// <para>
+/// <b>So are the references a rename touches</b> (#161 fix wave): a <c>ref</c> whose entity, field or target is renamed. A
+/// foreign key's, its index's and the target's <c>(tenant_id, id)</c> key's names are functions of the table and column
+/// names, both engines carry them through <c>RENAME</c> under their old names, and a reference to a renamed target names an
+/// entity the aligned copy no longer has. So the aligned copy carries such a field without its reference, the migrator
+/// drops what the database holds for it by the names the <em>current</em> model gives them
+/// (<see cref="ReleasedReferenceDrops"/>), and the residual diff re-creates it under the new names — otherwise PostgreSQL
+/// refused the renaming apply (the index already existed) or, after a field rename, a later drop (no such constraint).
+/// </para>
 /// </remarks>
 internal static class RenamePrePass
 {
@@ -51,7 +60,14 @@ internal static class RenamePrePass
         IReadOnlyList<RenameEntry> Renames,
         IReadOnlyList<RenameEntry> ReleasedChecks,
         IReadOnlyList<RenameEntry> ReleasedIndexes,
-        IReadOnlyList<ReleasedExclusion> ReleasedExclusions);
+        IReadOnlyList<ReleasedExclusion> ReleasedExclusions)
+    {
+        /// <summary>
+        /// The drops of the foreign keys, indexes and alternate keys of the references a rename released, by their old names
+        /// (<see cref="ReleasedReferenceDrops"/>) — set by the migrator, which alone can build the models that name them.
+        /// </summary>
+        internal IReadOnlyList<RenameEntry> ReleasedReferences { get; init; } = [];
+    }
 
     /// <summary>
     /// Computes the name-aligned "current" schema and the explicit rename operations, from the
@@ -92,8 +108,10 @@ internal static class RenamePrePass
     {
         var desiredEntity = FindDesiredCounterpart(currentEntity, desired);
         var alignedName = ResolveEntityRename(currentEntity, desiredEntity, renames);
-        var (alignedFields, fieldRenames) = AlignFields(currentEntity, desiredEntity, alignedName, renames);
+        var (renamedFields, fieldRenames) = AlignFields(currentEntity, desiredEntity, alignedName, renames);
         var renamed = fieldRenames.Count > 0 || !string.Equals(alignedName, currentEntity.Name, StringComparison.Ordinal);
+        var alignedFields = ReleaseReferences(
+            currentEntity, renamedFields, !string.Equals(alignedName, currentEntity.Name, StringComparison.Ordinal), desired);
 
         return currentEntity with
         {
@@ -122,6 +140,27 @@ internal static class RenamePrePass
     private static RenameEntry ReleasedIndex(string alignedName, string name) => new(
         new SqlOperation { Sql = $"DROP INDEX IF EXISTS {AlvoSqlIdentifier.Quote(name)}" },
         new SchemaChange { Kind = SchemaChangeKind.DropIndex, Entity = alignedName, Detail = name });
+
+    // The aligned fields with every reference a rename touches released: one declared by a renamed entity, by a renamed
+    // field, or naming a renamed target loses its reference in the aligned copy, so the residual diff re-creates it.
+    private static List<FieldSchema> ReleaseReferences(
+        EntitySchema currentEntity, List<FieldSchema> alignedFields, bool entityRenamed, SchemaModel desired)
+    {
+        var released = new List<FieldSchema>(alignedFields.Count);
+        foreach (var (currentField, alignedField) in currentEntity.Fields.Zip(alignedFields))
+        {
+            var touched = alignedField.Reference is { } reference
+                && (entityRenamed || IsRenamed(reference.TargetEntity, desired)
+                    || !string.Equals(currentField.Name, alignedField.Name, StringComparison.Ordinal));
+            released.Add(touched ? alignedField with { Reference = null } : alignedField);
+        }
+
+        return released;
+    }
+
+    private static bool IsRenamed(string entity, SchemaModel desired) =>
+        desired.Entities.Any(d => string.Equals(d.RenamedFrom, entity, StringComparison.Ordinal)
+            && !string.Equals(d.Name, entity, StringComparison.Ordinal));
 
     // The aligned fields with no validation, each validated one recorded as a drop of the constraint the database holds
     // under the entity's and field's current names, on the table as it is named after the renames.

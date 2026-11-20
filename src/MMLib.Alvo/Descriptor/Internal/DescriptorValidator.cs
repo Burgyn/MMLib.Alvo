@@ -9,6 +9,7 @@ using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets.Internal;
+using MMLib.Alvo.Tenants.SelfService;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;
@@ -243,6 +244,10 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             into.AddRange(ExclusionIndexCheck.Check(descriptor));
             into.AddRange(StateMachineCheck.Check(descriptor));
             into.AddRange(EntityTimerCheck.Check(descriptor));
+            into.AddRange(SignUpCheck.Check(descriptor));
+            into.AddRange(SignUpCheck.Warnings(descriptor));
+            into.AddRange(SelfServiceCheck.Check(descriptor));
+            into.AddRange(AccessTokensCheck.Check(descriptor));
             schema = DescriptorToSchemaMapper.Map(descriptor);
 
             return true;
@@ -279,7 +284,8 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     }
 
     /// <summary>
-    /// The owner-comparison warnings (D51) and the missing-list-rule relation warnings, less any at a pointer that
+    /// The owner-comparison warnings (D51), the missing-list-rule relation warnings and the open-sign-up global-write
+    /// warnings (accounts S3 D12), less any at a pointer that
     /// already carries an error: a condition the phase check refuses compiles, and a warning beside its error would be
     /// noise (T16 review L1).
     /// </summary>
@@ -292,6 +298,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             .ToHashSet(StringComparer.Ordinal);
         return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler)
             .Concat(RelationWarnings.Warnings(descriptor, schema, _compiler))
+            .Concat(GlobalWriteWarnings.Warnings(descriptor, schema, _compiler))
             .Where(warning => !refused.Contains(warning.Path));
     }
 
@@ -424,6 +431,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         if (SecretReferenceCheck.IsReferenceSlot(instancePath))
         {
             return SecretReferenceCheck.Refusal(instancePath);
+        }
+
+        if (SignUpCheck.IsSchemaRefusal(instancePath, result.Message))
+        {
+            return SignUpCheck.Refusal;
         }
 
         var schemaPath = PointerOrRoot(result.Location?.SchemaLocation.ToString());

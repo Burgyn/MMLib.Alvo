@@ -746,6 +746,22 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// A host that registered no person resolver publishes no Bearer scheme and offers none on any operation: the
+    /// Bearer channel is closed there (S2 D9), so the document must not tell a client to use it.
+    /// </summary>
+    [Fact]
+    public async Task Without_a_person_resolver_there_is_no_bearer_scheme()
+    {
+        await using var world = await StoreAsync();
+
+        var document = await world.OpenApiDocumentAsync();
+
+        document["components"]!["securitySchemes"]!.AsObject().Select(scheme => scheme.Key).ShouldBe(["alvoApiKey"]);
+        Operations(document).ShouldAllBe(
+            operation => operation["security"]!.ToJsonString() == "[{},{\"alvoApiKey\":[]}]");
+    }
+
+    /// <summary>
     /// The document satisfies the <em>generic</em> shape claims — the ones every Alvo document must satisfy,
     /// whatever its descriptor said.
     /// </summary>

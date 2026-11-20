@@ -168,6 +168,7 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         }
 
         var operations = ForThisEngine(AssembleOperations(prePass, residual));
+        await RefuseUnsupportedScopedSetNullAsync(operations, ct).ConfigureAwait(false);
         var exclusions = ExclusionPlan.Plan(prePass, desired, _dialect, _filters, TouchedTables(operations), Epoch);
         var prerequisite = await PrepareExclusionsAsync(current, prePass, exclusions.Added, counted, ct).ConfigureAwait(false);
         var backfill = Backfill(prePass.AlignedCurrent, desired);
@@ -184,6 +185,29 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         var plan = new MigrationPlan { Steps = steps, Sql = sql };
         _plannedAgainst.AddOrUpdate(plan, desired);
         return plan;
+    }
+
+    // A plan that adds a guard with ON DELETE SET NULL on an engine that spells the column list asks the server whether it can.
+    private async Task RefuseUnsupportedScopedSetNullAsync(IReadOnlyList<MigrationOperation> operations, CancellationToken ct)
+    {
+        if (_dialect.ScopedSetNull != ScopedSetNullShape.NamedColumns || ScopedSetNullGuards.In(operations) is not { Count: > 0 } guards)
+        {
+            return;
+        }
+
+        var connection = _connections.Create();
+        await using (connection.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+            if (await _dialect.ScopedSetNullRefusalAsync(connection, ct).ConfigureAwait(false) is { } message)
+            {
+                throw new DescriptorValidationException(new DescriptorValidationResult(
+                [
+                    .. guards.Select(pointer => new DescriptorValidationError(
+                        pointer, message, "Use onDelete: restrict or cascade, or upgrade the server.", DescriptorValidationSeverity.Error)),
+                ]));
+            }
+        }
     }
 
     private async Task RefuseRowsThatBreakNewChecksAsync(
@@ -382,25 +406,38 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private (RenamePrePass.Result PrePass, IModel DesiredModel, IReadOnlyList<MigrationOperation> Residual) ComputeResidualDiff(
         SchemaModel current, SchemaModel desired)
     {
+        var guards = TenantGuardShape.For(_dialect.ScopedSetNull);
         var prePass = RenamePrePass.Compute(current, desired);
-        var currentModel = BuildInitializedModel(prePass.AlignedCurrent);
-        var desiredModel = BuildInitializedModel(desired);
+        var currentModel = BuildInitializedModel(prePass.AlignedCurrent, guards);
+        var desiredModel = BuildInitializedModel(desired, guards);
+        prePass = prePass with
+        {
+            ReleasedReferences = ReleasedReferenceDrops.For(prePass.Renames, () => BuildInitializedModel(current, guards), currentModel),
+        };
 
         var residual = _differ.GetDifferences(currentModel.GetRelationalModel(), desiredModel.GetRelationalModel());
-        residual = RenameGuessSplitter.Normalize(residual, prePass.AlignedCurrent, desired, BuildInitializedModel, _differ);
+        residual = RenameGuessSplitter.Normalize(
+            residual,
+            prePass.AlignedCurrent,
+            desired,
+            schema => BuildInitializedModel(schema, guards),
+            _differ);
 
         return (prePass, desiredModel, residual);
     }
 
     // Assembles the full, ordered operation list: the drops of the partial indexes a rename released (by their old names,
-    // which no rename changes), then declared renames (so later operations see the new names), then the drops of the CHECK constraints a rename released (see RenamePrePass), then the
-    // (normalized) residual diff, which adds them back under their new names.
+    // which no rename changes), then declared renames (so later operations see the new names), then the drops of the
+    // references and CHECK constraints a rename released (see RenamePrePass), then the (normalized) residual diff, which
+    // adds them back under their new names.
     private static List<MigrationOperation> AssembleOperations(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
         var operations = new List<MigrationOperation>(
-            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedReferences.Count + prePass.ReleasedChecks.Count
+            + residual.Count);
         operations.AddRange(prePass.ReleasedIndexes.Select(released => released.Operation));
         operations.AddRange(prePass.Renames.Select(rename => rename.Operation));
+        operations.AddRange(prePass.ReleasedReferences.Select(released => released.Operation));
         operations.AddRange(prePass.ReleasedChecks.Select(released => released.Operation));
         operations.AddRange(residual);
         return operations;
@@ -418,9 +455,11 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
         RenamePrePass.Result prePass, SchemaModel desired, IReadOnlyList<MigrationOperation> residual)
     {
         var steps = new List<MigrationStep>(
-            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedChecks.Count + residual.Count);
+            prePass.ReleasedIndexes.Count + prePass.Renames.Count + prePass.ReleasedReferences.Count + prePass.ReleasedChecks.Count
+            + residual.Count);
         steps.AddRange(prePass.ReleasedIndexes.Select(released => ToStep(released.Change)));
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
+        steps.AddRange(prePass.ReleasedReferences.Select(released => ToStep(released.Change)));
         steps.AddRange(prePass.ReleasedChecks.Select(released => ToStep(released.Change, CostNote(released.Operation))));
         steps.AddRange(residual.Select(operation =>
             ToStep(WithValidatedField(DestructiveScan.Classify(operation), operation, prePass.AlignedCurrent, desired), CostNote(operation))));
@@ -658,12 +697,12 @@ public sealed partial class EfCoreSchemaMigrator : ISchemaMigrator, IUncountedSc
     private static MigrationStep ToStep(SchemaChange change, string? costNote = null) =>
         new(change, change.IsDestructive, change.IsDestructive ? change.Detail : costNote);
 
-    private IModel BuildInitializedModel(SchemaModel schema)
+    private IModel BuildInitializedModel(SchemaModel schema, TenantGuardShape guards)
     {
         // DescriptorModelBuilder.Build returns a FinalizeModel()'d model; GetRelationalModel()
         // additionally requires the runtime initializer to have run (Task 0 report, gotcha #1).
         CheckConstraintNames.EnsureDistinct(schema);
-        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks, _filters);
+        var model = DescriptorModelBuilder.Build(schema, _newModelBuilder, _computed, _checks, _filters, guards);
         var initialized = _modelRuntimeInitializer.Initialize(model, designTime: true);
         EnsureEveryGeneratedColumnIsExpressible(initialized);
 

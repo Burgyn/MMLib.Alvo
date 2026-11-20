@@ -145,6 +145,14 @@ public class CSharpApiTests
     }
 
     [Fact]
+    public void The_accounts_constants_are_in_scope()
+    {
+        var accounts = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.Accounts").Assembly;
+
+        ApiScope.TypesOf(accounts).Select(type => type.Name).ShouldContain("AlvoAccounts");
+    }
+
+    [Fact]
     public void The_test_host_is_in_scope()
     {
         var testHost = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.TestHost").Assembly;

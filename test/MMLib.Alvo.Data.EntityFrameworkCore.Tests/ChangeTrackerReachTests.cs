@@ -149,6 +149,19 @@ public class ChangeTrackerReachTests
     /// (<c>EfCoreDeliveryStore.Operations.cs</c>) builds no command of its own and goes through the main file's;
     /// <c>EfCoreTimerStore</c> reads and writes only the timer, schedule and data-migration tables and appends to the
     /// outbox, binding every value, and never an entity table — its schedule half builds no command of its own;
+    /// <c>EfCoreAccountStore</c> reads and writes only the five end-user account tables (<c>AuthTables</c>' statements),
+    /// binding every value — ids, instants, the identity's asserted fields — and never an entity table; its session and key
+    /// halves build no command of their own and go through the main file's;
+    /// <c>EfCoreTenantStore</c> reads and writes only the three tenant-registry tables (<c>TenantTables</c>' and
+    /// <c>InvitationTables</c>' statements) and takes the creator's row lock on the accounts table with a write that changes
+    /// nothing, binding every value, and never an entity table; its member and invitation halves build no command of their
+    /// own and go through the main file's;
+    /// <c>InvitationAcceptance</c> is the one acceptance both the tenant and the account store run inside their own
+    /// transactions: <c>InvitationTables</c>', <c>TenantTables</c>' and <c>AuthTables</c>' statements, every value bound, and
+    /// never an entity table;
+    /// <c>EfCoreAppTokenStore</c> reads and writes only the app-token table (<c>AppTokenTables</c>' statements), takes the
+    /// minter's account-row lock and the tenant's version bump with <c>TenantTables</c>' statements, reads memberships and the
+    /// minter's name, binding every value, and never an entity table;
     /// <c>TimerWrites</c> is the timer table's upsert, cancel and armed-due read that store shares with a data write arming its entity's
     /// declarative timers, binding every value, and never touches an entity table;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
@@ -217,6 +230,18 @@ public class ChangeTrackerReachTests
     [InlineData("TimerTable.cs")]
     [InlineData("EfCoreTimerStore.cs")]
     [InlineData("TimerWrites.cs")]
+    [InlineData("AuthTables.cs")]
+    [InlineData("EfCoreAccountStore.cs")]
+    [InlineData("EfCoreAccountStore.Sessions.cs")]
+    [InlineData("EfCoreAccountStore.Keys.cs")]
+    [InlineData("TenantTables.cs")]
+    [InlineData("EfCoreTenantStore.cs")]
+    [InlineData("EfCoreTenantStore.Members.cs")]
+    [InlineData("InvitationTables.cs")]
+    [InlineData("EfCoreTenantStore.Invitations.cs")]
+    [InlineData("InvitationAcceptance.cs")]
+    [InlineData("AppTokenTables.cs")]
+    [InlineData("EfCoreAppTokenStore.cs")]
     public void The_outbox_claim_is_raw_sql_and_never_linq_over_the_context(string file)
     {
         var source = ReadSource(file);
@@ -249,17 +274,21 @@ public class ChangeTrackerReachTests
         "EfAlvoData.Hooks.cs",
         "EfAlvoData.Units.cs",
         "EfCoreDeliveryStore.cs",
+        "EfCoreAccountStore.cs",
+        "EfCoreAppTokenStore.cs",
         "EfCoreDescriptorVersionStore.cs",
         "EfCoreOutboxStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
         "EfCoreSecretStore.cs",
+        "EfCoreTenantStore.cs",
         "EfCoreTimerStore.cs",
         "ExclusionLocks.cs",
         "ExclusionOverlapScan.cs",
         "HookRejectionTable.cs",
         "IdempotencyTable.cs",
         "InboundWebhookTable.cs",
+        "InvitationAcceptance.cs",
         "MigrationFramingScope.cs",
         "OutboxTable.cs",
         "PostgreSqlSqlDialect.cs",

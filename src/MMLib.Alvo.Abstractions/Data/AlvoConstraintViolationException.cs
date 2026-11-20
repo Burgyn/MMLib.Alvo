@@ -3,7 +3,8 @@
 /// <summary>
 /// Thrown when a well-formed, authorized request collides with <em>stored state</em> the database itself
 /// guards: a value another record already holds on a <c>unique</c> field, a delete a
-/// <c>onDelete: "restrict"</c> reference refuses, or a row that breaks a field's <c>validation</c> — the CHECK
+/// <c>onDelete: "restrict"</c> reference refuses, a write whose <c>ref</c> names a record it cannot point at, or a row
+/// that breaks a field's <c>validation</c> — the CHECK
 /// constraint the engine holds for it (<see cref="AlvoConstraintKind.Check"/>, answered as invalid input rather than
 /// a conflict, because the fix is a different value in this request, not a change to stored state).
 /// </summary>
@@ -61,6 +62,13 @@
 /// disclose to be a refusal; narrowing it to an entity would disclose more than the constraint itself does.
 /// </para>
 /// <para>
+/// <b>The same kind answers a write whose <c>ref</c> names no record it can point at</b> — one that exists nowhere, or,
+/// between two <c>tenancy: "scoped"</c> entities, one of another tenant: the reference is a key over
+/// <c>(tenant_id, id)</c> (#161), so to the caller's tenant the two are the same missing row, and they are refused with
+/// one wording, distinct from the delete's because the fix is the opposite one — point the reference elsewhere rather
+/// than remove what points here. Anything that told the two apart would be an existence oracle across tenants.
+/// </para>
+/// <para>
 /// <b>It is not an oracle across tenants — but only because the index is scoped.</b> On a
 /// <c>tenancy: "scoped"</c> entity a <c>unique</c> constraint spans <c>(tenant_id, …)</c> (#137), so a
 /// caller only ever collides with a row in their own tenant. Mapping the refusal to this exception does
@@ -94,6 +102,19 @@ public sealed class AlvoConstraintViolationException : Exception
     private const string ReferencedMessage =
         "Other records still reference this record, so it cannot be removed. Delete those records, or point "
         + "them at something else, and retry.";
+
+    /// <summary>
+    /// The wording of a write whose reference names no record it can point at — one text whether the record exists
+    /// nowhere or in another tenant (#161), naming neither the field, the value nor the referenced entity.
+    /// </summary>
+    private const string UnresolvedReferenceMessage =
+        "A reference this write supplies names a record that could not be resolved, so the write was refused. Point "
+        + "it at an existing record of the referenced entity and retry.";
+
+    /// <summary>The fix a refused unresolved reference carries.</summary>
+    internal const string UnresolvedReferenceFix =
+        "Reference a record of the target entity that exists, then retry. A record this write cannot reference is "
+        + "indistinguishable from one that does not exist, deliberately.";
 
     /// <summary>Initializes a new instance of the <see cref="AlvoConstraintViolationException"/> class.</summary>
     /// <param name="kind">Which constraint the request collided with.</param>
@@ -180,8 +201,32 @@ public sealed class AlvoConstraintViolationException : Exception
         FacetFix = fixSuggestion;
     }
 
+    /// <summary>Initializes a new instance of the <see cref="AlvoConstraintViolationException"/> class for a refused reference.</summary>
+    /// <param name="innerException">The provider exception this was translated from.</param>
+    private AlvoConstraintViolationException(Exception? innerException)
+        : base(UnresolvedReferenceMessage, innerException)
+    {
+        Kind = AlvoConstraintKind.Referenced;
+        Fields = [];
+        IsUnresolvedReference = true;
+    }
+
+    /// <summary>
+    /// The refusal of a create or update whose <c>ref</c> names a record it cannot point at — kind
+    /// <see cref="AlvoConstraintKind.Referenced"/>, naming nothing, worded for the write rather than for a delete.
+    /// </summary>
+    /// <param name="innerException">The provider exception this was translated from, kept for the host's log.</param>
+    internal static AlvoConstraintViolationException UnresolvedReference(Exception? innerException) => new(innerException);
+
     /// <summary>Which constraint the request collided with.</summary>
     public AlvoConstraintKind Kind { get; }
+
+    /// <summary>
+    /// Whether a create or update was refused for a <c>ref</c> naming a record it cannot point at, rather than a delete for
+    /// records still pointing here; both are <see cref="AlvoConstraintKind.Referenced"/>, and only the wording and the fix
+    /// differ.
+    /// </summary>
+    internal bool IsUnresolvedReference { get; }
 
     /// <summary>
     /// The payload validator's code when the port's facet measure refused the value (<c>max-length</c>, <c>enum-value</c>,

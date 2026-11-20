@@ -170,6 +170,42 @@ public class AlvoApiOptionsValidatorTests
     /// <paramref name="expected"/> — a refusal whose message names nothing is a startup failure an operator
     /// cannot act on.
     /// </summary>
+    /// <summary>
+    /// A CORS origin is one a browser could send, and never <c>*</c>; a rate-limit budget is at least one request.
+    /// </summary>
+    [Theory]
+    [InlineData("*", "may not contain '*'")]
+    [InlineData("https://a.test/path", "is not an origin")]
+    [InlineData("not-a-uri", "is not an origin")]
+    [InlineData("ftp://a.test", "is not an origin")]
+    [InlineData("https://a.test?x=1", "is not an origin")]
+    public void A_cors_origin_that_is_not_an_origin_is_refused(string origin, string fragment)
+        => ShouldFail(api => api.Cors.Origins.Add(origin), "Alvo:Api:Cors:Origins", fragment);
+
+    [Theory]
+    [InlineData("https://app.example.com")]
+    [InlineData("https://app.example.com/")]
+    [InlineData("http://localhost:5173")]
+    public void A_cors_origin_is_accepted(string origin)
+        => Validate(api => api.Cors.Origins.Add(origin)).ShouldBeNull();
+
+    [Fact]
+    public void A_token_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.Token = 0, "RateLimits:Token");
+
+    [Fact]
+    public void A_tenant_creation_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.Create = 0, "RateLimits:Create");
+
+    [Fact]
+    public void An_invitations_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.Invitations = 0, "RateLimits:Invitations");
+
+    /// <summary>Spec §7.3's budget for the invitation routes: 20 a minute per client.</summary>
+    [Fact]
+    public void The_invitations_rate_limit_defaults_to_twenty()
+        => new AlvoApiOptions().RateLimits.Invitations.ShouldBe(20);
+
     private static void ShouldFail(Action<AlvoApiOptions> configure, params string[] expected)
     {
         var message = Validate(configure);

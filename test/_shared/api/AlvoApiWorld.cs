@@ -574,6 +574,7 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             ["subscriber"] = "no-such-handler",
             ["extension"] = "no-such-extension",
             ["schedule"] = "no-such-schedule",
+            ["account"] = Guid.Empty.ToString(),
         };
 
     /// <summary>One path segment, with a route parameter replaced by a value a request can carry.</summary>

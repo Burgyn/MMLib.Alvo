@@ -9,6 +9,208 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
+  per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
+  in the standalone host), a person can sign in through the app:
+  - **Signing in.** The app exchanges the person's Google ID token at `POST /auth/v1/token` (RFC 8693) and receives a
+    15-minute ES256 access token (RFC 9068) and a rotating refresh token.
+  - **Using the API.** The app calls the Data API and the commands with `Authorization: Bearer`, and the rules see the
+    person as `@user.id` with the `authenticated` role. Audited entities fill `created_by` from the person.
+  - **Refreshing.** A refresh rotates the token. Two concurrent refreshes get the same child. Reuse after a 10-second
+    grace window revokes the whole session (RFC 9700 §4.14).
+  - **Account routes.** `GET`/`PATCH /auth/v1/user` and `POST /auth/v1/logout` complete the surface. RFC 8414 metadata
+    and a JWKS are served under `/auth/v1/.well-known/`.
+  - **The descriptor is the switch.** `auth.signUp` (`open` | `invitationOnly`, optional `allowedEmailDomains`) is
+    required once `auth.providers` lists `google`, which is no longer reported as unhonoured. Only a provider the
+    descriptor lists *and* the host configures signs anyone in. Dropping it ends live sessions on their next request.
+    **Breaking for an apply:** a descriptor that lists `google` without `auth.signUp` — accepted before, with an
+    unhonoured-subsystem warning — is now refused at `/auth/signUp`, on every host, accounts or not. Add
+    `"signUp": { "mode": "open" }` or `{ "mode": "invitationOnly" }`.
+  - **Disabling a person.** An operator disables a person with `PUT {management}/projects/{project}/accounts/{id}/disabled`
+    (the new `ManageAccounts` operation, `admin`). The person is refused from their next request. Enabling them again
+    ends every session the account still has, so they sign in afresh; enabling an account that is not disabled is a
+    no-op that logs nobody out.
+  - **Storage.** Five new framework tables (`{prefix}_auth_*`) hold accounts, identities, sessions, refresh tokens and
+    keys. The keys are encrypted with `Alvo:Secrets:EncryptionKeyFile`, which an accounts host must configure. Nothing
+    deletes a session or refresh-token row yet, so those two tables grow with every sign-in and refresh (#527).
+  - **CORS and rate limits.** `Alvo:Api:Cors:Origins` and `Alvo:Api:RateLimits:Token` (default 30 per minute per client
+    IP) cover the Data API and the sign-in routes without a pipeline step.
+  - **A host that does not add accounts behaves as before.** It needs no key file, maps no `/auth` route, publishes no
+    Bearer scheme and ignores `Authorization` exactly as before. Its OpenAPI document gains only the four new problem
+    types in the shared `type` enum: `token-refused`, `sign-up-refused`, `sign-in-refused` and `rate-limited`. Two
+    things do reach it: on a relational provider the five `{prefix}_auth_*` tables are created, empty, on every host;
+    and the framework's CORS services are registered (`AddCors()`), sending nothing until `Alvo:Api:Cors:Origins` is set.
+  - **Tests.** Level 1 is proven end to end on SQLite and PostgreSQL (`AccountsEngineFacts`). A log scan at Trace finds
+    no ID token, access token, refresh token or API key in any message, exception, structured value or scope.
+  - **Docs.** The contributor's view is `docs/architecture/accounts.md`.
+- **Self-service tenants: `tenancy.selfService`** (accounts initiative, slice S3; levels 2 and 3 of the design, without
+  invitations). On a host with sign-in:
+  - **A personal tenant per person** (`selfService.personalTenant`). Created with the account at sign-in (or at the next
+    refresh for people who signed up before), named after the person; a request with no `X-Alvo-Tenant` acts in it, with
+    the tenant roles `personalTenant.roles` names.
+  - **Shared tenants a person creates** (`selfService.createTenants`: `creatorRoles`, `maxPerAccount` 1–100, default 5).
+    `GET`/`POST /auth/v1/tenants` and `PATCH /auth/v1/tenants/{id}` list, create and rename them; the creator is the
+    owner. `GET /auth/v1/tenants/{id}/members`, `PATCH …/members/{userId}` and `DELETE …/members/{userId}` let owners
+    give roles from `selfService.assignableRoles` and ownership, remove members, and let anyone leave. Nobody changes
+    their own membership, a tenant never loses its last owner (also when two owners act at once), and a personal tenant
+    has exactly one member. A second member joins through an invitation (S4, the next entry).
+  - **The tenant header selects among a person's memberships.** It is checked on every request in the same one store
+    read as the session; a tenant the person is not a member of refuses the whole request with 401, never a request
+    without a tenant. Tenant roles are recomputed from the applied descriptor on every request and count only on that
+    tenant's scoped rows — never on a global entity, never in a Management `access` level, and the owner flag is never
+    a role.
+  - **Apply refusals and a warning.** `selfService` needs `tenancy.enabled`; every role it names must be an application
+    role in `assignableRoles`; `invitations` needs `createTenants`; an `access` level naming an assignable role is
+    refused. With `signUp.mode: open`, each write rule of a global entity that admits `authenticated` is warned about.
+  - **New public API:** the descriptor's `Tenancy.SelfService` block (`TenancySelfService`, `SelfServicePersonalTenant`,
+    `SelfServiceCreateTenants`); `AlvoProblemTypes.FeatureDisabled`, `LastOwner`, `TenantLimit`; and
+    `AlvoRateLimitOptions.Create` (`Alvo:Api:RateLimits:Create`, default 10 tenant creations per client per minute).
+  - **Storage.** Two framework tables, `{prefix}_tenants` and `{prefix}_tenant_members`, created on every relational
+    host and empty until `selfService` is used.
+  - **Schedules and migrations per tenant.** Under `selfService`, with no `IAlvoTenantCatalog` of the host's own, an
+    `EachTenant` schedule, a per-tenant cron automation and a per-tenant data migration run once per self-service tenant.
+    **Behaviour change:** a relational host whose only problem is an `EachTenant` schedule with no catalog no longer
+    exits at a boot with no descriptor (a `selfService` descriptor could cure it); a stored-descriptor boot that cannot
+    bind it stands down not-ready instead of exiting. A file boot still exits with the same message.
+  - **Event actors** keep only tenant roles still in `assignableRoles`, and a person's delivery is narrowed to the
+    membership they still hold.
+  - **Tests.** Levels 2 and 3, and every wall between tenants, are proven end to end on SQLite and PostgreSQL
+    (`TenancyEngineFacts`). **Docs:** `docs/architecture/accounts.md`, *Tenants a person creates (S3)*.
+- **Invitations, and sign-up by invitation: `tenancy.selfService.invitations`** (accounts initiative, slice S4; how a
+  second person joins a level-3 tenant). On a host with sign-in and `createTenants`:
+  - **Owners invite.** `POST /auth/v1/tenants/{id}/invitations` creates an invitation with roles from
+    `assignableRoles`, optionally the owner flag, an email it is bound to, a use count (default 1, at most 100) and an
+    expiry (default 7 days, at most 30). An owner-granting invitation must be single-use and expire within 7 days; it is
+    refused otherwise, never clamped. The answer carries the secret code — `alvo_inv_` + 128 random bits — **once**;
+    only its hash is stored. `GET …/invitations` lists them newest first with their status, never a code;
+    `DELETE …/invitations/{invitationId}` revokes one. **Alvo sends no email:** the app shares the code.
+  - **Anyone holding a code previews it** with `POST /auth/v1/invitations/preview` — tenant, inviter, roles, expiry and
+    whether an email is bound, never the address — without signing in. **A person accepts it** with
+    `POST /auth/v1/invitations/accept` and acts in the tenant with its roles on their next request. Accepting again
+    answers the same membership and consumes nothing. Codes travel only in request bodies, never in a URL.
+  - **One answer for every dead code.** Unknown, expired, revoked, used up, bound to another or an untrusted email, into
+    a personal tenant, or created by someone no longer an owner or disabled: the same 404 as an unknown tenant, byte for byte.
+  - **An owner's invitations die with their ownership or their account.** Demoting or removing an owner, or an owner
+    leaving, revokes their live invitations in the same transaction; so does disabling the owner's account, and enabling
+    it again revives none. Two people racing for a single-use code make exactly one member.
+  - **`signUp.mode: invitationOnly` admits people.** The token exchange accepts `invitation_code` (an RFC 8693
+    extension parameter) in any mode. The new account, its identity, its session and the membership commit together,
+    or nothing does: a dead code is one `400 invalid_grant`, also for an existing account. `allowedEmailDomains` now
+    apply under `invitationOnly` too. A code sent while `invitations` is off is `400 invalid_request`.
+  - **`invitations` is honoured.** It no longer appears in `capabilities.warned`, in the apply warning, or on the
+    dashboard's Overview.
+  - **New public API:** `AlvoRateLimitOptions.Invitations` (`Alvo:Api:RateLimits:Invitations`, default 20 requests per
+    client per minute, shared by the five invitation routes). No new problem type.
+  - **Storage.** One framework table, `{prefix}_tenant_invitations`, created on every relational host and empty until
+    `invitations` is used.
+  - **Tests.** Invitations end to end, both races and the ownership sweep are proven on SQLite and PostgreSQL
+    (`InvitationEngineFacts`, `InvitationStoreFacts`). A log scan at Trace finds no invitation code, no part of one and
+    no hash of one. **Docs:** `docs/architecture/accounts.md`, *Invitations and `invitationOnly` sign-up (S4)*.
+- **Tokens for integrators: `auth.accessTokens`** (accounts initiative, slice S5; personal and service tokens). On a
+  host with sign-in:
+  - **Personal tokens act as their person.** A signed-in person mints one with `POST /auth/v1/tokens`
+    (`"kind": "personal"`), for one tenant they belong to or for none. It acts as them — `created_by` is theirs — with
+    the tenant roles of their current membership, read on every request: a demotion counts on the token's next request,
+    and a removal kills it for good, so inviting the person back does not revive it.
+  - **Service tokens act as a shared tenant.** An owner mints one (`"kind": "service"`) with tenant roles they hold
+    there. It has its own user id, which fills `created_by`, and its roles are tenant roles only, never project roles.
+    It dies when its minter is removed or stops being an owner, and a remaining owner mints the replacement.
+  - **Shown once, sent like an API key.** The 201 answers the credential once — `alvo_pat_…` / `alvo_svc_…`, a
+    recognisable prefix for secret scanning, then a 256-bit secret — and only its SHA-256 is stored. A client sends it
+    as `X-Alvo-Api-Key`, exactly as it sends an API key. `GET /auth/v1/tokens` lists a person's own tokens and the
+    service tokens of tenants they own, with minter and last use, never a secret; `DELETE /auth/v1/tokens/{keyId}`
+    revokes one.
+  - **Scoped where a route names an entity, refused where none does.** Scopes are `entity:read` / `entity:write`, at
+    least one, only entities the descriptor declares, no wildcard. The generated Data API checks them on every
+    operation, and a mapped command checks its own entity (read and write; an unbound command needs `*:write`, so it
+    never takes a token) — once admitted, the command's handler writes as the token's caller under the descriptor's
+    rules, unscoped beyond its entity. **A host's own `.WithAlvoCaller()` endpoint refuses every personal and service
+    token with 403** `forbidden` and a fixed sentence, because it names no entity a scope could be checked against;
+    configured keys, Bearer people and anonymous callers reach it as before (an endpoint-level scope opt-in is #536).
+    Every token expires within `maxLifetimeDays` (1–365, default 90). A token's tenant is fixed at mint, and
+    `X-Alvo-Tenant` naming another one is 401. A token never mints, lists or revokes a token, never calls a
+    self-service route (403), and **the Management API refuses every personal and service token with 403**, whatever its
+    roles. At most 100 live tokens per account.
+  - **A token dies with its reason.** A member's removal or departure, an owner's demotion and an account ban revoke the
+    tokens they cut off in the same transaction; enabling the account again revives none.
+  - **The descriptor is the switch.** `auth.accessTokens` (`personal`, `service`, `maxLifetimeDays`); without it every
+    token route answers 404 `feature-disabled` and no persisted token resolves. Switching a kind off refuses its tokens
+    on their next request; switching it on revives the unexpired ones. **Apply refuses `service: true` without
+    `tenancy.selfService.createTenants`**, at `/auth/accessTokens/service`.
+  - **Minting is charged the `Create` budget** (`Alvo:Api:RateLimits:Create`, default 10 per client per minute), the one
+    tenant creation already uses: the two now share it.
+  - **New public API:** `Auth.AccessTokens` and `AuthAccessTokens` (the descriptor block); `ApiKeyKind` (`Configured`,
+    `Personal`, `Service`), `ApiKeyRecord.Kind` (default `Configured`, so existing and host-built keys keep their
+    meaning) and `ApiKeyRecord.MintedBy`. No new problem type. A dev key whose id starts `alvo_pat_` or `alvo_svc_` is
+    refused at startup.
+  - **A host with its own `IApiKeyStore` should decorate Alvo's, not replace it.** A decorator that delegates keeps
+    personal and service tokens working. A host that replaces the store gets `404 feature-disabled` naming
+    `auth.accessTokens` (and why) from `POST /auth/v1/tokens`, instead of a token nothing would accept.
+  - **Storage.** One framework table, `{prefix}_api_keys`, created on every relational host and empty until a token is
+    minted. Nothing deletes a revoked or expired row yet (#527).
+  - **Tests.** Both kinds end to end, a level-1 token, a ban, the tenant wall, a tenant role on global data and
+    Management, and the descriptor moving under live tokens, on SQLite and PostgreSQL (`AppTokenEngineFacts`); the races
+    of a mint against a demotion, a removal and a ban (`AppTokenStoreFacts`). A log scan at Trace finds no token, no
+    secret part and no hash of one. **Docs:** `docs/architecture/accounts.md`, *Tokens for integrators (S5)*.
+- **Self-service in the field-service demo, the guides, the reference and the skill** (accounts initiative, slice S6;
+  no product behaviour changes):
+  - **The demo.** `examples/field-service` lets people sign in with Google, found a company, invite technicians and
+    mint tokens, beside its five dev keys: `auth.providers` gains `google`, with `auth.signUp` (`open`),
+    `auth.accessTokens` (`personal`, `service`) and `tenancy.selfService` (`createTenants` for `dispatcher`,
+    `invitations`, `assignableRoles` `dispatcher` and `technician`). `docker-compose.field-service.yml` points the
+    Google provider at a **test OpenID issuer** that the WireMock `sink` serves (`Authority` + `AllowHttpMetadata`, so
+    the stack runs `ASPNETCORE_ENVIRONMENT=Development`), takes a sign-in secrets key from `ALVO_FS_SECRETS_KEY` as a
+    Compose secret, and widens the per-IP rate budgets. **To start the stack by hand you now also export
+    `ALVO_FS_SECRETS_KEY`** (`openssl rand -base64 32`); `scripts/test-e2e` and `scripts/test-load` do it for you, and
+    the load stack resets every sign-in setting so it measures the host its baselines describe. The suite's signing
+    key is made on the machine that runs it and registered in the sink per run; no private key is committed. The
+    embedded sample serves the same descriptor without sign-in.
+  - **`test/teapie-field-service/170-SelfService`**, inside the required e2e check: three people sign in; a dispatcher
+    founds *Acme Repairs*, invites a technician who sees only his assigned job and completes it, mints a read-only
+    billing service token, and removes the technician, whose next request and personal token are refused; then the
+    walls — a foreign tenant, roles per tenant and the global `regions`, dead invitations answering alike, what a token
+    cannot reach — and last, refresh reuse ending the session. It runs alone and again on a live stack. `090-Docs`
+    pins the 15 `/auth/v1` paths beside the entity paths.
+  - **Three guides under *Secure it*:** *Sign-in and accounts* (the Google client, a sign-in page in plain `fetch`,
+    sessions, where to keep the tokens), *Tenants, members and invitations* and *Tokens for integrators*, each starting
+    from what you will build and naming the `170` case that runs its flow. Stale claims across the site (only local
+    accounts and API keys, Google "tracked in #36", the generated routes taking API keys only) are corrected.
+  - **A generated reference page, `reference/accounts-api`:** the sign-in, tenant, invitation and token routes, from the
+    OpenAPI document of a field-service host with sign-in configured.
+  - **A tenth descriptor skill, `alvo-descriptor-accounts`**, in the `alvo` plugin and the schema assistant: the three
+    levels, `auth.signUp`, `auth.accessTokens`, `tenancy.selfService`, tenant versus project roles, and what the
+    descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget);
+    its `eval-assistant` run is owed (#540).
+  - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
+    by policy." and names no field (#538); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
+    hint to use `X-Alvo-Api-Key` (#539). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+- **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
+  - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
+    transaction, every personal and service token the person minted and every invitation they created, in any tenant,
+    since that session started. What they created before it started survives. A mint or an invitation still in flight
+    on that session when it ends writes nothing and answers `401 invalid_token`: each re-reads the session under its
+    row lock in its own transaction, so a thief who triggers the reuse mid-request gets nothing past the sweep. A
+    membership someone already accepted, and a member change the session made, are not undone.
+  - **A banned person's queued work loses their tenant roles.** A delivery running as the event's actor no longer
+    honours the memberships of a disabled account; enabling it honours them again, and an owner can still remove a
+    banned member.
+  - **Apply warns when nobody could ever sign up:** `auth.signUp.mode: invitationOnly` without
+    `tenancy.selfService.invitations` is a warning at `/auth/signUp/mode` (registration closed is legitimate, so not a
+    refusal). The `examples/complex-crm` showcase had that shape and now declares self-service invitations.
+  - **Corrected:** `AlvoRateLimitOptions.Create`'s doc (it also charges `POST /auth/v1/tokens`) and the `rate-limited`
+    problem type's causes; *Timers, schedules and data migrations* and *Automation*, which still said a per-tenant
+    schedule or cron rule needs a host `IAlvoTenantCatalog` (with `tenancy.selfService` the registry is the default).
+  - **Open before v0.1:** the `/auth/v1` HTTP contract's names, credential errors, rate-limit keys and idempotency
+    (#542); recovering a tenant whose only owner is banned, and the owner-removal × ban lock order (#543); signing-key
+    rotation, an emergency procedure, and checking Google's `azp` (#544); undoing the ownership a stolen session
+    already granted before its reuse ended it (#546).
+- **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
+  Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
+  decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms
+  into other scoped entities); a global entity's rules, anything reached from one, and Management `access` levels read
+  project roles only. The event envelope records them (`authclaims.tenantRoles`, written only when non-empty) so an
+  after-hook condition judges what the write saw. The `Authorization` header is still ignored unless a person resolver is
+  registered; one credential reading now serves the Data API, the commands and Management.
 - **The advanced demo's host layer: `samples/MMLib.Alvo.Samples.FieldService`**, an embedded host over the same
   `examples/field-service` descriptor (PostgreSQL, typed against the generated `WorkOrder`, `Visit` and roles) that adds
   what the descriptor has no construct for: the `work_orders.dispatch` command (schedule the job and book its visit in
@@ -466,6 +668,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **A descriptor that lists `google` must say who may sign up** (accounts slice S2). `auth.providers` naming `google`
+  without `auth.signUp` was applied with an unhonoured-subsystem warning; it is now refused at `/auth/signUp`, on every
+  host, whether or not it adds accounts. Add `"signUp": { "mode": "open" }` or `{ "mode": "invitationOnly" }`.
+- **A scoped `ref` can no longer name another tenant's row** (#161): a reference between two `tenancy: "scoped"`
+  entities is now a foreign key over `(tenant_id, id)`, with a matching alternate key on the target, so the database
+  refuses a row whose reference names another tenant's. A write that tries it through `IAlvoData` is refused as
+  `Referenced` (409 `conflict`, code `referenced`) with the same wording as an id that exists nowhere — no existence
+  oracle — and a delete the key refuses keeps its own wording. `restrict` and `cascade` carry their action on the one
+  composite key; `onDelete: setNull` is one composite key `ON DELETE SET NULL (<ref>)` on PostgreSQL and a single-column
+  `SET NULL` key plus a separate composite guard on SQLite. A scoped → global or global → scoped reference is unchanged.
+  **The emitted DDL changed for every scoped → scoped reference, and there is no upgrade path: a database created before
+  this change keeps the old key and must be recreated.** `setNull` between scoped entities needs PostgreSQL 15 and is
+  refused at plan, at `/entities/{child}/fields/{ref}/onDelete`, on an older server. Dynamic entities are not covered
+  (no driver yet). See `docs/architecture/data-path.md`.
+  A declared rename of a `ref` field, of its entity or of its target now re-creates the reference's foreign key, index
+  and (for a guard) the target's alternate key under the new names; before, on PostgreSQL, renaming a referenced entity
+  failed its apply and a later drop after a field rename named a constraint that did not exist — plain references
+  included.
 - **The data port measures field facets on every write** (#481): `IAlvoData` and `IAlvoTransaction` creates, updates,
   replaces and batches measure each value they are handed against its field's `maxLength`, enum `values`, decimal
   `precision`/`scale` and `format` (the facets the descriptor has; there is no min/max or `pattern` facet) — the HTTP

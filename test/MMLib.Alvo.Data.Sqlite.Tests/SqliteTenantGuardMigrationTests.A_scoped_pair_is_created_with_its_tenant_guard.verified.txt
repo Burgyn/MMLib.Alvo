@@ -1,0 +1,43 @@
+﻿CREATE TABLE "work_orders" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_work_orders" PRIMARY KEY,
+    "tenant_id" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    CONSTRAINT "AK_work_orders_tenant_id_id" UNIQUE ("tenant_id", "id")
+);
+
+;
+CREATE TABLE "notes" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_notes" PRIMARY KEY,
+    "tenant_id" TEXT NOT NULL,
+    "work_order_id" TEXT NULL,
+    CONSTRAINT "FK_notes_work_orders_tenant_id_work_order_id" FOREIGN KEY ("tenant_id", "work_order_id") REFERENCES "work_orders" ("tenant_id", "id"),
+    CONSTRAINT "FK_notes_work_orders_work_order_id" FOREIGN KEY ("work_order_id") REFERENCES "work_orders" ("id") ON DELETE SET NULL
+);
+
+;
+CREATE TABLE "tasks" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_tasks" PRIMARY KEY,
+    "tenant_id" TEXT NOT NULL,
+    "work_order_id" TEXT NOT NULL,
+    CONSTRAINT "FK_tasks_work_orders_tenant_id_work_order_id" FOREIGN KEY ("tenant_id", "work_order_id") REFERENCES "work_orders" ("tenant_id", "id") ON DELETE CASCADE
+);
+
+;
+CREATE TABLE "visits" (
+    "id" TEXT NOT NULL CONSTRAINT "PK_visits" PRIMARY KEY,
+    "tenant_id" TEXT NOT NULL,
+    "work_order_id" TEXT NOT NULL,
+    CONSTRAINT "FK_visits_work_orders_tenant_id_work_order_id" FOREIGN KEY ("tenant_id", "work_order_id") REFERENCES "work_orders" ("tenant_id", "id") ON DELETE RESTRICT
+);
+
+;
+CREATE INDEX "IX_notes_tenant_id_work_order_id" ON "notes" ("tenant_id", "work_order_id");
+
+;
+CREATE INDEX "IX_notes_work_order_id" ON "notes" ("work_order_id");
+
+;
+CREATE INDEX "IX_tasks_tenant_id_work_order_id" ON "tasks" ("tenant_id", "work_order_id");
+
+;
+CREATE INDEX "IX_visits_tenant_id_work_order_id" ON "visits" ("tenant_id", "work_order_id");

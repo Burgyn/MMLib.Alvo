@@ -49,6 +49,12 @@ internal static class ConstraintViolationTranslator
     /// expires and a collision on it is an ordinary conflict the caller can fix by choosing another id.
     /// Every other write mints its own key, passes <see langword="false"/>, and keeps the old answer.
     /// </param>
+    /// <param name="removes">
+    /// Whether the write removes rows. A foreign-key refusal of a removal is a <c>restrict</c> holding — records still
+    /// point here; of any other write, a <c>ref</c> naming a record it cannot point at (#161). The engine cannot tell the
+    /// two apart for every statement (SQLite says only <c>FOREIGN KEY constraint failed</c>), so the write says which it is
+    /// — required rather than defaulted, so no call site inherits a direction it did not state.
+    /// </param>
     /// <param name="applied">The applied schema, whose validated fields a CHECK constraint's name is recomputed from.</param>
     /// <param name="unnameable">The fields the descriptor hides, which a CHECK refusal never names (the write's decision).</param>
     /// <param name="bodySent">
@@ -56,14 +62,14 @@ internal static class ConstraintViolationTranslator
     /// recompute breaks names no child field: there is no value of the caller's to change.
     /// </param>
     internal static async Task<T> TranslatedAsync<T>(
-        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
+        Func<Task<T>> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed, bool removes,
         SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
             return await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent)) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent, removes)) is { } violation)
         {
             throw violation;
         }
@@ -71,14 +77,14 @@ internal static class ConstraintViolationTranslator
 
     /// <inheritdoc cref="TranslatedAsync{T}"/>
     internal static async Task TranslatedAsync(
-        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed,
+        Func<Task> write, IAlvoSqlDialect dialect, IEntityType rows, EntitySchema schema, bool callerKeyed, bool removes,
         SchemaModel applied, IReadOnlySet<string> unnameable, bool bodySent = true)
     {
         try
         {
             await write();
         }
-        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent)) is { } violation)
+        catch (Exception failure) when (Translate(failure, dialect, new Written(rows, schema, callerKeyed, applied, unnameable, bodySent, removes)) is { } violation)
         {
             throw violation;
         }
@@ -91,9 +97,10 @@ internal static class ConstraintViolationTranslator
     /// <param name="Applied">The applied schema.</param>
     /// <param name="Unnameable">The fields a refusal never names.</param>
     /// <param name="BodySent">Whether the request carried values a refusal may point at.</param>
+    /// <param name="Removes">Whether the write removes rows, which decides what a foreign-key refusal means.</param>
     private sealed record Written(
         IEntityType Rows, EntitySchema Schema, bool CallerKeyed, SchemaModel Applied, IReadOnlySet<string> Unnameable,
-        bool BodySent);
+        bool BodySent, bool Removes);
 
     /// <summary>
     /// The translated exception, or <see langword="null"/> when <paramref name="failure"/> is not a
@@ -118,9 +125,7 @@ internal static class ConstraintViolationTranslator
 
         if (violation.Kind == AlvoConstraintKind.Referenced)
         {
-            // The engine names the referencing table at best, and that is a fact about data the caller may
-            // not be able to read — see AlvoConstraintViolationException. The refusal names nothing.
-            return new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, [], failure);
+            return Referenced(failure, written.Removes);
         }
 
         if (violation.Kind == AlvoConstraintKind.Check)
@@ -138,6 +143,21 @@ internal static class ConstraintViolationTranslator
             ? null
             : new AlvoConstraintViolationException(AlvoConstraintKind.Unique, fields, failure);
     }
+
+    /// <summary>
+    /// A foreign-key refusal, naming nothing: a removal's is the <c>restrict</c> refusal, any other write's the unresolved
+    /// reference — one answer whether the record exists nowhere or in another tenant (#161).
+    /// </summary>
+    /// <remarks>
+    /// The engine names the referencing table or the constraint at best, and which one is a fact about data the caller may
+    /// not be able to read — see <see cref="AlvoConstraintViolationException"/>.
+    /// </remarks>
+    /// <param name="failure">The provider exception, kept for the host's log.</param>
+    /// <param name="removes">Whether the refused write removes rows.</param>
+    private static AlvoConstraintViolationException Referenced(Exception failure, bool removes) =>
+        removes
+            ? new AlvoConstraintViolationException(AlvoConstraintKind.Referenced, [], failure)
+            : AlvoConstraintViolationException.UnresolvedReference(failure);
 
     /// <summary>
     /// The provider's own exception inside whatever EF wrapped it in — <see cref="DbUpdateException"/> from

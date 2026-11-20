@@ -84,6 +84,12 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
     /// that is a container killed and restart-looped by its own liveness gate. A host that wants conventions
     /// calls the parts, which is already the documented composition.
     /// </para>
+    /// <para>
+    /// <b>With <c>Alvo:Api:Cors:Origins</c> configured, it also maps <c>OPTIONS {RoutePrefix}/{**path}</c></b>, the one
+    /// route that answers a CORS preflight for every generated endpoint (excluded from the OpenAPI document); every
+    /// generated endpoint applies the policy itself, so no <c>UseCors()</c> step is needed. Without origins nothing is
+    /// mapped and no CORS header is ever sent.
+    /// </para>
     /// </remarks>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>
     /// <returns>
@@ -111,6 +117,8 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
             services.GetRequiredService<ILogger<AlvoEndpointDataSource>>());
 
         endpoints.DataSources.Add(source);
+        services.GetRequiredService<AlvoCors>().MapPreflight(
+            endpoints, RoutePrefix.Normalize(services.GetRequiredService<IOptions<AlvoApiOptions>>().Value.RoutePrefix));
 
         return source.Conventions;
     }

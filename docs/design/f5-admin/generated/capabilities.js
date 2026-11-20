@@ -34,7 +34,7 @@ export const CAPABILITIES = {
     },
     {
       "block": "auth.providers",
-      "consequence": "only local credentials exist in this build — a person signs in with an address and a password Alvo holds; google, microsoft, github, apple and oidc sign-in are #36 (F7), so a declared provider other than local offers no way in"
+      "consequence": "only local credentials and google sign-in exist in this build; microsoft, github, apple and oidc sign-in are #36 (F7), so a declared provider other than local or google offers no way in"
     },
     {
       "block": "entity.storage",

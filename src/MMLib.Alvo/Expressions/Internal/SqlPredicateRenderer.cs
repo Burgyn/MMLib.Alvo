@@ -379,20 +379,22 @@ internal sealed partial class SqlPredicateRenderer : IPredicateRenderer
 
     /// <summary>
     /// Renders role membership. The right operand is never read — the caller's role set answers it — so
-    /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first.
+    /// <see cref="RoleMembership"/> asserts that the operand really is <c>@user.roles</c> first. The set is the one
+    /// <see cref="RoleProvenance"/> makes visible on this scope's path: tenant roles count only while every entity on it,
+    /// from the top-level one to this scope's, is scoped.
     /// </summary>
     private static PredicateFragment RenderIn(CelBinary binary, RenderScope scope)
     {
         RoleMembership.RequireUserRolesOperand(binary.Right);
-        var caller = Caller(scope.Context, binary);
+        var roles = RoleProvenance.OnPath(Caller(scope.Context, binary), scope.EveryEntityScoped);
 
         if (binary.Left is CelLiteral { Type: CelValueType.String, Value: string text })
         {
-            var isMember = caller.Roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
+            var isMember = roles.Select(role => role.Name).Contains(text, StringComparer.Ordinal);
             return new PredicateFragment(scope.Fields.RenderBooleanPredicate(isMember), true);
         }
 
-        var roleNames = caller.Roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
+        var roleNames = roles.Select(role => role.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
         if (roleNames.Count == 0 || ReadsAbsentImageValue(binary.Left, scope))
         {
             return new PredicateFragment(scope.Fields.RenderBooleanPredicate(false), true);

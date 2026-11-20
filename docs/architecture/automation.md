@@ -113,7 +113,8 @@ row in the log. `AlvoFunctionSkippedException` ends the delivery succeeded with 
 A cron rule becomes a **trigger-only schedule** on HX-13's schedule pump (`SchedulePump` syncs them per catalog): its
 id is `/automation/<rule>#<hash>`, its fire appends `alvo.automation.<rule>` with subject `schedules/<id>`, and that
 event fans out to the rule's actions like any other. On a tenanted project the schedule's scope is `EachTenant`, so it
-fires once per tenant (an `IAlvoTenantCatalog` is required, else apply refuses). Its actions compile over an empty row
+fires once per tenant (a tenant list is required — the host's `IAlvoTenantCatalog`, or the self-service registry while
+the descriptor declares `tenancy.selfService`; see `time.md`, *Which tenants* — else apply refuses). Its actions compile over an empty row
 at `afterCreate`, and a cron rule takes no condition.
 
 ## Secrets
@@ -136,7 +137,7 @@ refuse until a restart. A store that throws fails closed, naming its exception t
 8. `secretRef`/`headersSecretRef`: grammar refused, existence warned.
 9. The required-secret boot check reads each value; empty = missing; a throwing store refuses the boot.
 10. Triggers honoured: entity created/updated/deleted and a five-field UTC cron; wildcard, `.batch`/`delivery: batch`, `auth.*`/`storage.*` and a condition on a cron rule refused.
-11. A cron rule runs once globally without tenancy, once per tenant with it (an `IAlvoTenantCatalog` required).
+11. A cron rule runs once globally without tenancy, once per tenant with it (a tenant list required: an `IAlvoTenantCatalog`, or the registry under `tenancy.selfService`).
 12. `entity.update` into a tenant-scoped entity from an untenanted trigger is refused at apply; a `recordId` not found in the event's tenant is dead `record-not-found`.
 13. `FunctionAction.Input` becomes `FunctionInput?` (breaking); `ManagementExtension.InputSchema` is added, `Secrets` is not.
 14. The Automations page is read-only; `/admin/functions` stays *Not yet* and points at the hooks editor.

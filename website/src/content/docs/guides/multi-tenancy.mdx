@@ -31,7 +31,8 @@ The responses below were captured from a real host when the site was built, so y
 ## 1. Turn tenancy on
 
 A tenant-scoped entity gets a `tenant_id` column, and every read and write of it is limited to the caller's tenant.
-The tenant comes from the API key, never from the request or the descriptor. In an embedded host that calls
+On this page the tenant comes from the API key, never from the request or the descriptor. A signed-in person's
+tenant is a membership they hold ([Tenants people create](#tenants-people-create)). In an embedded host that calls
 `IAlvoData` from its own endpoints, it comes from the `AlvoContext` the host passes.
 
 <Steps>
@@ -69,7 +70,8 @@ The tenant comes from the API key, never from the request or the descriptor. In 
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[1]} />
 
-3. Leave `tenant_id` out, or name another tenant, and the write is refused. The refusal names no field:
+3. Leave `tenant_id` out, or name another tenant, and the write is refused. The refusal names no field
+   ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)):
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[2]} />
 
@@ -120,17 +122,28 @@ refused before any rule runs, so a missing tenant can never match rows by accide
 [`docs/architecture/cel.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#the-required-context-gate-no-expression-runs-against-a-context-value-the-caller-lacks)
 has the details.
 
-Alvo does not keep a list of your tenants: a tenant is whatever a caller's key names. Work that runs per tenant with no
-caller — an [automation](/extending/automation/#triggers) rule with a cron trigger, a per-tenant
+With API keys alone, Alvo keeps no list of your tenants: a tenant is whatever a caller's key names. Work that runs
+per tenant with no caller — an [automation](/extending/automation/#triggers) rule with a cron trigger, a per-tenant
 [schedule](/extending/time/#schedules) or a [data migration](/extending/time/#data-migrations) over a tenant-scoped
-entity — needs an embedded host that registers an `IAlvoTenantCatalog` listing them.
+entity — then needs an embedded host that registers an `IAlvoTenantCatalog` listing them. Once people create their
+own tenants, Alvo keeps them, and that work runs for each of them with no catalog to register.
+
+## Tenants people create
+
+Keys with a fixed tenant suit a backend whose customers you onboard yourself. When the customers are people who sign
+up, let them create their own tenants instead: `tenancy.selfService` lets a signed-in person create a company, invite
+colleagues into it with a link, and hold roles there, such as `dispatcher` in one company and `technician` in
+another. A request names the tenant it acts in with `X-Alvo-Tenant`, which must be one of the person's memberships.
+The isolation below holds unchanged. [Tenants, members and invitations](/guides/tenants-and-invitations/) builds one
+end to end.
 
 ## What isolation guarantees
 
 - **A tenant cannot see, change or delete another tenant's rows.** Every attempt is the answer for a row that does
   not exist: an empty page or a 404.
 - **A tenant cannot learn that another tenant's row exists**, with one exception. A reference to a row in another
-  tenant is refused like a reference to nothing (`unresolved-reference`), and a `unique` field is unique per tenant,
+  tenant is refused like a reference to nothing (`unresolved-reference` over HTTP; the database's own key over
+  `(tenant_id, id)` refuses it for host code too), and a `unique` field is unique per tenant,
   so two tenants may hold the same value and a duplicate tells you only about your own rows. The exception: a `PUT`
   create-or-replace on a UUID you already hold answers `409` if a row of any tenant has that id, because the primary
   key is the id alone.

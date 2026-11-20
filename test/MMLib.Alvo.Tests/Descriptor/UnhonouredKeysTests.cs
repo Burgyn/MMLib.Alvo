@@ -1,13 +1,18 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Migrations.Internal;
+using NSubstitute;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Tests.Descriptor;
 
 /// <summary>
 /// The keys <b>inside</b> a block this build honours that it does not honour themselves —
-/// <c>entity.storage: dynamic</c>, a non-local <c>auth.providers</c>, and <c>entity.realtime</c> — asserted on
-/// which slot the one warning names, in both directions (docs/todo-admin.md §8d items 21 and 27).
+/// <c>entity.storage: dynamic</c>, an <c>auth.providers</c> other than local or google and <c>entity.realtime</c> —
+/// asserted on which slot the one warning names, in both directions (docs/todo-admin.md §8d items 21 and 27).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,6 +32,7 @@ public class UnhonouredKeysTests
     private const string StorageSlot = "entity.storage";
     private const string ProvidersSlot = "auth.providers";
     private const string RealtimeSlot = "entity.realtime";
+    private const string InvitationsSlot = "tenancy.selfService.invitations";
 
     /// <summary>
     /// <b>An entity with <c>storage: dynamic</c> is warned about although <c>dynamicEntities</c> is not
@@ -49,16 +55,56 @@ public class UnhonouredKeysTests
             .ShouldBeNull("a warning every physical entity earns is one every operator learns to filter out");
 
     /// <summary>
-    /// <b>A provider other than <c>local</c> is warned about</b>, because only local credentials exist in this
-    /// build and <c>auth</c> is on the honoured list for its roles alone.
+    /// <b>A provider other than <c>local</c> or <c>google</c> is warned about</b>, because only those two exist in
+    /// this build and <c>auth</c> is on the honoured list for its roles and those providers alone.
     /// </summary>
     [Fact]
     public void A_provider_other_than_local_is_warned_about()
     {
-        var warning = WarningFor(Entities, """{ "providers": ["local", "google"] }""");
+        var warning = WarningFor(Entities, """{ "providers": ["local", "microsoft"] }""");
 
         warning.ShouldNotBeNull();
         warning.ShouldContain(ProvidersSlot, Shouldly.Case.Sensitive);
+        warning.ShouldContain("microsoft, github, apple and oidc", Shouldly.Case.Sensitive);
+    }
+
+    /// <summary>
+    /// <b><c>google</c> is honoured by the descriptor (S2)</b>, so beside <c>local</c> it names no slot; whether a
+    /// host registered sign-in is the boot's own line, below.
+    /// </summary>
+    [Fact]
+    public void Google_beside_local_names_no_provider_slot()
+        => WarningFor(Entities, """{ "providers": ["local", "google"], "signUp": { "mode": "open" } }""").ShouldBeNull();
+
+    /// <summary>
+    /// <b>A descriptor listing <c>google</c> on a host without a person resolver warns once</b> — on the boot, as a
+    /// fact about this host — and a host that registered one hears nothing.
+    /// </summary>
+    [Fact]
+    public void A_descriptor_listing_google_on_a_host_without_a_person_resolver_warns_once()
+    {
+        const string google = """{ "providers": ["google"], "signUp": { "mode": "open" } }""";
+
+        BootWarnings(google, hasPerson: false).ShouldHaveSingleItem().ShouldBe(
+            "auth.providers lists google, but this host registered no end-user sign-in (MMLib.Alvo.Accounts: "
+            + "AddAlvoAccounts and MapAlvoAccounts), so nobody can sign in with Google here.");
+        BootWarnings(google, hasPerson: true).ShouldBeEmpty();
+        BootWarnings("""{ "providers": ["local"] }""", hasPerson: false).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// <b><c>invitations: true</c> is honoured</b> (S4 plan D14): owners invite people into shared tenants, so the key that
+    /// was warned about from S3 (S3 plan D11) earns no line, whatever it says.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Invitations_are_honoured(bool invitations)
+    {
+        var tenancy = $$"""{ "enabled": true, "selfService": { "createTenants": {}, "invitations": {{(invitations ? "true" : "false")}} } }""";
+
+        WarningFor(Entities, auth: null, tenancy: tenancy).ShouldBeNull();
+        UnhonouredSubsystems.WithinBlocks.Select(row => row.Block).ShouldNotContain(InvitationsSlot);
     }
 
     /// <summary><c>local</c> alone is exactly what this build does, so it earns no line.</summary>
@@ -97,11 +143,11 @@ public class UnhonouredKeysTests
             .ShouldBe(declared);
 
     /// <summary>
-    /// The showcase declares <c>google</c> beside <c>local</c>, so its one warning now names the provider slot as
-    /// well as its five top-level blocks.
+    /// The showcase declares <c>google</c> beside <c>local</c>, both honoured, so its one warning names its top-level
+    /// blocks and no provider slot.
     /// </summary>
     [Fact]
-    public void The_showcase_warning_names_its_declared_provider()
+    public void The_showcase_warning_does_not_name_its_honoured_providers()
     {
         var descriptor = AlvoDescriptor.Parse(File.ReadAllText(
             Path.Combine(RepositoryRoot.Find(), "examples", "complex-crm", "crm.alvo.json")));
@@ -109,12 +155,13 @@ public class UnhonouredKeysTests
 
         UnhonouredSubsystems.Warn(logger, descriptor);
 
-        logger.Warnings.ShouldHaveSingleItem().ShouldContain(ProvidersSlot, Shouldly.Case.Sensitive);
+        logger.Warnings.ShouldHaveSingleItem().ShouldNotContain(ProvidersSlot, Shouldly.Case.Sensitive);
     }
 
     /// <summary>
     /// <b>Every slot names a key the frozen schema declares</b>, under the block its first segment names —
-    /// <c>entity.*</c> under <c>$defs/entity</c>, anything else under the root's own property.
+    /// <c>entity.*</c> under <c>$defs/entity</c>, anything else under the root's own property — and every further
+    /// segment one level down.
     /// </summary>
     /// <remarks>
     /// The sibling file's reason, one level down: a slot matching no key warns about nothing forever and reads as
@@ -132,7 +179,12 @@ public class UnhonouredKeysTests
             var owner = block == "entity" ? schema["$defs"]!["entity"] : schema["properties"]![block];
 
             owner.ShouldNotBeNull($"'{slot.Block}' names no block of the schema");
-            owner!["properties"]!.AsObject().ContainsKey(key).ShouldBeTrue($"'{slot.Block}' names no declared key");
+            foreach (var segment in key.Split('.'))
+            {
+                var properties = owner!["properties"]?.AsObject();
+                (properties?.ContainsKey(segment) == true).ShouldBeTrue($"'{slot.Block}' names no declared key");
+                owner = properties![segment];
+            }
         }
     }
 
@@ -152,17 +204,35 @@ public class UnhonouredKeysTests
     private const string Entities = """{ "notes": { "fields": { "title": { "type": "string" } } } }""";
 
     /// <summary>The one warning a descriptor with these entities earns, or null when it earns none.</summary>
-    private static string? WarningFor(string entities, string? auth = null)
+    private static string? WarningFor(string entities, string? auth = null, string? tenancy = null)
     {
         var logger = new CapturingLogger();
-        UnhonouredSubsystems.Warn(logger, Parse(entities, auth));
+        UnhonouredSubsystems.Warn(logger, Parse(entities, auth, tenancy));
         return logger.Warnings.SingleOrDefault();
     }
 
-    private static AlvoDescriptor Parse(string entities, string? auth)
-        => AlvoDescriptor.Parse(auth is null
-            ? $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys", "entities": {{entities}} }"""
-            : $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys", "auth": {{auth}}, "entities": {{entities}} }""");
+    /// <summary>Every warning stage 0 writes for a descriptor with <paramref name="auth"/>, on a host with or without a person resolver.</summary>
+    private static IReadOnlyList<string> BootWarnings(string auth, bool hasPerson)
+    {
+        var json = $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys", "auth": {{auth}}, "entities": {{Entities}} }""";
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+        var plan = new DescriptorBootPlan(
+            Substitute.For<IDescriptorSource>(), new DescriptorValidator(), new CelCompiler(),
+            loggers.CreateLogger<DescriptorBootPlan>(), hasPerson: hasPerson);
+
+        plan.Plan(json);
+
+        return capturing.Warnings;
+    }
+
+    private static AlvoDescriptor Parse(string entities, string? auth, string? tenancy = null)
+    {
+        var authBlock = auth is null ? string.Empty : $$""" "auth": {{auth}},""";
+        var tenancyBlock = tenancy is null ? string.Empty : $$""" "tenancy": {{tenancy}},""";
+        return AlvoDescriptor.Parse(
+            $$"""{ "apiVersion": "alvo.dev/v1", "name": "keys",{{authBlock}}{{tenancyBlock}} "entities": {{entities}} }""");
+    }
 
     private static (string Block, string Key) Split(string slot)
     {

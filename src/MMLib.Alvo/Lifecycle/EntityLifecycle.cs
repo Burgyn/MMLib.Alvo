@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Lifecycle;
 
@@ -20,8 +21,12 @@ internal sealed record EntityLifecycle(CompiledStateMachine? StateMachine, IRead
 /// <param name="Initial">The state every create must store, or <see langword="null"/> when any is admitted.</param>
 /// <param name="Default">The field's literal <c>default</c>, which a create that sends no state stores.</param>
 /// <param name="Transitions">The transitions, in declaration order.</param>
+/// <param name="Tenancy">
+/// The entity's tenancy, which decides whether a caller's tenant roles count toward a transition's <c>roles</c> (spec §6.2);
+/// <see langword="null"/> — untenanted, or a machine built without one — counts project roles only.
+/// </param>
 internal sealed record CompiledStateMachine(
-    string Field, string? Initial, string? Default, IReadOnlyList<CompiledTransition> Transitions);
+    string Field, string? Initial, string? Default, IReadOnlyList<CompiledTransition> Transitions, TenancyMode? Tenancy = null);
 
 /// <summary>One compiled transition.</summary>
 /// <param name="Name">The transition's declared name.</param>

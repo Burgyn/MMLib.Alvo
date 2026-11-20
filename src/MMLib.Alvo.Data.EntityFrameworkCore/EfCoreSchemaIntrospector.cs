@@ -95,15 +95,21 @@ public sealed class EfCoreSchemaIntrospector : ISchemaIntrospector
 
     private static Dictionary<string, DatabaseForeignKey> BuildForeignKeyMap(DatabaseTable table)
     {
-        // A field maps to at most one FK/RefSchema (Alvo references are single-column), so the
-        // last foreign key declared on a column wins if there were somehow more than one.
+        // A reference is one field, guarded or not: a single-column foreign key maps to its column, a tenant guard
+        // (tenant_id, x) to x — never to tenant_id. SQLite keeps a setNull reference as both, and the single-column key
+        // wins because it carries the declared action.
         var map = new Dictionary<string, DatabaseForeignKey>(StringComparer.Ordinal);
-        foreach (var fk in table.ForeignKeys)
+        foreach (var fk in table.ForeignKeys.Where(fk => fk.Columns.Count != 1))
         {
-            foreach (var column in fk.Columns)
+            if (TenantGuards.GuardedField([.. fk.Columns.Select(c => c.Name)]) is { } field)
             {
-                map[column.Name] = fk;
+                map[field] = fk;
             }
+        }
+
+        foreach (var fk in table.ForeignKeys.Where(fk => fk.Columns.Count == 1))
+        {
+            map[fk.Columns[0].Name] = fk;
         }
 
         return map;

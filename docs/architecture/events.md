@@ -819,7 +819,7 @@ mechanism that covers a process that died.
 
 **There is no dispatcher-wide caller, and the claim that there was one was wrong in both directions.** A
 hook condition's `@user.id` is resolved **per event, from the envelope's own `authid`**
-(`EventSubscriptions.CallerOf`), because the actor an author means is the credential that made the change
+(`EnvelopeReading.CallerOf`), because the actor an author means is the credential that made the change
 and not whoever happens to be draining the queue. Since HX-01, `@tenant.id` and `@user.roles` are resolved
 the same way, from `tenantid` and `authclaims` (below). What a shared `AlvoContext.System(tenant: null)` actually did:
 
@@ -844,7 +844,7 @@ in the same words `TemplatePlaceholder` refused them in a template — one autho
 refuse what it cannot.**
 
 **HX-01 (2026-10-14) gave the envelope both values, so the refusal is gone (#153).** `tenantid` carries the
-write's tenant and `authclaims` the caller's roles, and `EventSubscriptions.CallerOf` resolves `@tenant.id` and
+write's tenant and `authclaims` the caller's roles, and `EnvelopeReading.CallerOf` resolves `@tenant.id` and
 `@user.roles` from them, as the writer held them *at the event*. The rule above still decides what happens when an
 envelope cannot answer — now per event rather than per hook: a hook whose condition reads `@tenant.id` is **not
 selected** for an event without `tenantid` (a global row, a tenantless system write, an envelope written before
@@ -854,6 +854,21 @@ all (Alvo never writes an empty list, so `{"roles":[]}` is treated as unreadable
 envelope, as `{{@user.id}}` does for an anonymous write; `{{@user.roles}}` renders the names comma-joined in
 ordinal order. An author-declared template may render `{{@user.roles}}`; only the **default** webhook body strips
 `authclaims`, because nobody chose to post it.
+
+**Tenant roles travel in the same claim, and an after-hook condition can admit one.** When the writer held tenant roles
+in the event's tenant, `authclaims` also carries `"tenantRoles":[...]` (written only when non-empty, so no existing
+envelope moves), and `EnvelopeReading.CallerOf` rebuilds them for the condition beside `roles`, only when the envelope
+names both an identity and a tenant, and never a built-in. Only the ones the applied descriptor still lets a membership
+carry count: recorded ∩ declared ∩ `tenancy.selfService.assignableRoles` (`EventActor.AssignableTenantRoles`, accounts S3
+plan D10a), so a role dropped from `assignableRoles` stops admitting old envelopes on the apply that drops it, and
+without `selfService` no recorded tenant role counts at all. The condition's entity decides whether they fold, by the
+same path rule the request path uses (`relation-rules.md`, *Binding*): on a `tenancy: scoped` entity
+`'dispatcher' in @user.roles` is true for a tenant `dispatcher`; on a global entity it is not. That rule governs
+*authorization decisions*, and an after-hook is not one. So a scoped entity's after-hook whose condition admits a tenant
+role may fire an action that runs **as `System`** against a global entity, and any member of that tenant holding the
+role can cause it. That is the app author's explicit escalation, reviewed where the hook is written, and not the
+caller's authority leaking: the action runs with the author's grant, not the member's. An author who does not want a
+tenant member to trigger it keeps the role test out of the condition.
 
 The PR5a refusal lived at the *after-hook* compile site and **not** in
 `CelTypeChecker`'s profile table, because the reason belongs to the envelope and not to the profile: PR5b's
@@ -1023,6 +1038,16 @@ host stopping records nothing; a delivery reclaimed past its policy's last attem
 running; an envelope gone from the outbox is dead `event-missing`; an envelope whose `tenantid` (or, for `EventActor`,
 `authid`) does not parse is dead `event-unreadable` — never run as a tenantless system or an anonymous caller. Every
 other failure records the exception's **type name**, never its message, and `DeliveryRunFailed` logs the type only.
+
+**An event actor's tenant roles are the ones its membership still holds.** `EventActor` starts from the recorded tenant
+roles still assignable (above); for a person (`authtype` `user`) with a tenant and tenant roles, the runner then reads the
+person's membership in the event's tenant once through `IMembershipResolution`, inside the attempt, and keeps the
+intersection: a member removed since the event runs with no tenant role, a demoted one with the recorded roles still
+held, and a role gained since is never added. Project roles stay as at the event (E8). An API-key actor, a system run
+and an actor with no tenant role read nothing; a failed read fails the attempt, which is retried. Accounts S3 plan D10b:
+the anti-goal *roles that survive their reason*, at one registry read per such delivery, only in a `selfService`
+project. A personal token acts as its person and records `authtype` `user` (accounts S5 D6), so a write made by token is
+narrowed exactly like one made by session; a service token records `api_key` and keeps its recorded roles, as any key.
 
 **Timeouts are enforced, not requested.** The runner awaits the handler with `WaitAsync(Timeout)` (default 30 s, at most
 1 h — a longer one refuses the start, because the lease would overflow), cancels its token and waits at most
