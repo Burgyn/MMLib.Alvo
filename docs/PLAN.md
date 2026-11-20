@@ -135,7 +135,9 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   technician, a billing service token, a removed member, every tenant wall and refresh reuse, with every existing suite
   still green; three guides (*Sign-in and accounts*, *Tenants, members and invitations*, *Tokens for integrators*), a
   generated sign-in reference, and a tenth descriptor skill, `alvo-descriptor-accounts`
-  (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 complete; a whole-stack review precedes the merge.
+  (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are complete as stacked PRs #524, #525, #528, #529,
+  #530, #537 and S6's; a whole-stack review precedes the merge. Follow-ups: #523, #526, #527, #536, #538, #539 and
+  #540 (the v10 assistant eval is owed).
 
 ## 3a. What closed F4
 
