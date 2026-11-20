@@ -1,0 +1,44 @@
+### Olga tries every dead code she might hold. Spec §6.4: a dead invitation answers one way, whatever killed it —
+### otherwise the answer tells a holder that a code was real, or that its owner revoked it.
+
+### Used up: Theo's, accepted once, `maxUses` 1
+# @name UsedUp
+## TEST-EXPECT-STATUS: [404]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{OlgaAccess}}
+Content-Type: application/json
+
+{ "code": "{{TheoInviteCode}}" }
+
+### Revoked by its owner
+# @name Revoked
+## TEST-EXPECT-STATUS: [404]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{OlgaAccess}}
+Content-Type: application/json
+
+{ "code": "{{RevokedInviteCode}}" }
+
+### Expired
+# @name Expired
+## TEST-EXPECT-STATUS: [404]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{OlgaAccess}}
+Content-Type: application/json
+
+{ "code": "{{ExpiredInviteCode}}" }
+
+### Never issued
+# @name Unknown
+## TEST-EXPECT-STATUS: [404]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{OlgaAccess}}
+Content-Type: application/json
+
+{ "code": "{{UnknownInviteCode}}" }
+
+### And she belongs to nothing afterwards
+# @name OlgaUserAfter
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/user
+Authorization: Bearer {{OlgaAccess}}

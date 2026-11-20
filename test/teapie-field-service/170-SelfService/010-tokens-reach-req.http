@@ -1,0 +1,57 @@
+### A token cannot mint a token: minting is something a signed-in person does
+# @name BillingMintsAToken
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/auth/v1/tokens
+X-Alvo-Api-Key: {{BillingToken}}
+Content-Type: application/json
+
+{
+  "name": "billing's own",
+  "kind": "service",
+  "tenantId": "{{AcmeId}}",
+  "roles": ["dispatcher"],
+  "scopes": ["work_orders:read"],
+  "expiresAt": "{{TokenExpiresAt}}"
+}
+
+### Dana mints a personal token of her own
+# @name DanaMintsPersonal
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tokens
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{
+  "name": "dana's laptop",
+  "kind": "personal",
+  "tenantId": "{{AcmeId}}",
+  "scopes": ["work_orders:read"],
+  "expiresAt": "{{TokenExpiresAt}}"
+}
+
+### Neither kind of token manages a project: the Management API names the credential and the fix
+# @name PersonalAtManagement
+## TEST-EXPECT-STATUS: [403]
+GET {{fsBaseUrl}}/management/projects/field-service/descriptor
+X-Alvo-Api-Key: {{DanaMintsPersonal.response.body.$.token}}
+
+###
+# @name ServiceAtManagement
+## TEST-EXPECT-STATUS: [403]
+GET {{fsBaseUrl}}/management/projects/field-service/descriptor
+X-Alvo-Api-Key: {{BillingToken}}
+
+### No credential at all
+# @name AnonymousAtManagement
+GET {{fsBaseUrl}}/management/projects/field-service/descriptor
+
+### A person's access token: Management does not read `Authorization: Bearer` (spec §5.7), so this is anonymous
+# @name BearerAtManagement
+GET {{fsBaseUrl}}/management/projects/field-service/descriptor
+Authorization: Bearer {{DanaAccess}}
+
+### The control: an operator key the descriptor's `access` admits
+# @name AdminAtManagement
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/management/projects/field-service/descriptor
+X-Alvo-Api-Key: {{keyAdmin}}
