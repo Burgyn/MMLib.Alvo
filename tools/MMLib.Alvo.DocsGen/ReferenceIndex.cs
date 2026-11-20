@@ -26,6 +26,8 @@ internal sealed class ReferenceIndexGenerator : IPageGenerator
     [
         ("data-api", "Data API — example (vehicle-registry)",
             "The Data API generated from the vehicle-registry example descriptor; every descriptor produces its own at `GET /openapi/v1.json`.", 4),
+        ("accounts-api", "Sign-in, tenants and tokens API — example (field-service)",
+            "The `/auth/v1` sign-in, self-service tenant, invitation and app-token routes, generated for the field-service example with Google sign-in configured.", 4),
     ];
 
     internal static IReadOnlyList<(string Slug, string Title, string Summary)> Scan(string referenceDir) => Ordered(FilePages(referenceDir));

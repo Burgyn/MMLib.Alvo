@@ -1,0 +1,68 @@
+### Dana mints a service token for her billing integration: it acts in Acme as a dispatcher, and may only read jobs.
+### The secret is in this answer and in no later one.
+# @name DanaMintsBilling
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tokens
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{
+  "name": "billing",
+  "kind": "service",
+  "tenantId": "{{AcmeId}}",
+  "roles": ["dispatcher"],
+  "scopes": ["work_orders:read"],
+  "expiresAt": "{{BillingExpiresAt}}"
+}
+
+### Billing reads Acme's completed jobs. A token carries its tenant, so it sends no X-Alvo-Tenant.
+# @name BillingReadsCompleted
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?status=eq.completed&order=reference.asc
+X-Alvo-Api-Key: {{DanaMintsBilling.response.body.$.token}}
+
+### And tries to write one: a dispatcher may create jobs, a `work_orders:read` token may not
+# @name BillingTriesToWrite
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/work_orders
+X-Alvo-Api-Key: {{DanaMintsBilling.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "reference": "{{OtherJobReference}}8",
+  "title": "Billing writes a job",
+  "status": "new",
+  "priority": 5,
+  "access_code": "ACME-BILLING",
+  "customer_id": "{{AcmeCustomerId}}",
+  "region_id": "{{RegionId}}"
+}
+
+### Theo mints a personal token for his phone's widget: it acts as him, in Acme, read-only. It carries no roles of its
+### own — it holds his tenant roles, read on every request.
+# @name TheoMintsPersonal
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tokens
+Authorization: Bearer {{TheoAccess}}
+Content-Type: application/json
+
+{
+  "name": "phone widget",
+  "kind": "personal",
+  "tenantId": "{{AcmeId}}",
+  "scopes": ["work_orders:read"],
+  "expiresAt": "{{TheoTokenExpiresAt}}"
+}
+
+### His token reads what he reads: his job, and only his
+# @name TheosTokenReads
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+X-Alvo-Api-Key: {{TheoMintsPersonal.response.body.$.token}}
+
+### The tokens Dana minted, as she sees them
+# @name DanaListsTokens
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/auth/v1/tokens
+Authorization: Bearer {{DanaAccess}}

@@ -14,6 +14,7 @@
       "**/InboundWebhooks/Internal/WebhookReceiver.cs",
       "**/Api/Internal/CallerGate.cs",
       "**/Api/Internal/AlvoCallerFilter.cs",
+      "**/Management/Internal/ManagementCallerFilter.cs",
       "**/Api/Internal/AlvoGateWitness.cs"
     ],
     "thresholds": {

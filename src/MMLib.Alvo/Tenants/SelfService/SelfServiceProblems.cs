@@ -63,6 +63,7 @@ internal static class SelfServiceProblems
         MemberChangeStatus.Self => ProblemResultFactory.PersonForbidden(Self),
         MemberChangeStatus.LastOwner => ProblemResultFactory.LastOwner(),
         MemberChangeStatus.PersonalTenant => ProblemResultFactory.MembershipConflict(Personal),
+        MemberChangeStatus.SessionEnded => ProblemResultFactory.BearerUnauthenticated("invalid_token"),
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "A change that was made is no refusal."),
     };
 

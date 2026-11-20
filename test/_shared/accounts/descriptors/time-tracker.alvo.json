@@ -9,6 +9,9 @@
     ],
     "signUp": {
       "mode": "open"
+    },
+    "accessTokens": {
+      "personal": true
     }
   },
   "entities": {

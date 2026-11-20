@@ -1,0 +1,26 @@
+### Olga — signed in, a member of nothing — names Acme. A tenant the person does not belong to refuses the whole
+### principal: never a quieter, tenantless caller who might still read something.
+# @name OlgaNamesAcme
+## TEST-EXPECT-STATUS: [401]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{OlgaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+
+### Olga names no tenant: she acts in none, and a scoped entity answers the tenant guard
+# @name OlgaNamesNothing
+## TEST-EXPECT-STATUS: [403]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{OlgaAccess}}
+
+### The control: the same request by Acme's dispatcher
+# @name DanaNamesAcme
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+
+### A tenantless person still reads global data: `regions.list` asks only that the caller is authenticated
+# @name OlgaReadsRegions
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/regions?code=eq.{{RegionCode}}
+Authorization: Bearer {{OlgaAccess}}

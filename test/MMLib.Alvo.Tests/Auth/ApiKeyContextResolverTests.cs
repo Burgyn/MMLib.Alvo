@@ -23,6 +23,11 @@ public class ApiKeyContextResolverTests
     private static readonly Guid _user = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid _tenant = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
+    private static readonly PolicyCatalogProvider _catalogs = new();
+
+    /// <summary>App-token resolution over an unprimed catalog: no app token of either kind, as before tokens existed.</summary>
+    private static AppTokenPrincipals NoAppTokens => new(new NoTenantMembershipResolution(), _catalogs);
+
     private static IAlvoContextResolver Resolver(Action<AlvoAuthOptions>? configure = null)
     {
         var options = new AlvoAuthOptions();
@@ -40,7 +45,7 @@ public class ApiKeyContextResolverTests
         var store = new InMemoryApiKeyStore(Options.Create(options));
 #pragma warning disable CA1859
         IAlvoContextResolver resolver = new ApiKeyContextResolver(
-            store, RoleCatalog.Create(["editor"]), TimeProvider.System, new TenantResolver(), new PolicyCatalogProvider());
+            store, RoleCatalog.Create(["editor"]), TimeProvider.System, new TenantResolver(), _catalogs, NoAppTokens);
 #pragma warning restore CA1859
         return resolver;
     }
@@ -98,7 +103,8 @@ public class ApiKeyContextResolverTests
             RoleCatalog.Create(["editor"]),
             TimeProvider.System,
             new TenantResolver(),
-            new PolicyCatalogProvider());
+            _catalogs,
+            NoAppTokens);
 
         var principal = await resolver.ResolveAsync(PresentedKey, requestedTenant: null, TestContext.Current.CancellationToken);
 

@@ -33,7 +33,9 @@ internal sealed partial class EfCoreTenantStore
             request.Tenant,
             request.Actor,
             (connection, transaction, actor, token) => InvitedAsync(connection, transaction, request, actor, token),
-            ct).ConfigureAwait(false);
+            ct,
+            request.Session is { } session ? (connection, transaction, token) => SessionLiveAsync(connection, transaction, request, session, token) : null)
+            .ConfigureAwait(false);
 
         return status == MemberChangeStatus.Changed
             ? new CreateInvitationOutcome(status, StoredView(request))
@@ -103,6 +105,17 @@ internal sealed partial class EfCoreTenantStore
             .ConfigureAwait(false);
         return MemberChangeStatus.Changed;
     }
+
+    /// <summary>
+    /// Locks the creator's <paramref name="session"/> if it is still live (stack review A-I1) — before the tenant's bump, the
+    /// order a mint and a refresh take a session and a tenant in.
+    /// </summary>
+    private async Task<bool> SessionLiveAsync(
+        DbConnection connection, DbTransaction transaction, CreateInvitationRequest request, Guid session, CancellationToken ct) =>
+        await ExecuteAsync(
+            connection, transaction, _authTables.LockLiveSessionSql,
+            command => Bind(command, ("@session_id", Id(session)), ("@account_id", Id(request.Actor)), ("@now", Instant(request.Now))),
+            ct).ConfigureAwait(false) == 1;
 
     private async Task<MemberChangeStatus> RevokedAsync(
         DbConnection connection, DbTransaction transaction, InvitationRevocation revocation, StoredMembership actor, CancellationToken ct)

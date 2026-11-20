@@ -27,9 +27,18 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// an owner leaving revokes every live invitation they created, in the same transaction — so a refused demotion or
 /// removal rolls the sweep back with it.
 /// </para>
+/// <para>
+/// <b>A token dies with its reason, in the same transaction</b> (S5 plan D10, spec §7.1): a member removed or leaving loses
+/// their personal tokens for the tenant and the service tokens they minted into it; a demoted owner loses the service tokens
+/// they minted into it. A change of roles revokes nothing — a personal token's roles are the member's live ones, a service
+/// token's are fixed at mint. A mint takes the tenant's lock before it reads the minter's membership, so a mint racing one of
+/// these writes either sees it and is refused, or is committed first and swept.
+/// </para>
 /// </remarks>
 internal sealed partial class EfCoreTenantStore
 {
+    private delegate Task<bool> SessionGate(DbConnection connection, DbTransaction transaction, CancellationToken ct);
+
     private delegate Task<MemberChangeStatus> Judgement(
         DbConnection connection, DbTransaction transaction, StoredMembership actor, CancellationToken ct);
 
@@ -184,11 +193,21 @@ internal sealed partial class EfCoreTenantStore
             if (!isOwner && member.IsOwner)
             {
                 await SweepInvitationsAsync(connection, transaction, update.Tenant, update.Member, update.Now, ct).ConfigureAwait(false);
+                await SweepTokensAsync(
+                    connection, transaction, _appTokens.RevokeMintedServiceSql, update.Tenant, update.Member, update.Now, ct)
+                    .ConfigureAwait(false);
             }
         }
     }
 
-    /// <summary>Removes <paramref name="member"/> and, when they were an owner, sweeps the invitations they created (D6).</summary>
+    /// <summary>
+    /// Removes <paramref name="member"/>, revokes their personal tokens for the tenant and the service tokens they minted into
+    /// it (S5 D10), and, when they were an owner, sweeps the invitations they created (D6).
+    /// </summary>
+    /// <remarks>
+    /// Lock order: every sweep touches invitations before tokens (as the ban and the demotion do), so two sweeps of one
+    /// person never wait on each other's rows in opposite order (a PostgreSQL 40P01).
+    /// </remarks>
     private async Task RemoveAsync(
         DbConnection connection, DbTransaction transaction, MemberRemoval removal, StoredMembership member, CancellationToken ct)
     {
@@ -199,16 +218,32 @@ internal sealed partial class EfCoreTenantStore
         {
             await SweepInvitationsAsync(connection, transaction, removal.Tenant, removal.Member, removal.Now, ct).ConfigureAwait(false);
         }
+
+        await SweepTokensAsync(
+            connection, transaction, _appTokens.RevokeForMemberSql, removal.Tenant, removal.Member, removal.Now, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Runs one of <see cref="AppTokenTables"/>' member sweeps (S5 D10) over <paramref name="member"/> in <paramref name="tenant"/>.</summary>
+    private static Task<int> SweepTokensAsync(
+        DbConnection connection, DbTransaction transaction, string sweep, TenantId tenant, UserId member, DateTimeOffset now,
+        CancellationToken ct) =>
+        ExecuteAsync(connection, transaction, sweep, command => BindMemberKey(command, tenant, member, ("@now", Instant(now))), ct);
+
     /// <summary>
-    /// One membership write: bump the tenant's version, read the actor's membership, then <paramref name="judge"/> — in one
-    /// transaction, committed only on <see cref="MemberChangeStatus.Changed"/>, so a refusal leaves even the bump undone.
+    /// One membership write: the actor's live session when <paramref name="session"/> is given, bump the tenant's version,
+    /// read the actor's membership, then <paramref name="judge"/> — in one transaction, committed only on
+    /// <see cref="MemberChangeStatus.Changed"/>, so a refusal leaves even the bump undone.
     /// </summary>
-    private Task<MemberChangeStatus> MemberWriteAsync(TenantId tenant, UserId actor, Judgement judge, CancellationToken ct) =>
+    private Task<MemberChangeStatus> MemberWriteAsync(
+        TenantId tenant, UserId actor, Judgement judge, CancellationToken ct, SessionGate? session = null) =>
         InTransactionAsync(
             async (connection, transaction, token) =>
             {
+                if (session is not null && !await session(connection, transaction, token).ConfigureAwait(false))
+                {
+                    return MemberChangeStatus.SessionEnded;
+                }
+
                 if (await ExecuteAsync(
                     connection, transaction, _tables.BumpVersionSql, command => Bind(command, ("@tenant_id", Id(tenant))), token)
                     .ConfigureAwait(false) != 1)

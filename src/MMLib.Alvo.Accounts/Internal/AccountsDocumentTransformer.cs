@@ -78,6 +78,12 @@ internal sealed class AccountsDocumentTransformer(IOptions<AlvoAccountsOptions> 
             SelfServiceEndpoints.InvitationsTag,
             "Invitations by code: anyone holding a code previews what it offers, and a signed-in person accepts it to join "
             + "the tenant. The code travels only in request bodies. Every code that admits nobody answers the same 404.");
+        DescribeTag(
+            document,
+            SelfServiceEndpoints.TokensTag,
+            "App tokens: a signed-in person mints a personal token that acts as them, or a service token that acts as a tenant "
+            + "they own, and sees the credential once. A token never mints another and never manages a project. Each route answers "
+            + "404 `feature-disabled` naming the descriptor key that enables it while the descriptor leaves it off.");
     }
 
     private static void DescribeTag(OpenApiDocument document, string name, string description)

@@ -10,6 +10,7 @@
   "reserved-users-entity.json": { "pointer": "#/entities/users" },
   "self-service-admin-assignable.json": { "pointer": "/tenancy/selfService/assignableRoles/0", "messageContains": "built-in role", "refusedBy": "apply" },
   "self-service-without-tenancy.json": { "pointer": "/tenancy/selfService", "messageContains": "tenancy.enabled", "refusedBy": "apply" },
+  "service-tokens-without-shared-tenants.json": { "pointer": "/auth/accessTokens/service", "messageContains": "createTenants", "refusedBy": "apply" },
   "sequence-two-numbers.json": { "pointer": "#/entities/orders/fields/code/sequence/format", "messageContains": "pattern" },
   "sequence-unknown-period.json": { "pointer": "#/entities/orders/fields/number/sequence/period" },
   "sequence-windows-time-zone.json": { "pointer": "#/entities/orders/fields/number/sequence/timeZone", "messageContains": "pattern" },

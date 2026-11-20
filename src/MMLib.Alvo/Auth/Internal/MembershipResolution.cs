@@ -10,8 +10,8 @@ namespace MMLib.Alvo.Auth.Internal;
 /// <remarks>
 /// <para>
 /// <b>One decision, two readers</b> (S3 plan D4). The rules are <c>MembershipRules</c>'; this port reads the membership
-/// from the registry (<c>RegistryMembershipResolution</c>) for a caller with no session read — event actors, later
-/// personal tokens. The person resolver does not call it: it folds the membership into its one session read
+/// from the registry (<c>RegistryMembershipResolution</c>) for a caller with no session read — event actors and
+/// personal tokens (<c>AppTokenPrincipals</c>). The person resolver does not call it: it folds the membership into its one session read
 /// (spec §14 AC2) and decides by the same rules, so a refused tenant still costs it no read.
 /// </para>
 /// <para>

@@ -48,7 +48,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// shapes, the membership left-joined onto the live session.
 /// </para>
 /// <para>
-/// The tables — the tenant registry's too, which the personal tenant, the invitation and the caller read reach — are
+/// The tables — the tenant registry's and the tokens table too, which the personal tenant, the invitation, the caller read
+/// and the ban's sweep reach — are
 /// created once per process by <see cref="OnceDdl"/> (Ruling 47) for a composition that never booted;
 /// <c>SystemSchemaInitializer</c> creates them at boot.
 /// </para>
@@ -59,6 +60,7 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
     private readonly AuthTables _tables;
     private readonly TenantTables _tenantTables;
     private readonly InvitationTables _invitationTables;
+    private readonly AppTokenTables _appTokenTables;
     private readonly SecretCipher? _cipher;
     private readonly OnceDdl _ddl;
 
@@ -77,6 +79,7 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
         _tables = new AuthTables(options.SchemaPrefix);
         _tenantTables = new TenantTables(options.SchemaPrefix);
         _invitationTables = new InvitationTables(options.SchemaPrefix);
+        _appTokenTables = new AppTokenTables(options.SchemaPrefix);
         _cipher = cipher;
         _ddl = new OnceDdl(EnsureTablesAsync);
     }
@@ -438,6 +441,7 @@ internal sealed partial class EfCoreAccountStore : IAccountStore
                 await _tables.EnsureAsync(connection, ct).ConfigureAwait(false);
                 await _tenantTables.EnsureAsync(connection, ct).ConfigureAwait(false);
                 await _invitationTables.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await _appTokenTables.EnsureAsync(connection, ct).ConfigureAwait(false);
             }
         }
     }

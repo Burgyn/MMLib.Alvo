@@ -124,6 +124,9 @@
     ]
   },
   {
+    file: service-tokens-without-shared-tenants.json
+  },
+  {
     file: state-machine-no-transitions.json,
     failures: [
       {

@@ -55,8 +55,9 @@ fixed: an entity added through the Management API or the dashboard gets no route
 
 Every generated route is a minimal-API endpoint, and every one takes the same steps:
 
-- **Authenticate.** The API key header resolves to a caller: a user id, roles and at most one tenant. No key means the
-  anonymous caller, judged by the same rules. An unusable key is a `401`.
+- **Authenticate.** The API key header, or a signed-in person's `Authorization: Bearer` token, resolves to a caller:
+  a user id, roles and at most one tenant. No credential means the anonymous caller, judged by the same rules. An
+  unusable one is a `401`.
 - **Scope.** The key's scopes must cover the entity and the operation, or the answer is `403 out-of-scope`.
 - **Decide.** The policy engine resolves the operation's rule, the tenant scope and the field masks into a decision,
   or refuses it with `403 forbidden`.

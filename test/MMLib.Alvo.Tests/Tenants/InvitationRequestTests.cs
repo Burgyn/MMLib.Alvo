@@ -104,6 +104,18 @@ public sealed class InvitationRequestTests
     }
 
     [Fact]
+    public void The_expiry_hint_is_an_instant_the_same_request_accepts()
+    {
+        var plain = Validate("""{"roles":[],"expiresAt":"x"}""").Violations.ShouldHaveSingleItem().FixSuggestion;
+        var owner = Validate("""{"roles":[],"isOwner":true,"expiresAt":"x"}""").Violations.ShouldHaveSingleItem().FixSuggestion;
+
+        plain.ShouldBe("Send e.g. \"2026-12-13T09:00:00Z\", or leave expiresAt out for 7 days from now.", "now + 30 days");
+        owner.ShouldBe("Send e.g. \"2026-11-20T09:00:00Z\", or leave expiresAt out for 7 days from now.", "now + 7 days");
+        Valid($$"""{"roles":[],"expiresAt":"{{Example(plain)}}"}""").ExpiresAt.ShouldBe(_now.AddDays(30));
+        Valid($$"""{"roles":[],"isOwner":true,"expiresAt":"{{Example(owner)}}"}""").ExpiresAt.ShouldBe(_now.AddDays(7));
+    }
+
+    [Fact]
     public void Every_violation_of_one_body_is_reported_together()
     {
         Pointers("""{"roles":["admin"],"maxUses":0,"expiresAt":"x","email":"y"}""")
@@ -133,6 +145,8 @@ public sealed class InvitationRequestTests
     }
 
     private static string[] Pointers(string json) => [.. Validate(json).Violations.Select(violation => violation.Pointer)];
+
+    private static string Example(string? hint) => hint.ShouldNotBeNull().Split('"')[1];
 
     private static (InvitationRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(string json)
     {

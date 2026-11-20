@@ -179,7 +179,7 @@ public sealed class InvitationRoutesTests
             await TenantRoutesTests.FeatureDisabledAsync(response, SelfServiceProblems.InvitationsKey);
         }
 
-        await team.World.ReapplyAsync(descriptor => descriptor["tenancy"]!.AsObject().Remove("selfService"));
+        await team.World.ReapplyAsync(AccountsWorld.WithoutSelfService);
 
         foreach (var request in Requests(team.Tenant.Value, Guid.NewGuid()))
         {

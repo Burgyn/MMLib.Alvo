@@ -22,10 +22,14 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// </para>
 /// </remarks>
 /// <param name="Person">The signed-in person.</param>
+/// <param name="Session">
+/// The session the person's Bearer token came from, carried into every write that hands out a credential or power, so
+/// the store refuses it once that session has ended (stack review A-I1); <see langword="null"/> from a host's own resolver.
+/// </param>
 /// <param name="Policy">The applied self-service policy.</param>
 /// <param name="Store">The tenant registry.</param>
 /// <param name="Http">The request.</param>
-internal sealed record SelfServiceCall(UserId Person, SelfServicePolicy Policy, ITenantStore Store, HttpContext Http)
+internal sealed record SelfServiceCall(UserId Person, Guid? Session, SelfServicePolicy Policy, ITenantStore Store, HttpContext Http)
 {
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.General);
 
@@ -52,7 +56,8 @@ internal sealed record SelfServiceCall(UserId Person, SelfServicePolicy Policy, 
         var policy = PolicyOf(http);
         return feature(policy) is { } disabled
             ? (null, disabled)
-            : (new SelfServiceCall(person!.Value, policy, http.RequestServices.GetRequiredService<ITenantStore>(), http), null);
+            : (new SelfServiceCall(
+                person!.Value.User, person.Value.Session, policy, http.RequestServices.GetRequiredService<ITenantStore>(), http), null);
     }
 
     /// <summary>

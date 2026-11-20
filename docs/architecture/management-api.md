@@ -306,6 +306,18 @@ role anyone can be given in their own tenant is never a management role to begin
 a tenant header on a Management route gets exactly the anonymous answer
 (`TenancyEngineFacts.A_tenant_role_never_reaches_management`, both engines).
 
+**Personal and service tokens never manage a project** (accounts S5 D9, which closes S1 D8). They travel on
+`X-Alvo-Api-Key` like any key, so `ManagementCallerFilter` resolves one first — an unusable token is the ordinary 401 of
+any key — and then refuses a principal whose key id carries an app-token prefix (`alvo_pat_`, `alvo_svc_`) with **403**
+`forbidden` and one fixed detail: *"Personal and service tokens are app credentials and never manage a project. Use an
+operator session or a configured API key."* That holds even when the token's roles would satisfy an `access` level: a
+token is something a person or an owner hands an integration, and handing it out must never hand out the project's
+configuration. The prefix is a sound test because both prefixes are reserved — a configured dev key cannot carry one —
+so `AlvoPrincipal` did not have to grow a "kind". A Bearer sent beside a token is ignored here as always, so the token
+decides. In-process `IAlvoManagement` callers publish their own principal, as before. Pinned by
+`AppTokenManagementTests` (every route, read and write) and, for a `dispatcher` service token over HTTP on both
+engines, `AppTokenEngineFacts.A_service_token_s_tenant_role_never_reaches_global_data_or_management`.
+
 ## D3: `If-Match` carries `revision`, not an `ETag`
 
 The Data API's optimistic concurrency is a strong `ETag` over a row version. The Management API's is an
@@ -479,6 +491,8 @@ pinned over the wire by
 `ManagementAccessTests.A_key_scoped_to_one_entity_still_reaches_management_because_scopes_do_not_govern_configuration`.
 #146's review recorded this as #212's question to decide; this is the answer. Revisit if a
 management-shaped scope is ever wanted, and note it would then need a default for every key already issued.
+A personal or service token is the exception by kind, not by scope: whatever its roles, it is refused 403 (above,
+accounts S5 D9).
 
 ## `info` reports the data provider, not the engine
 
@@ -583,7 +597,11 @@ and revokes every live session of it (reason `disabled`) **in one transaction** 
 person's next request with an access token is `401 invalid_token`, their next refresh `invalid_grant`, and their next
 sign-in `403 sign-in-refused`. `{"disabled": false}` on a disabled account clears the stamp and lets them sign in
 again, and revokes every session the account still has in the same transaction: a clean slate, so a ban is a
-force-logout even for a session the ban's own revocation never saw, and the person signs in afresh. On an account that
+force-logout even for a session the ban's own revocation never saw, and the person signs in afresh. The ban's
+transaction also revokes every personal and service token the account minted (accounts S5 D10) — the service half goes
+beyond spec §7.1, because a banned owner who kept a token's secret would otherwise keep acting as the tenant — and
+enabling the account revives none: the person mints new ones
+(`AppTokenEngineFacts.A_banned_person_s_tokens_die_and_stay_dead`, both engines). On an account that
 is not disabled it is a no-op — still `204`, and nobody is logged out. The success answer is `204`; an account id that
 does not exist is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
 must not be the permissive one. The ban takes effect on the very next request, not when the access token expires:

@@ -189,7 +189,7 @@ public sealed class PersonResolverTests
         var tenant = await SharedTenantAsync(world, await world.UserIdAsync(access));
         (await WhoAmIAsync(world, access, tenant))["tenant"]!.GetValue<Guid>().ShouldBe(tenant.Value);
 
-        await world.ReapplyAsync(descriptor => descriptor["tenancy"]!.AsObject().Remove("selfService"));
+        await world.ReapplyAsync(AccountsWorld.WithoutSelfService);
         using var named = await world.AsPersonAsync(HttpMethod.Get, "/whoami", access, tenant: tenant.Value.ToString());
         var unnamed = await WhoAmIAsync(world, access);
 

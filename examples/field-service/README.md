@@ -24,6 +24,8 @@ export ALVO_FS_TECH_NORTH_SECRET=$(openssl rand -hex 16)
 export ALVO_FS_SPARE_NORTH_SECRET=$(openssl rand -hex 16)
 export ALVO_FS_DISPATCHER_SOUTH_SECRET=$(openssl rand -hex 16)
 export ALVO_FS_ADMIN_SECRET=$(openssl rand -hex 16)
+# The key sign-in seals what it stores with (32 random bytes in base64), handed over as a Compose secret.
+export ALVO_FS_SECRETS_KEY=$(openssl rand -base64 32)
 
 docker compose --env-file examples/field-service/demo-identities.env \
   -f docker-compose.field-service.yml up --build --wait
@@ -173,11 +175,82 @@ Tenant ids and user ids live in `demo-identities.env` and are **not** secrets: a
 entity has to carry `tenant_id`, and `assigned_to` names a technician by user id, so no test can be
 written without them. The five key secrets are credentials and are never committed.
 
+## Self-service: people sign in, found a company and invite their team
+
+The dev keys above are the operator's demo. People sign in instead, and run their own company here.
+Dana signs in with Google and creates *Acme Repairs*, which makes her its owner and a `dispatcher`. She invites Theo
+as a `technician`, and he previews the invitation and accepts it. She creates a customer and two jobs, one assigned
+to Theo, and he sees only his, starts it and completes it. She mints a read-only `billing` service token that reads
+completed jobs and cannot write, and Theo mints a personal token that reads what he reads. When she removes Theo from
+Acme, his next request there and his personal token are refused, while he stays signed in and billing keeps reading.
+`test/teapie-field-service/170-SelfService` runs this story against the stack, case by case (`002`–`005`).
+
+**The descriptor keys.**
+
+```json
+"auth": {
+  "providers": ["local", "google"],
+  "signUp": { "mode": "open" },
+  "accessTokens": { "personal": true, "service": true }
+},
+"tenancy": {
+  "enabled": true,
+  "selfService": {
+    "createTenants": { "creatorRoles": ["dispatcher"] },
+    "invitations": true,
+    "assignableRoles": ["dispatcher", "technician"]
+  }
+}
+```
+
+There is no `personalTenant`. A field-service person works for a company, so a person who sends no `X-Alvo-Tenant`
+acts in no tenant. A read of a scoped entity then answers `403 forbidden` (the tenant guard), not an empty page. A
+dispatcher who founded a tenant is a dispatcher **there**: `regions.create` still names only `admin`, so she cannot
+write the global reference data.
+
+**How this stack signs people in.** The Google provider is pointed at a **test issuer** that the `sink` serves:
+
+- `Alvo__Accounts__Providers__Google__Authority: http://localhost:9090/oidc`, with `AllowHttpMetadata: "true"`.
+- `ASPNETCORE_ENVIRONMENT: Development`, because Alvo refuses `AllowHttpMetadata` in every other environment.
+- `Alvo__Accounts__Issuer` is unset, so Alvo names its own tokens after the URL a request reached
+  (`http://localhost:8081/auth/v1`).
+
+The ID tokens say `iss: https://accounts.google.com`, as Google's do, but only the keys this authority publishes
+verify them. The signing key is **made per machine and registered per run**: `_shared/TestIssuer.csx` creates it on
+first use under `$TMPDIR/alvo-field-service-e2e/`, and every `170-SelfService` run publishes its public half to the
+sink before the first sign-in. Nothing private is committed. A stack you start by hand therefore trusts a key only
+once a `170` run has published it, and only the suite holds that key, so on this stack people are signed in by the
+suite. Point the provider at real Google (below) to sign in yourself.
+
+Each sign-in is an RFC 8693 token exchange. A client sends the Google ID token as `subject_token` to
+`POST /auth/v1/token` and receives a 15-minute access token (`Authorization: Bearer …`) and a rotating refresh
+token. The stack also raises the per-IP rate budgets (Token 120, Create 30, Invitations 120 a minute), because one
+suite run comes from one address. The limits themselves are tested in process.
+
+**Pointing it at real Google.**
+
+1. Create a *Web application* OAuth client in Google Cloud, and put its client id in `ALVO_FS_GOOGLE_CLIENT_ID`.
+2. Delete the `Authority` and `AllowHttpMetadata` lines. Google's preset then reads Google's own discovery document
+   and keys.
+3. Run the container as `Production` (drop `ASPNETCORE_ENVIRONMENT`), with `Alvo__Accounts__Issuer` set to the
+   public `https://…/auth/v1` your clients reach.
+
+Your page uses *Sign in with Google* and sends the `credential` it receives (the ID token) to `/auth/v1/token`.
+
+**The dev keys keep working beside sign-in.** The other suites drive the stack through them unchanged. A person and
+a key are two credentials over the same rules.
+
+**A scoped create still echoes its tenant.** A person names the tenant she acts in with `X-Alvo-Tenant`, and a
+create on a scoped entity carries the same id as `tenant_id` in its body. Alvo checks the column, it does not fill
+it in. Leave it out and the answer is `403 The write was rejected by policy.`, which names no field
+(`170-SelfService/003` pins it; [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538) tracks the fix).
+
 ## Worth knowing before you write against this
 
 - **A create on a tenant-scoped entity must carry `tenant_id` explicitly.** Nothing stamps it from the
   caller's context; the synthesized tenant scope's `WITH CHECK` then judges the value. Omit it and the
-  answer is `403 The write was rejected by policy.` — correct, but it names no field.
+  answer is `403 The write was rejected by policy.` — correct, but it names no field
+  ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)).
 - **`job_number` and `on_site_minutes` are Alvo's to write.** A create or update that sends either is
   refused `403`, with a detail that says why; read them back from the response.
 - **The dashboard's field rename does not carry everything yet.** Renaming a field a transition's `when`, a timer,

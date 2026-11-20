@@ -191,7 +191,7 @@ internal sealed record InvitationRequest(
             return now + DefaultLifetime;
         }
 
-        var instant = value.ValueKind == JsonValueKind.String ? InstantOf(SelfServiceBody.TextOf(value)) : null;
+        var instant = value.ValueKind == JsonValueKind.String ? SelfServiceBody.InstantOf(SelfServiceBody.TextOf(value)) : null;
         var latest = now + (isOwner ? OwnerLifetime : MaxLifetime);
         if (instant is { } expires && expires > now && expires <= latest)
         {
@@ -204,20 +204,9 @@ internal sealed record InvitationRequest(
             isOwner
                 ? "expiresAt of an invitation that makes an owner is an RFC 3339 instant with an offset, in the future and at most 7 days away."
                 : "expiresAt is an RFC 3339 instant with an offset, in the future and at most 30 days away.",
-            "Send e.g. \"2026-12-01T09:00:00Z\", or leave expiresAt out for 7 days from now."));
+            $"Send e.g. \"{SelfServiceBody.ExampleInstant(latest)}\", or leave expiresAt out for 7 days from now."));
         return now;
     }
-
-    private static DateTimeOffset? InstantOf(string? text) =>
-        text is not null
-        && HasOffset(text)
-        && DateTimeOffset.TryParseExact(
-            text, ["yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK", "yyyy-MM-dd'T'HH:mm:ssK"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant)
-            ? instant
-            : null;
-
-    private static bool HasOffset(string text) =>
-        text.EndsWith('Z') || (text.Length > 6 && text[^6] is '+' or '-' && text[^3] == ':');
 
     private static AlvoViolation Refusal(string member, string code, string message, string hint) =>
         new(PayloadViolations.PointerTo(member), code, message, hint);

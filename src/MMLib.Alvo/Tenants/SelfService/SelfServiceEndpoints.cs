@@ -7,7 +7,7 @@ namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>
 /// Maps the self-service routes (spec §6.3) under a sign-in group: <c>{prefix}/tenants…</c>, tagged <see cref="Tag"/>, and
-/// <c>{prefix}/invitations/…</c>, tagged <see cref="InvitationsTag"/>.
+/// <c>{prefix}/invitations/…</c>, tagged <see cref="InvitationsTag"/>, and <c>{prefix}/tokens…</c>, tagged <see cref="TokensTag"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,8 +22,8 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <para>
 /// <b>Every route carries the core's CORS filter first, then <c>Cache-Control: no-store</c></b> — each answer is about a
 /// person — so a refusal is readable from an allowed origin and never cached; creating a tenant is charged the
-/// <see cref="AlvoRateLimit.Create"/> budget after both, and every invitation route the one
-/// <see cref="AlvoRateLimit.Invitations"/> budget (S4 plan D13).
+/// <see cref="AlvoRateLimit.Create"/> budget after both — minting a token is charged the same one (S5 plan D15) — and every
+/// invitation route the one <see cref="AlvoRateLimit.Invitations"/> budget (S4 plan D13).
 /// </para>
 /// </remarks>
 internal static class SelfServiceEndpoints
@@ -67,7 +67,23 @@ internal static class SelfServiceEndpoints
     /// <summary>The operation id of <c>DELETE {prefix}/tenants/{tenantId}/invitations/{invitationId}</c>.</summary>
     internal const string RevokeInvitationOperationId = "tenants.revokeInvitation";
 
+    /// <summary>The OpenAPI tag the token route carries.</summary>
+    internal const string TokensTag = "tokens";
+
+    /// <summary>The operation id of <c>POST {prefix}/tokens</c>.</summary>
+    internal const string CreateTokenOperationId = "tokens.create";
+
+    /// <summary>The operation id of <c>GET {prefix}/tokens</c>.</summary>
+    internal const string ListTokensOperationId = "tokens.list";
+
+    /// <summary>The operation id of <c>DELETE {prefix}/tokens/{keyId}</c>.</summary>
+    internal const string RevokeTokenOperationId = "tokens.revoke";
+
     private const string Collection = "/tenants";
+
+    private const string Tokens = "/tokens";
+
+    private const string Token = Tokens + "/{keyId}";
 
     private const string Tenant = Collection + "/{tenantId:guid}";
 
@@ -104,6 +120,19 @@ internal static class SelfServiceEndpoints
             RenameOperationId);
         MapMembers(group, cors);
         MapInvitations(group, cors, limits.For(AlvoRateLimit.Invitations));
+        MapTokens(group, cors, limits);
+    }
+
+    private static void MapTokens(RouteGroupBuilder group, AlvoCors cors, AlvoRateLimits limits)
+    {
+        Protect(group.MapPost(Tokens, (Func<HttpContext, Task<IResult>>)TokenRoutes.CreateAsync), cors, CreateTokenOperationId, TokensTag)
+            .AddEndpointFilter(limits.For(AlvoRateLimit.Create));
+        Protect(group.MapGet(Tokens, (Func<HttpContext, Task<IResult>>)TokenRoutes.ListAsync), cors, ListTokensOperationId, TokensTag);
+        Protect(
+            group.MapDelete(Token, static (HttpContext http, string keyId) => TokenRoutes.RevokeAsync(http, keyId)),
+            cors,
+            RevokeTokenOperationId,
+            TokensTag);
     }
 
     private static void MapMembers(RouteGroupBuilder group, AlvoCors cors)

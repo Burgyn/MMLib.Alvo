@@ -1046,7 +1046,8 @@ intersection: a member removed since the event runs with no tenant role, a demot
 held, and a role gained since is never added. Project roles stay as at the event (E8). An API-key actor, a system run
 and an actor with no tenant role read nothing; a failed read fails the attempt, which is retried. Accounts S3 plan D10b:
 the anti-goal *roles that survive their reason*, at one registry read per such delivery, only in a `selfService`
-project.
+project. A personal token acts as its person and records `authtype` `user` (accounts S5 D6), so a write made by token is
+narrowed exactly like one made by session; a service token records `api_key` and keeps its recorded roles, as any key.
 
 **Timeouts are enforced, not requested.** The runner awaits the handler with `WaitAsync(Timeout)` (default 30 s, at most
 1 h — a longer one refuses the start, because the lease would overflow), cancels its token and waits at most

@@ -173,6 +173,11 @@ operator grants). Requires `tenancy.enabled: true`.
 | `service` | boolean | `false` | A tenant owner may mint tokens that act as the tenant. Requires `selfService`. |
 | `maxLifetimeDays` | integer 1–365 | `90` | The longest expiry a token may ask for. |
 
+**Recorded deviation (S5 plan D8):** apply refuses `service: true` without `tenancy.selfService.createTenants`, not
+only without `selfService` — stricter than the table's "Requires `selfService`", which it implies. A service token acts
+as a *shared* tenant: a personal tenant has exactly one member forever (§6.1), so a token there would outlive nothing a
+personal token does not, and minting one for a personal tenant is refused (409) as well.
+
 **Apply-time refusals** (structured, with a fix): `selfService` without tenancy; `invitations` without
 `createTenants`; an `assignableRoles` entry not declared in `auth.roles` or naming a built-in role;
 `personalTenant.roles`/`creatorRoles` not ⊆ `assignableRoles`; **an `assignableRoles` role named in the
@@ -593,6 +598,12 @@ keys. Key ids are prefixed `alvo_pat_…` / `alvo_svc_…` for secret scanning. 
 compatibly with its kind and minter; a personal token stores no roles, and its resolution goes through
 membership resolution rather than `RoleNames`.
 
+**Recorded deviation (S5 plan D10):** a service token also dies when its minter's **account is disabled** — beyond the
+table's "removed or demoted". A banned owner who kept a service token's secret would otherwise keep acting as the tenant
+(§16 B4's case). The ban revokes every token the account minted in its own transaction, and enabling the account
+revives none. Every death, of either kind, is a revocation stamp written in the transaction that kills its reason, so
+a person invited back does not get their old tokens back.
+
 ### 7.2 The self-service routes
 
 | Route | Who |
@@ -603,6 +614,10 @@ membership resolution rather than `RoleNames`.
 
 `expiresAt` is required and ≤ `maxLifetimeDays`. The secret is answered once and stored as its SHA-256.
 Scopes naming an entity the descriptor lacks are refused with the list of entities.
+
+**Recorded deviation (S5 plan D1):** the routes are mapped under the sign-in prefix, `{authPrefix}/tokens` (default
+`/auth/v1/tokens`), not under `{prefix}` — as S3 and S4 did for §6.3's routes. `/api/tokens` would collide with an
+entity named `tokens`, and minting needs a person's session, which exists only where sign-in is mapped.
 
 ### 7.3 Abuse limits and CORS
 
@@ -740,6 +755,27 @@ existing test**: API keys keep working beside sign-in, which is itself a propert
   invitations answering the same 404; a personal token dying with its owner's membership; a token trying
   to mint a token; a personal token refused by the Management API.
 
+**Recorded decisions (S6 plan, `2026-11-13-accounts-s6-demo-docs.md`).**
+- **D1 — sign-in lives on the standalone stack only.** The embedded sample (`samples/MMLib.Alvo.Samples.FieldService`)
+  serves the same descriptor with no `AddAlvoAccounts`: it logs the boot warning and behaves as before. It maps no
+  `.WithAlvoCaller()` endpoint — dispatch is a mapped command, which takes a token within its entity's scopes — so
+  nothing there is promised to personal or service tokens either (#536 is the general rule).
+- **D2 — `regions` is not touched.** Its rules already name only `admin` for a create and admit no update or delete,
+  and other collections pin that shape; so "a self-made dispatcher cannot write `regions`" is pinned as a `403` beside
+  the admin's `201`. The descriptor gains exactly the keys above, keeps `local`, and has **no `personalTenant`**: a
+  field-service person works in a company, so a request naming no tenant acts in none.
+- **D4 — deviation from "the matching test private key (committed under `test/`)" and the static JWKS above.** No
+  private key is committed. The suite makes an RSA key on the machine that runs it (kept under `$TMPDIR`, `kid` = its
+  RFC 7638 thumbprint) and registers the public half in the sink through WireMock's admin API at the start of every
+  run; only the discovery document is a committed mapping. Alvo refetches a provider's key set for an unknown `kid` at
+  most once per five minutes, which is why the key is kept per machine rather than made per run. A public repository
+  thus holds no private key at all, and a hand-started stack still signs people in once a run has published the key.
+- **D5 — the stack runs Development with `Alvo:Accounts:Issuer` unset**, so tokens name the URL a request reached;
+  only the accounts package reads the environment (§11.2).
+- **D7 — wider per-IP rate budgets on the demo stack:** `Token` 120, `Create` 30, `Invitations` 120 (the plan said 60;
+  one `170-SelfService` run spends about 31 invitation calls). The limits themselves are pinned in process. The load
+  stack resets all of the demo's sign-in configuration, so load still measures the host its baselines describe.
+
 ## 13. Documentation
 
 Written for a person reading top to bottom — each page opens with what you can build, shows the smallest
@@ -757,6 +793,15 @@ working thing, then explains why it behaves as it does:
 - **`docs/architecture/accounts.md`** — the contributor view: tables, the resolution pipeline, role
   provenance, the invariants and the tests that hold them, the deviations of §4.
 - `examples/field-service/README.md` gains a *Self-service* section; `docs/PLAN.md` records the initiative.
+
+**Recorded decisions (S6 plan).**
+- **D12 — the guides' exchanges are hand-written, and held three ways.** Capturing a sign-in would need a test issuer
+  inside DocsGen, a shipped tool. Instead every descriptor a guide shows is a snippet `DocsSnippetTests` applies; a fact
+  (`AccountsReferenceTests`) checks every `METHOD /auth/v1/…` a guide names against the generated reference; and each
+  worked flow names the `170-SelfService` case that runs it against the real container.
+- **D13 — the routes' reference comes from OpenAPI.** DocsGen boots a second in-process host over the field-service
+  descriptor with Google configured (a placeholder client id, an `https` issuer, no network) and publishes only the
+  paths under `/auth/v1`, as `reference/accounts-api`, beside the Data API's.
 
 ## 14. Acceptance criteria
 

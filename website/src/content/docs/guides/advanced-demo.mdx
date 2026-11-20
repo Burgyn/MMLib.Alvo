@@ -34,10 +34,40 @@ runs in the standalone image with no code at all, and `test/teapie-field-service
 | Relation rule, lookup check | A technician sees a visit through its job; no visit on a closed job | [Rules over relations](/extending/relation-rules/) |
 | Rollup | Minutes on site summed onto the job | [Computed fields and rollups](/guides/computed-and-rollups/) |
 | Automation + webhook | A completed purchase-order job is posted to billing, without the excluded fields | [Automation rules](/extending/automation/) |
+| Self-service | People sign in with Google, found a company, invite a technician and mint tokens for an integration | [Sign-in and accounts](/guides/sign-in/), [Tenants, members and invitations](/guides/tenants-and-invitations/), [Tokens for integrators](/guides/tokens/) |
 
 Run it from the published image with
 `ALVO_DESCRIPTOR=/alvo/examples/field-service/field-service.alvo.json docker compose -f docker-compose.quickstart.yml up --wait`,
 or on its own stack with the five demo keys — see [Examples](/examples/).
+
+## Self-service: people run their own companies
+
+The five demo keys are the operator's view. The same stack also lets people sign in and run a company of their own,
+and `test/teapie-field-service/170-SelfService` plays the whole story against it:
+
+1. Dana signs in with Google and creates *Acme Repairs*, which makes her its owner and a `dispatcher`.
+2. She invites Theo as a `technician`. He previews the invitation without signing in, signs in, and accepts it.
+3. She creates a customer and two jobs, one assigned to Theo. Theo sees only his, starts it and completes it: a
+   tenant role going through the state machine.
+4. She mints a `billing` service token that reads completed jobs and cannot write one. Theo mints a personal token
+   that reads what he reads.
+5. She removes Theo. His next request in Acme and his personal token are refused, while he stays signed in and
+   billing keeps reading.
+
+The suite then tries the walls: a tenant you are not in, a role from one company used in another, a self-made
+dispatcher writing the global `regions`, invitations that are expired, revoked or used up, a token minting a token,
+a token at the Management API, and, last, a refresh token reused after its grace window, which ends the session. The
+descriptor gains only the keys the guides teach: `auth.signUp`, `auth.accessTokens` and `tenancy.selfService`.
+
+**How the stack signs people in.** Google's own provider is pointed at a **test issuer** the stack's mock server
+serves, with `Authority` and `AllowHttpMetadata`. Alvo refuses that setting outside Development, so this stack runs
+in Development. The issuer's signing key is made per machine and registered per run: the suite creates it on first
+use, publishes its public half before the first sign-in, and nothing private is committed. So on this stack the
+suite is what signs people in. The [example's README](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/field-service/README.md#self-service-people-sign-in-found-a-company-and-invite-their-team)
+shows how to point it at real Google instead.
+
+The embedded host below serves the same descriptor without registering sign-in. It logs a warning at boot that
+nobody can sign in with Google, and every request there behaves as before.
 
 ## Layer 2: the embedded host
 
@@ -52,7 +82,7 @@ It is typed against the classes the build [generates from the descriptor](/exten
 | Mobile | An inbound Standard Webhook that completes the job and records the minutes | Inbound webhooks — the descriptor declares what Alvo sends | [Commands and inbound webhooks](/extending/commands/) |
 | Scheduling | Before-write hooks: a job's start and a visit's whole slot fall inside the customer's service hours | A time-zone-aware hour in CEL; the hours live on another row | [Write hooks](/extending/write-hooks/) |
 | SLA | A handler of the timer's own event: page on-call, then priority 1 | A subscriber for a timer's event | [Timers, schedules and data migrations](/extending/time/) |
-| Reports | A cron schedule that runs once per tenant | A per-tenant job: a cron automation takes no condition, and the image has no tenant catalog | [Timers, schedules and data migrations](/extending/time/) |
+| Reports | A cron schedule that runs once per tenant | A per-tenant job: a cron automation takes no condition, and the image's default tenant list holds only self-service tenants, not the demo's API-key ones | [Timers, schedules and data migrations](/extending/time/) |
 
 The descriptor still judges every write the host makes: the dispatch command's unit takes the state machine's
 `schedule` transition, hits the technician's exclusion on the calendar and runs the service-hours hooks, and any refusal
@@ -72,6 +102,11 @@ Two things the demo could have written in C# stay out of it, because the descrip
 Both suites run inside the required check, against the code as shipped. The SLA deadline is data — a job's
 `respond_by`, sent a few seconds ahead — and the overdue report keeps its production cron and is started with the
 Management API's **Run now**. There is no debug route, no shortened constant and no clock control in the host.
+
+That holds for self-service too. The test issuer stands in for Google, the way the mock server stands in for the
+billing system: the product code is the shipped code, and only configuration differs (the provider's authority, the
+Development environment, and rate budgets raised because one suite run comes from one address). Waiting out an
+invitation's expiry and the refresh grace window is polling, never a shortened constant.
 
 ## See also
 

@@ -52,7 +52,8 @@ Reference descriptors validated against `schema/project.schema.json`
   absence on another (so `If-Match` is honoured on one and refused with 412 on the other), `hidden` and
   `readOnly` fields, role-differentiated and row-level rules, an operation with no rule at all, `ref` with
   `onDelete: restrict`, one field of each type, and built-in and declared `formats`. Its own stack is
-  `docker-compose.field-service.yml`, with one dev key per role and tenant.
+  `docker-compose.field-service.yml`, with one dev key per role and tenant — and sign-in: people sign in with
+  Google (a test issuer in the demo stack), found their own tenants, invite their team and mint tokens.
 - **`_negative/`** — descriptors that MUST be rejected, each proving one
   constraint (unknown property, `decimal` missing `scale`, the reserved
   `users` entity name, a wrong `apiVersion`). The test asserts they fail with

@@ -36,7 +36,9 @@ internal interface ITenantStore
 
     /// <summary>
     /// The membership of <paramref name="user"/> in <paramref name="tenant"/> — or, when <paramref name="tenant"/> is
-    /// <see langword="null"/>, in their personal tenant — or <see langword="null"/> when they are no member of it.
+    /// <see langword="null"/>, in their personal tenant — or <see langword="null"/> when they are no member of it, or when
+    /// their account is disabled: a ban leaves the row, and this read is what callers without a session honour (an
+    /// <c>EventActor</c> delivery, a personal token), so it does not honour a banned person's membership.
     /// </summary>
     /// <param name="user">The account.</param>
     /// <param name="tenant">The tenant, or <see langword="null"/> for the personal one.</param>
@@ -98,7 +100,8 @@ internal interface ITenantStore
     /// <param name="ct">A token to cancel the operation.</param>
     /// <returns>
     /// <see cref="MemberChangeStatus.Changed"/> with the stored invitation, or <see cref="MemberChangeStatus.NotFound"/>,
-    /// <see cref="MemberChangeStatus.PersonalTenant"/> or <see cref="MemberChangeStatus.NotOwner"/> with none.
+    /// <see cref="MemberChangeStatus.PersonalTenant"/>, <see cref="MemberChangeStatus.NotOwner"/> or
+    /// <see cref="MemberChangeStatus.SessionEnded"/> with none.
     /// </returns>
     Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct);
 
@@ -254,4 +257,10 @@ internal enum MemberChangeStatus
 
     /// <summary>The invitation is not one of this tenant's.</summary>
     NoSuchInvitation,
+
+    /// <summary>
+    /// The actor's session the write named has ended — by a refresh-token reuse, a sign-out or a ban while the request was
+    /// in flight; nothing was written.
+    /// </summary>
+    SessionEnded,
 }

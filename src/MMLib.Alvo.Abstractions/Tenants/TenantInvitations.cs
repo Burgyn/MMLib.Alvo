@@ -14,9 +14,14 @@
 /// <param name="MaxUses">How many people may accept it.</param>
 /// <param name="ExpiresAt">The instant from which it no longer admits anyone.</param>
 /// <param name="Now">The instant of the creation.</param>
+/// <param name="Session">
+/// The creator's session the request came from, or <see langword="null"/> when none is known. When set, the creation
+/// re-reads it under a lock in its own transaction and is <see cref="MemberChangeStatus.SessionEnded"/> once it has ended
+/// (stack review A-I1).
+/// </param>
 internal sealed record CreateInvitationRequest(
     Guid Id, TenantId Tenant, UserId Actor, string CodeHash, IReadOnlyList<string> Roles, bool GrantsOwner,
-    string? Email, int MaxUses, DateTimeOffset ExpiresAt, DateTimeOffset Now);
+    string? Email, int MaxUses, DateTimeOffset ExpiresAt, DateTimeOffset Now, Guid? Session = null);
 
 /// <summary>A creation's status and, when it created the invitation, the invitation as stored.</summary>
 /// <param name="Status">What the creation did.</param>

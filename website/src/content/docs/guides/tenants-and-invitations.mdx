@@ -1,0 +1,427 @@
+---
+title: "Tenants, members and invitations"
+description: "Let signed-in people create their own companies, invite colleagues with a link, and hold roles per company: personal and shared tenants, the tenant switcher, invitations end to end, and why a tenant role never reaches shared data."
+sidebar:
+  order: 18
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import levelTwo from '../../../snippets/tenants/01-level-two.alvo.json?raw';
+import levelThree from '../../../snippets/tenants/02-level-three.alvo.json?raw';
+
+:::tip[What you will build]
+Acme Repairs, a team that runs itself. Dana signs up and creates the company, which makes her its owner and a
+dispatcher. She invites Theo as a technician with a link. Theo joins and sees only the jobs assigned to him, and when
+Dana removes him, his access to Acme ends on his next request. You write no user or membership code. About thirty
+minutes, starting from a host with sign-in from [Sign-in and accounts](/guides/sign-in/).
+:::
+
+## Before you start
+
+- A host with Google sign-in configured, and a page that signs people in:
+  [Sign-in and accounts](/guides/sign-in/), steps 2, 3 and 5. This page carries on in the folder and the terminal
+  that guide left you in, with its variables still exported.
+- **Two Google accounts**, one for Dana and one for Theo. Sign in as Dana in a normal browser window and as Theo in a
+  private one, so each window keeps its own session. While your Google app's audience is in *Testing*, list both
+  accounts as test users.
+- [Multi-tenancy](/guides/multi-tenancy/), for what a tenant-scoped entity is. Everything there holds here: a tenant
+  only ever sees its own rows.
+
+**Serve Acme Repairs from an empty database.** Both descriptors in step 1 change the time tracker's table in a way
+that discards data: level 2 drops its audit columns, and Acme Repairs drops `time_entries` altogether. Alvo refuses to
+start rather than throw data away: `docker compose logs alvo` shows "Alvo cannot start" and lists each refused step,
+marked `<- destructive`. So remove the time tracker's database, accounts included, and start Acme Repairs on a fresh
+one:
+
+```sh title="Terminal"
+docker compose down --volumes
+curl -fsSL -o acme-repairs.alvo.json https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/website/src/snippets/tenants/02-level-three.alvo.json
+sed -i.bak 's#./time-tracker.alvo.json#./acme-repairs.alvo.json#' docker-compose.override.yml
+docker compose up --wait --wait-timeout 90
+```
+
+The `sed` line points the override's `volumes:` entry at the new file, so it reads
+`./acme-repairs.alvo.json:/alvo/descriptor.json:ro`. To try level 2 instead, download `01-level-two.alvo.json` from
+the same folder and point the line at it the same way. Reload the page in both windows and sign in again: the first
+exchange creates each account afresh.
+
+**Send the requests from the page.** The exchanges below are shown as raw HTTP. To send one, open the browser console
+on the sign-in page and use `api()` from `sign-in.js`. It sends the request as the person signed in in that window,
+with their access token, refreshed when it is due. Extra headers such as `X-Alvo-Tenant` go in `headers`:
+
+```js
+const acme = await (await api('/auth/v1/tenants', { method: 'POST', body: JSON.stringify({ name: 'Acme Repairs' }) })).json();
+const inAcme = { 'X-Alvo-Tenant': acme.tenantId };
+await (await api('/api/customers', {
+  method: 'POST', headers: inAcme, body: JSON.stringify({ tenant_id: acme.tenantId, name: "Acme's first customer" }),
+})).json();
+```
+
+To use `curl` instead, type `access` in the same console. It prints the window's current access token, which you send
+as `-H "Authorization: Bearer <token>"` for the next 15 minutes.
+
+The routes below are written as their templates: `{tenantId}` is the id `POST /auth/v1/tenants` answers, `{userId}` a
+member's id. Each worked step names the case of `test/teapie-field-service/170-SelfService` that runs it for real
+against the [field-service demo](/guides/advanced-demo/#self-service-people-run-their-own-companies). That suite runs
+the fuller field-service descriptor (more fields, a state machine), so its requests carry more than the ones shown here;
+the answers are the same.
+
+## Build it
+
+<Steps>
+
+1. **Choose personal tenants, shared ones, or both.** `tenancy.selfService` turns tenants that people create on.
+   There are two kinds:
+
+   - A **personal tenant** is created for every person at sign-up, with them as its only member, forever. Every
+     request a person sends without naming a tenant acts in it. That is level 2, a private space per person:
+
+     <Code code={levelTwo} lang="json" title="time-tracker.alvo.json" ins={[{ range: '9-14' }]} />
+
+     The tenant wall keeps one person's entries from another's, so the rules need no `created_by` check. Later, when
+     you add shared tenants, the rows already carry `tenant_id` and nothing has to move.
+   - A **shared tenant** is one a person creates, owns, and invites others into. That is level 3, and Acme Repairs:
+
+     <Code code={levelThree} lang="json" title="acme-repairs.alvo.json" ins={[{ range: '10-17' }]} />
+
+   | Key | What it decides |
+   |---|---|
+   | [`assignableRoles`](/reference/descriptor/tenancy/#tenancy.selfService.assignableRoles) | The **tenant roles**, the only roles a membership can carry. Each is declared in `auth.roles`. `admin` never is one. |
+   | [`createTenants.creatorRoles`](/reference/descriptor/tenancy/#tenancy.selfService.createTenants.creatorRoles) | What the creator holds in a tenant they create. Here, the founder of a company dispatches for it. |
+   | [`createTenants.maxPerAccount`](/reference/descriptor/tenancy/#tenancy.selfService.createTenants.maxPerAccount) | How many shared tenants one account may ever create, 1–100, default 5. |
+   | [`invitations`](/reference/descriptor/tenancy/#tenancy.selfService.invitations) | Owners may invite. Needs `createTenants`. |
+   | [`personalTenant.roles`](/reference/descriptor/tenancy/#tenancy.selfService.personalTenant.roles) | The tenant roles a person holds in their own personal tenant, default none. |
+
+   Acme Repairs has **no personal tenant**: a technician works for a company, not for themselves. So a person who
+   names no tenant acts in none. They still read global data such as `regions`, and a scoped entity answers the
+   tenant guard rather than an empty page:
+
+   ```http
+   GET /api/work_orders
+   Authorization: Bearer <Theo's access token>
+   ```
+
+   ```http
+   HTTP/1.1 403 Forbidden
+
+   { "type": "https://alvo.dev/errors/forbidden", "status": 403, … }
+   ```
+
+   (`170-SelfService/003-assigned-work`, `TheoListsWithoutTenant`.)
+
+2. **Create the company.** Dana, signed in, creates Acme Repairs:
+
+   ```http
+   POST /auth/v1/tenants
+   Authorization: Bearer <Dana's access token>
+   Content-Type: application/json
+
+   { "name": "Acme Repairs" }
+   ```
+
+   ```http
+   HTTP/1.1 201 Created
+   Location: /auth/v1/tenants/3c9e…
+
+   { "tenantId": "3c9e…", "name": "Acme Repairs", "kind": "shared", "roles": ["dispatcher"], "isOwner": true }
+   ```
+
+   She is its owner and, by `creatorRoles`, its dispatcher. Past `maxPerAccount` the answer is `409 tenant-limit`.
+   Tenants cannot be deleted yet, so leaving one does not free a place. `PATCH /auth/v1/tenants/{tenantId}` with a new
+   `name` renames it, for an owner. (`170-SelfService/002-invite-and-accept`, `DanaCreatesAcme`.)
+
+3. **Act in it.** A person may belong to several tenants, so every request names the one it acts in with
+   `X-Alvo-Tenant`. Your app's tenant switcher reads the person's memberships from `GET /auth/v1/user` (or
+   `GET /auth/v1/tenants`, the same list on its own):
+
+   ```json
+   {
+     "id": "5b1f…",
+     "name": "Dana Novak",
+     …
+     "memberships": [
+       { "tenantId": "3c9e…", "name": "Acme Repairs", "kind": "shared", "roles": ["dispatcher"], "isOwner": true }
+     ]
+   }
+   ```
+
+   **Today a create on a scoped entity also carries the tenant in its body, as `tenant_id`.** Alvo checks the column
+   against the tenant the request acts in. It does not fill it in from the header. Send both:
+
+   ```http
+   POST /api/customers
+   Authorization: Bearer <Dana's access token>
+   X-Alvo-Tenant: 3c9e…
+   Content-Type: application/json
+
+   { "tenant_id": "3c9e…", "name": "Acme's first customer" }
+   ```
+
+   Leave `tenant_id` out and the write is refused by the same check that stops a write into another tenant. The
+   answer names no field, so it is easy to misread:
+
+   ```http
+   HTTP/1.1 403 Forbidden
+
+   {
+     "type": "https://alvo.dev/errors/forbidden",
+     "status": 403,
+     "detail": "The write was rejected by policy.",
+     …
+   }
+   ```
+
+   This is a current limitation, not a policy you have to satisfy differently. Until Alvo fills the column in
+   ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)), put `tenant_id` in every scoped create your client sends. An update never sends it.
+   (`170-SelfService/003-assigned-work`, `DanaCreatesCustomer` and `DanaCreatesWithoutTenantId`.)
+
+   A tenant the person does not belong to refuses the whole request with `401`, not a quieter request with no tenant
+   that could still read something (`006-foreign-tenant`).
+
+4. **Invite Theo with a link.** Dana creates an invitation that makes its holder a technician:
+
+   ```http
+   POST /auth/v1/tenants/{tenantId}/invitations
+   Authorization: Bearer <Dana's access token>
+   Content-Type: application/json
+
+   { "roles": ["technician"] }
+   ```
+
+   ```http
+   HTTP/1.1 201 Created
+
+   {
+     "id": "b17a…",
+     "code": "alvo_inv_Qm9vZ…",
+     "roles": ["technician"],
+     "isOwner": false,
+     "email": null,
+     "maxUses": 1,
+     "uses": 0,
+     "expiresAt": "…",
+     "status": "active",
+     …
+   }
+   ```
+
+   **`code` is in this answer and in no other**, ever. Alvo stores only its hash and sends no email: your app hands
+   the code to Theo however it likes. As a link, put it in the **fragment**, which the browser never sends to any
+   server, so the code never lands in an access log, a proxy log or a `Referer` header:
+
+   ```text
+   https://app.example.com/join#code=alvo_inv_Qm9vZ…
+   ```
+
+   Optional members narrow the invitation: `email` (only a person whose [trusted](/guides/sign-in/#which-email-addresses-alvo-trusts)
+   address it is may accept), `maxUses` (default 1, at most 100), `expiresAt` (default 7 days, at most 30), and
+   `isOwner` (an owner-granting invitation must be single-use and live at most 7 days).
+
+   Theo's join page reads the code, takes it out of the address bar, and asks what it is an invitation to. **Preview
+   needs no sign-in**, so the page can say "Dana Novak invites you to Acme Repairs" before Theo has an account:
+
+   ```js title="join.js"
+   const code = new URLSearchParams(location.hash.slice(1)).get('code');
+   history.replaceState(null, '', location.pathname);
+   const invitation = await fetch(`${ALVO}/auth/v1/invitations/preview`, {
+     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+   }).then(response => response.json());
+   ```
+
+   ```http
+   POST /auth/v1/invitations/preview
+   Content-Type: application/json
+
+   { "code": "alvo_inv_Qm9vZ…" }
+   ```
+
+   ```http
+   HTTP/1.1 200 OK
+
+   { "tenantName": "Acme Repairs", "inviterName": "Dana Novak", "roles": ["technician"], "isOwner": false,
+     "expiresAt": "…", "emailBound": false }
+   ```
+
+   Theo signs in, and the page accepts the code as him:
+
+   ```http
+   POST /auth/v1/invitations/accept
+   Authorization: Bearer <Theo's access token>
+   Content-Type: application/json
+
+   { "code": "alvo_inv_Qm9vZ…" }
+   ```
+
+   ```http
+   HTTP/1.1 200 OK
+
+   { "tenantId": "3c9e…", "name": "Acme Repairs", "kind": "shared", "roles": ["technician"], "isOwner": false }
+   ```
+
+   Accepting again, after a double click or a retried request, answers the same membership and uses nothing up. Dana
+   lists Acme's invitations with `GET /auth/v1/tenants/{tenantId}/invitations` (newest first, never a code) and
+   revokes one with `DELETE /auth/v1/tenants/{tenantId}/invitations/{invitationId}`.
+   (`170-SelfService/002-invite-and-accept`.)
+
+5. **Give Theo his work.** Dana creates a job assigned to Theo and one assigned to nobody, each with `tenant_id`
+   and `X-Alvo-Tenant` as in step 3. Theo lists jobs in Acme:
+
+   ```http
+   GET /api/work_orders
+   Authorization: Bearer <Theo's access token>
+   X-Alvo-Tenant: 3c9e…
+   ```
+
+   He gets exactly one job, his own. His membership puts him inside Acme's tenant wall, and the rule
+   `assigned_to == @user.id` narrows Acme's `work_orders` to his row. The role `technician` itself admits nothing
+   here, because no rule in this descriptor names it. It is in `@user.roles` while he acts in Acme, so a rule such as
+   `'technician' in @user.roles && assigned_to == @user.id` is how you would make the role count. He may update it, because `update` admits the person it is
+   assigned to. He may not create one: every job names a customer, and `customers` admits no technician, so the
+   reference does not resolve for him (`422`, code `unresolved-reference`). (`170-SelfService/003-assigned-work`.)
+
+6. **Manage the members.** Any member lists them. Only an owner changes them:
+
+   ```http
+   GET /auth/v1/tenants/{tenantId}/members
+   Authorization: Bearer <Dana's access token>
+   ```
+
+   ```http
+   HTTP/1.1 200 OK
+
+   [
+     { "userId": "5b1f…", "name": "Dana Novak", "avatarUrl": "…", "roles": ["dispatcher"], "isOwner": true },
+     { "userId": "9d02…", "name": "Theo Berg", "avatarUrl": "…", "roles": ["technician"], "isOwner": false }
+   ]
+   ```
+
+   - `PATCH /auth/v1/tenants/{tenantId}/members/{userId}` with `{ "roles": ["dispatcher"] }` changes Theo's roles,
+     and `{ "isOwner": true }` makes him an owner. Nobody changes their own membership. A role outside
+     `assignableRoles` is `422`.
+   - `DELETE /auth/v1/tenants/{tenantId}/members/{userId}` removes him. A member leaves the same way, with their own
+     id.
+   - A shared tenant always keeps an owner: the last one cannot leave, and gets `409 last-owner` when they try. Make
+     someone else an owner first.
+
+   Every change counts on the member's next request, because memberships are read per request, never cached in a
+   token. When Dana removes Theo, his next request in Acme is `401` and any personal token he minted for Acme dies
+   with the membership, while he stays signed in (`170-SelfService/005-member-removed`). An owner who is demoted, removed or leaves loses their
+   live invitations in the same transaction, so a code they handed out stops working with their ownership.
+
+</Steps>
+
+## Tenant roles and project roles
+
+A person holds two kinds of role, and a rule spells both the same way, `'dispatcher' in @user.roles`:
+
+- **Project roles**: `authenticated` for every signed-in person, and whatever an API key or an operator grants. They
+  count everywhere.
+- **Tenant roles**: what the membership of the tenant the request acts in carries, from `assignableRoles`. They count
+  only inside that tenant's scoped data.
+
+| Where a decision is made | `@user.roles` holds |
+|---|---|
+| A rule of a scoped entity, and every relation reached from it while every entity on the way is scoped | project roles and tenant roles |
+| A rule of a global entity, and everything reached from it | project roles only |
+| A scoped entity's relation into a global entity, and anything past it | project roles only |
+| A Management API `access` level | project roles only |
+
+**The rule in one line: a tenant role counts only while every entity on the decision's path is scoped.** Anyone can
+sign up and create a tenant, which makes them its dispatcher. If that role reached a global entity, anyone could
+write your shared reference data. So even if `regions.create` said `'dispatcher' in @user.roles`, a person who made
+themselves a dispatcher by creating a company still could not create a region. Only a dispatcher role from an API
+key or an operator could. `TenancyEngineFacts.A_self_made_dispatcher_cannot_write_global_regions` proves exactly that
+contrast on SQLite and PostgreSQL, and `170-SelfService/007-roles-per-tenant` pins it against the demo. The same case
+shows that a role is held per tenant: Dana is a dispatcher in Acme and a technician in the company Theo founded, so
+the same customer she creates in Acme is refused there.
+
+For the same reason, an apply that names a tenant role in an `access` level is refused: "'dispatcher' is a tenant
+role (tenancy.selfService.assignableRoles), and a tenant role can never manage the project." Use a project role there
+that no tenant can hand out. With `signUp.mode: open`, the apply also warns about every rule of a global entity that
+lets `authenticated` write: that now means anyone with a Google account.
+
+**Owner is a flag, not a role.** `isOwner` decides who manages members, invitations and service tokens, and only
+those routes read it. It never appears in `@user.roles`, so a rule cannot say "owners may", and a role your app
+happens to call `owner` makes nobody an owner. If your rules need "the people who run this tenant", give them a
+tenant role through `creatorRoles`.
+
+:::caution[Automation that runs as the system caller]
+The tenant-role rule governs every decision made **as the caller**. It does not govern an action you declared to
+run as the system caller, such as an [`entity.update`](/extending/automation/#entityupdate-writes-once-per-event)
+action, which holds `admin`. A scoped entity's after-hook or automation rule whose condition a tenant role
+satisfies may therefore fire such an action against a global entity. That is your declared escalation, not the
+caller's role leaking, but it means **any member of any tenant can trigger it**. Write its condition knowing that.
+:::
+
+## Invitation-only sign-up
+
+With `"signUp": { "mode": "invitationOnly" }`, a person without an account can sign up only by bringing a code to
+the token exchange, as the extra form parameter `invitation_code`. The account, its session and the membership are
+written in one transaction, or nothing is:
+
+```http
+POST /auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+&subject_token=eyJhbGciOiJSUzI1NiIs…
+&subject_token_type=urn:ietf:params:oauth:token-type:id_token
+&invitation_code=alvo_inv_Qm9vZ…
+```
+
+- `200`: the person is signed in and already a member.
+- `400`, `error: invalid_grant`, "The invitation is not valid. Sign in without it, or ask for a new one.": the code
+  is dead, and nothing was created.
+- `403 sign-up-refused`, `policy: invitationOnly`: a new person with no code at all.
+
+The first owner has to come from somewhere: sign them in while the mode is `open`, then apply the descriptor again
+with `invitationOnly`. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
+there as well.
+
+Codes exist only with `"invitations": true` under `tenancy.selfService`. Without it nobody can be invited, so nobody
+new can ever sign up. The apply still succeeds, because closed registration is a legitimate choice, but it warns at
+`/auth/signUp/mode` and names both fixes: turn invitations on, or sign people up under `open`.
+
+## How it behaves
+
+- **Every dead invitation gets one answer.** Unknown, malformed, expired, revoked, used up, bound to another email,
+  or created by someone who is no longer an owner: `preview` and `accept` answer the same `404 not-found`, byte for
+  byte. Whoever holds a code learns whether it works and nothing about why not
+  (`170-SelfService/008-dead-invitations`, `009-dead-invitations-answer-alike`).
+- **A stranger learns nothing about a tenant.** A tenant you are not in answers the same `404` as an id that names
+  nothing, on every tenant route. A tenant member who is not an owner gets `403` from the owner routes.
+- **Codes never travel in a URL.** Create answers the code once. Preview and accept take it in the body. Your join
+  link keeps it in the fragment.
+- **Only a person manages tenants.** An API key, a personal token or a service token on a tenant route is `403`.
+- **Rate limits per client address.** The five invitation routes share 20 requests a minute
+  (`Alvo:Api:RateLimits:Invitations`). Creating a tenant and minting a token share 10
+  (`Alvo:Api:RateLimits:Create`). Past either, the answer is `429` with `Retry-After`.
+- **People's tenants are the tenant list.** With `selfService` on, work that runs once per tenant (a cron
+  [automation](/extending/automation/#triggers), a per-tenant [schedule](/extending/time/#schedules), a
+  [data migration](/extending/time/#data-migrations)) runs for every shared tenant people created, and every personal
+  one while `personalTenant` is on, with no `IAlvoTenantCatalog` to register. An embedded host that registers its
+  own catalog keeps it. Under open sign-up with personal tenants, every new account adds a run to each of those.
+
+## Limits and what is not here yet
+
+- **The duplicated tenant on a create.** A scoped create sends both `X-Alvo-Tenant` and `tenant_id`, as step 3 shows
+  ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)).
+- **No deleting a tenant**, and no handing a personal tenant to someone else. `maxPerAccount` counts every shared
+  tenant an account ever created.
+- **No emails.** Alvo never sends an invitation. Your app delivers the code.
+- **No membership events.** Joining, leaving and role changes are not events an after-hook can react to.
+- **No sharing across tenants.** A row belongs to exactly one tenant. Public links and grants to another tenant are
+  designed but not built.
+
+## See also
+
+- [Sign-in and accounts](/guides/sign-in/): the exchange, sessions and where to keep the tokens.
+- [Tokens for integrators](/guides/tokens/): a billing system that reads Acme's completed jobs, and a script that
+  acts as Dana.
+- [Multi-tenancy](/guides/multi-tenancy/): what isolation guarantees, whoever the tenant comes from.
+- [The sign-in API reference](/reference/accounts-api/): every tenant, member and invitation route.
+- Descriptor keys: [`tenancy.selfService`](/reference/descriptor/tenancy/#tenancy.selfService).
+- Problem types: [`feature-disabled`](/reference/problem-types/#feature-disabled),
+  [`last-owner`](/reference/problem-types/#last-owner), [`tenant-limit`](/reference/problem-types/#tenant-limit),
+  [`not-found`](/reference/problem-types/#not-found), [`forbidden`](/reference/problem-types/#forbidden).
+- The contributor's view: [`docs/architecture/accounts.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/accounts.md#tenants-a-person-creates-s3).

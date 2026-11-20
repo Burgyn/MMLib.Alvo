@@ -6,7 +6,7 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <summary>
 /// Membership resolution over the self-service registry (S3 plan D4): <see cref="MembershipRules"/> over
 /// <see cref="ITenantStore.FindMembershipAsync"/>, for a caller that has no session read to fold the membership into —
-/// event actors here, personal tokens later. The person resolver decides by the same rules over its one read.
+/// event actors and personal tokens (<c>AppTokenPrincipals</c>, S5 plan D6). The person resolver decides by the same rules over its one read.
 /// </summary>
 /// <remarks>
 /// A refusal and a request with no tenant to read cost no I/O; otherwise one registry read. The applied policy is read

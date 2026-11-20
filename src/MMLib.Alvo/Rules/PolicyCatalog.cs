@@ -123,6 +123,14 @@ public sealed class PolicyCatalog
     /// </remarks>
     internal SelfServicePolicy SelfService { get; init; } = SelfServicePolicy.None;
 
+    /// <summary>Gets what the descriptor's <c>auth.accessTokens</c> says: which app tokens are on, and their longest lifetime.</summary>
+    /// <remarks>
+    /// <see langword="internal"/> for the reason <see cref="SignIn"/> is; consumers read it as
+    /// <c>IPolicyCatalogProvider.Current?.AppTokens ?? AppTokenPolicy.None</c>, so a descriptor that turns a kind off
+    /// refuses its tokens on the next request.
+    /// </remarks>
+    internal AppTokenPolicy AppTokens { get; init; } = AppTokenPolicy.None;
+
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>
     /// <param name="schema">The schema <paramref name="descriptor"/> maps to, every rule is checked against.</param>

@@ -32,7 +32,7 @@ The table is its complete tool set: six reads, two dry runs and two skill reader
 | `get_extensions` | the host code (extensions) this host registers and what each binds, read-only |
 | `get_revisions` | what changed recently, and why |
 | `check_change`, `propose_change` | a dry run of a change: "would this apply?", and the only way a change becomes a proposal |
-| `load_skill`, `read_skill_resource` | the nine descriptor skills, and the schema slices they cite |
+| `load_skill`, `read_skill_resource` | the ten descriptor skills, and the schema slices they cite |
 
 What follows from that:
 
@@ -97,8 +97,9 @@ author, because a person decided to apply it, and you can roll it back from *Con
 
 ## The skills it shares with coding agents
 
-The assistant learns the descriptor from nine skills: entities and fields, field types and formats, rules and CEL,
-hooks, computed fields and rollups, indexes, traits and tenancy, project access, and capabilities and limits. They are
+The assistant learns the descriptor from ten skills: entities and fields, field types and formats, rules and CEL,
+hooks, computed fields and rollups, indexes, traits and tenancy, project access, sign-in with self-service tenants and
+tokens, and capabilities and limits. They are
 plain Markdown files in the repository, `plugins/alvo/skills/alvo-descriptor-*`, and the package embeds exactly those
 files, so the assistant and your coding agent learn the same rules from one source.
 [For coding agents](/start-here/coding-agents/#3-load-the-shared-skills) installs them as a Claude Code plugin, or into

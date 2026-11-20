@@ -157,6 +157,38 @@ internal static class ProblemResultFactory
             + "decides who is; ask whoever administers it.");
 
     /// <summary>
+    /// The 403 for a personal or service token presented to the Management API (S5 plan D9, closing S1 D8).
+    /// </summary>
+    /// <remarks>
+    /// <b>The wording is fixed and names no caller</b> — identical for every token and every project, so it discloses
+    /// nothing a reader of the docs does not have, and it names the fix an agent can act on. The slug is
+    /// <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy refusal already carries.
+    /// </remarks>
+    internal static IResult AppTokenForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are app credentials and never manage a project. "
+            + "Use an operator session or a configured API key.");
+
+    /// <summary>
+    /// The 403 for a personal or service token presented to a host's own endpoint mapped with <c>.WithAlvoCaller()</c>
+    /// (accounts S5, the final review's I1).
+    /// </summary>
+    /// <remarks>
+    /// <b>Why refuse rather than admit unscoped:</b> a token's scopes are the boundary its owner drew around a credential
+    /// handed to a third party, and a custom endpoint names no entity they could be checked against — so admitting it
+    /// would let a <c>jobs:read</c> token act as its whole principal. Until an endpoint can name the scope it needs
+    /// (#536), it does not take app tokens at all. The wording is fixed and names no caller, like
+    /// <see cref="AppTokenForbidden"/>; the slug is <see cref="AlvoProblemTypes.Forbidden"/>.
+    /// </remarks>
+    internal static IResult AppTokenCustomEndpointForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are not accepted on custom endpoints yet: a custom endpoint names no entity a "
+            + "token's scopes could be checked against. Use the generated Data API or a command, or call this endpoint "
+            + "with a signed-in session or a configured API key.");
+
+    /// <summary>
     /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
     /// does not admit as an administrator.
     /// </summary>
@@ -439,10 +471,20 @@ internal static class ProblemResultFactory
     /// </summary>
     /// <param name="descriptorKey">The key that enables the route, e.g. <c>tenancy.selfService</c>.</param>
     /// <returns>The problem result.</returns>
-    internal static IResult FeatureDisabled(string descriptorKey) => Problem(
+    internal static IResult FeatureDisabled(string descriptorKey) =>
+        FeatureDisabled(descriptorKey, $"This route answers only when the applied descriptor declares {descriptorKey}.");
+
+    /// <summary>
+    /// The same 404 <c>feature-disabled</c>, naming <paramref name="descriptorKey"/>, for a feature the descriptor declares
+    /// but this host cannot honour; <paramref name="detail"/> is a fixed sentence naming why.
+    /// </summary>
+    /// <param name="descriptorKey">The descriptor key, carried in a <c>descriptorKey</c> member.</param>
+    /// <param name="detail">The fixed sentence.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey, string detail) => Problem(
         StatusCodes.Status404NotFound,
         AlvoProblemTypes.FeatureDisabled,
-        $"This route answers only when the applied descriptor declares {descriptorKey}.",
+        detail,
         new Dictionary<string, object?>(StringComparer.Ordinal) { [DescriptorKeyMember] = descriptorKey });
 
     /// <summary>The 409 for a person who has created as many shared tenants as the descriptor allows (S3 plan D9).</summary>
@@ -475,7 +517,7 @@ internal static class ProblemResultFactory
     internal static IResult MembershipConflict(string detail) =>
         Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
 
-    /// <summary>The <see cref="FeatureDisabled"/> member naming the descriptor key.</summary>
+    /// <summary>The <see cref="FeatureDisabled(string, string)"/> member naming the descriptor key.</summary>
     private const string DescriptorKeyMember = "descriptorKey";
 
     /// <summary>The <see cref="TenantLimit"/> member carrying the cap.</summary>
