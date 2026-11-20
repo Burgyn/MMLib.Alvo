@@ -131,7 +131,11 @@ only a hash of a high-entropy secret; one answer for every failed lookup); the C
   `forbidden`, fixed detail "Personal and service tokens are app credentials and never manage a project. Use an operator
   session or a configured API key." Resolved first, so an unusable token is the ordinary 401 of any key. `AlvoPrincipal`
   stays unchanged (no public growth for a flag the prefix already carries). In-process `IAlvoManagement` callers publish
-  their own principal, as today. The Data API, the commands and `.WithAlvoCaller()` accept app tokens.
+  their own principal, as today. The Data API and the commands accept app tokens.
+  **Recorded deviation:** as shipped, `.WithAlvoCaller()` also refuses app tokens (403 `forbidden`, after resolving them,
+  so an unusable one is still 401), because such an endpoint names no entity and so no scope can be checked; descriptor
+  commands keep their per-entity scope check. A scope opt-in for custom endpoints is follow-up #536; see
+  `docs/architecture/accounts.md`.
 - **D10 — How a token dies; every sweep in the transaction that kills its reason** (§7.1, §6.4 eighth bullet, B4):
   - a member **removed or leaving** (`EfCoreTenantStore.RemovedAsync`) → their personal tokens for that tenant, and the
     service tokens they minted for it;

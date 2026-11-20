@@ -127,7 +127,8 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   (`InvitationEngineFacts`). **S5**: tokens for integrators — `auth.accessTokens`, personal tokens acting as their
   person with live tenant roles and service tokens acting as a shared tenant with fixed ones, minted over
   `/auth/v1/tokens` and shown once (`alvo_pat_`/`alvo_svc_`, `_api_keys`), sent as `X-Alvo-Api-Key`, refused by the
-  Management API, and revoked in the transaction that removes, demotes or bans their minter; proven end to end on SQLite
+  Management API and by a host's own `.WithAlvoCaller()` endpoints (a scope opt-in for those is #536), and revoked in
+  the transaction that removes, demotes or bans their minter; proven end to end on SQLite
   and PostgreSQL with no secret in any log (`AppTokenEngineFacts`). The initiative's `← YOU ARE HERE` is **S6** — the
   field-service self-service demo, the users' guides and the descriptor skills.
 
