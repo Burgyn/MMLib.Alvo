@@ -1010,7 +1010,7 @@ endpoints; `Management`), not three copies.
 |---|---|---|
 | nothing | anonymous, as today | anonymous, as today |
 | `X-Alvo-Api-Key` | the API-key resolver: a configured key as today, or a persisted personal or service token (accounts S5) | the API-key resolver; a personal or service token (`alvo_pat_`/`alvo_svc_`) that resolves is then refused **403** `forbidden` (S5 D9) |
-| `Authorization: Bearer ...` and a person resolver is registered | the person resolver | **ignored** |
+| `Authorization: Bearer ...` and a person resolver is registered | the person resolver; an `alvo_pat_`/`alvo_svc_` token is **401** naming the API-key header, resolving nothing (#539) | **ignored** |
 | `Authorization` with another scheme, or Bearer with no person resolver registered | **ignored, exactly as today** | ignored |
 | `X-Alvo-Api-Key` and a Bearer token Alvo owns, well-formed or malformed | **401**, ambiguous; never settled by precedence | API key as above |
 
@@ -1025,6 +1025,11 @@ endpoints; `Management`), not three copies.
 - A Bearer value is malformed when its token is empty or contains whitespace, or when more than one `Authorization`
   line arrives and any of them is Bearer. That is a 401, never "take the first": it is the repeated-header rule the
   API key already follows.
+- A well-formed Bearer token that starts `alvo_pat_` or `alvo_svc_` (ordinal, `AppTokenSecret.IsAppTokenId`) is a
+  personal or service token in the wrong header (#539). It is read as its own channel with its value dropped, so
+  neither resolver is handed it, and answered 401 `Bearer error="invalid_token"` with one fixed detail naming the
+  API-key header — identical for every such string, live, revoked or made up, and echoing none of it. The self-service
+  routes and the sign-in package's own routes answer it the same way, through `CallerResolution.PersonOnlyRefusal`.
 - "A person resolver is registered" is read once, from the container's keyed-service lookup; a container that cannot
   answer counts as *not registered*, which is today's behaviour. Only a registration under exactly the person-resolver
   key counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
@@ -1058,7 +1063,8 @@ entity; a host's `.WithAlvoCaller()` endpoint, which shares the `Data` surface b
 
 **The three 401s.** A Bearer the resolver refuses answers `WWW-Authenticate: Bearer error="invalid_token"`. A malformed
 one answers `Bearer error="invalid_request"`. An ambiguous request answers with both challenges (API key and Bearer).
-The problem `type` stays `unauthenticated` throughout.
+The problem `type` stays `unauthenticated` throughout. An app token sent as a Bearer gets the first one's challenge,
+with its own detail naming the API-key header (the rule above).
 
 **Deviation from RFC 6750 section 3.1, on purpose.** The RFC answers `invalid_request` with **400**. Alvo answers 401.
 Every credential that was *presented but cannot be used* already gets one diagnosis on all three sites, and agents
