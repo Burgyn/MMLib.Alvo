@@ -141,6 +141,26 @@ public sealed class AppTokenRequestTests
     }
 
     [Fact]
+    public void The_expiry_hint_is_an_instant_the_same_request_accepts()
+    {
+        var hint = Validate("""{"name":"ci","kind":"personal","scopes":["jobs:read"]}""").Violations.ShouldHaveSingleItem().FixSuggestion;
+
+        hint.ShouldBe("Send e.g. \"2026-12-13T09:00:00Z\"; a token always expires.", "now + 30 days, in UTC");
+        Valid(WithExpiry(Example(hint))).ExpiresAt.ShouldBe(_now.AddDays(30));
+    }
+
+    [Fact]
+    public void The_expiry_hint_stays_within_a_shorter_lifetime_and_drops_fractions_of_a_second()
+    {
+        var rules = _rules with { Tokens = new AppTokenPolicy(true, true, 7), Now = _now.AddMilliseconds(750) };
+
+        var hint = Validate(WithExpiry("tomorrow"), rules).Violations.ShouldHaveSingleItem().FixSuggestion;
+
+        hint.ShouldBe("Send e.g. \"2026-11-20T09:00:00Z\"; a token always expires.", "now + 7 days, truncated to the second");
+        Validate(WithExpiry(Example(hint)), rules).Violations.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Every_violation_of_one_body_is_reported_together()
     {
         Pointers("""{"kind":"owner","scopes":["jobs"],"expiresAt":"x"}""").ShouldBe(["/name", "/kind", "/scopes/0", "/expiresAt"]);
@@ -169,9 +189,16 @@ public sealed class AppTokenRequestTests
 
     private static string[] Pointers(string json) => [.. Validate(json).Violations.Select(violation => violation.Pointer)];
 
-    private static (AppTokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(string json)
+    private static (AppTokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(string json) => Validate(json, _rules);
+
+    private static (AppTokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(string json, TokenRules rules)
     {
         using var document = JsonDocument.Parse(json);
-        return AppTokenRequest.Validate(document.RootElement, _rules);
+        return AppTokenRequest.Validate(document.RootElement, rules);
     }
+
+    private static string WithExpiry(string expiresAt) =>
+        $$"""{"name":"ci","kind":"personal","scopes":["jobs:read"],"expiresAt":"{{expiresAt}}"}""";
+
+    private static string Example(string? hint) => hint.ShouldNotBeNull().Split('"')[1];
 }

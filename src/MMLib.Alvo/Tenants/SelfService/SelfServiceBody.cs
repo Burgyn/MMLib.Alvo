@@ -80,6 +80,18 @@ internal static class SelfServiceBody
             ? instant
             : null;
 
+    /// <summary>
+    /// <paramref name="instant"/> as an <c>expiresAt</c> fix hint shows it: RFC 3339, UTC with <c>Z</c>, whole seconds
+    /// (truncated, so never later than the instant itself).
+    /// </summary>
+    /// <remarks>
+    /// A hint is built from the request's own instant, never written as a literal: a fixed example date turns into a
+    /// guaranteed refusal the day it passes.
+    /// </remarks>
+    /// <param name="instant">The instant to show.</param>
+    internal static string ExampleInstant(DateTimeOffset instant) =>
+        instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
     private static bool HasOffset(string text) =>
         text.EndsWith('Z') || (text.Length > 6 && text[^6] is '+' or '-' && text[^3] == ':');
 }

@@ -58,6 +58,9 @@ internal sealed record AppTokenRequest(
 
     private const string ServiceKind = "service";
 
+    /// <summary>How far ahead the <c>expiresAt</c> hint's example lies, when <c>maxLifetimeDays</c> allows that far.</summary>
+    private const int ExampleDays = 30;
+
     private static readonly SelfServiceName _name = new("token name");
 
     /// <summary>Gets <see cref="Scopes"/> in the form a stored token keeps them, <c>&lt;entity&gt;:&lt;read|write&gt;</c>.</summary>
@@ -254,7 +257,8 @@ internal sealed record AppTokenRequest(
             string.Create(
                 CultureInfo.InvariantCulture,
                 $"expiresAt is an RFC 3339 instant with an offset, in the future and at most {days} days away."),
-            "Send e.g. \"2026-12-01T09:00:00Z\"; a token always expires."));
+            $"Send e.g. \"{SelfServiceBody.ExampleInstant(rules.Now + TimeSpan.FromDays(Math.Min(days, ExampleDays)))}\"; "
+                + "a token always expires."));
         return rules.Now;
     }
 

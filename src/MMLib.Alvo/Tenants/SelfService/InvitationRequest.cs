@@ -204,7 +204,7 @@ internal sealed record InvitationRequest(
             isOwner
                 ? "expiresAt of an invitation that makes an owner is an RFC 3339 instant with an offset, in the future and at most 7 days away."
                 : "expiresAt is an RFC 3339 instant with an offset, in the future and at most 30 days away.",
-            "Send e.g. \"2026-12-01T09:00:00Z\", or leave expiresAt out for 7 days from now."));
+            $"Send e.g. \"{SelfServiceBody.ExampleInstant(latest)}\", or leave expiresAt out for 7 days from now."));
         return now;
     }
 
