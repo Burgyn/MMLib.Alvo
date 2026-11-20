@@ -70,6 +70,7 @@ internal static partial class AccountsSchemas
         document.AddComponent(KeyId, Key());
         document.AddComponent(KeySetId, KeySet(document));
         AddInvitationComponents(document);
+        AddAppTokenComponents(document);
     }
 
     private static OpenApiSchema TokenRequest() => Object(

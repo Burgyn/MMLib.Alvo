@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Internal;
+using System.Globalization;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Tenants.SelfService;
@@ -65,4 +66,20 @@ internal static class SelfServiceBody
         [.. root.EnumerateObject()
             .Where(member => !known.Contains(member.Name, StringComparer.Ordinal))
             .Select(member => PayloadViolations.UnknownField(member.Name))];
+
+    /// <summary>
+    /// The instant <paramref name="text"/> spells — RFC 3339 with an explicit offset, <c>Z</c> included — or
+    /// <see langword="null"/> when it spells none, or none with an offset.
+    /// </summary>
+    /// <param name="text">A string member's text, or <see langword="null"/>.</param>
+    internal static DateTimeOffset? InstantOf(string? text) =>
+        text is not null
+        && HasOffset(text)
+        && DateTimeOffset.TryParseExact(
+            text, ["yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK", "yyyy-MM-dd'T'HH:mm:ssK"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant)
+            ? instant
+            : null;
+
+    private static bool HasOffset(string text) =>
+        text.EndsWith('Z') || (text.Length > 6 && text[^6] is '+' or '-' && text[^3] == ':');
 }

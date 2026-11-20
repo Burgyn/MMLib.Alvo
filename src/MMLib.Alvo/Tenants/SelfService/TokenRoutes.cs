@@ -1,0 +1,89 @@
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
+using MMLib.Alvo.Rules;
+
+namespace MMLib.Alvo.Tenants.SelfService;
+
+/// <summary>
+/// App tokens (spec §7.1, S5 plan D7–D14): <c>POST {prefix}/tokens</c> mints a personal token for the signed-in person, or a
+/// service token for a tenant the person owns, and answers the credential — once.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The order of the gates is the self-service contract</b> (S3 plan Task 7): the person (a token — any key — presented as
+/// an API key is 403, never a token minting a token), then <c>auth.accessTokens</c>, then the body, then the kind's own
+/// feature, then the person's membership (a personal token naming a tenant), and only then the registry.
+/// </para>
+/// <para>
+/// <b>The secret is made here and only its hash goes down</b>: the registry stores what it is given and never sees the
+/// secret, so no statement, log or refusal below this line can carry it. The registry judges ownership, the tenant kind, the
+/// roles the minter holds and the live cap in the mint's own transaction, serialised with every sweep that would revoke the
+/// token (D10).
+/// </para>
+/// </remarks>
+internal static class TokenRoutes
+{
+    /// <summary><c>POST {prefix}/tokens</c>: a new token, answered with its credential.</summary>
+    /// <param name="http">The request.</param>
+    internal static async Task<IResult> CreateAsync(HttpContext http)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        var catalog = http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current;
+        var tokens = catalog?.AppTokens ?? AppTokenPolicy.None;
+        var (call, refusal) = await SelfServiceCall.EnterAsync(http, _ => TokenProblems.Off(tokens)).ConfigureAwait(false);
+        if (call is null)
+        {
+            return refusal!;
+        }
+
+        var rules = new TokenRules(tokens, call.Policy, EntitiesOf(catalog), call.Now);
+        var (request, invalid) = await call.ReadAsync(
+            (body, options, ct) => TokenRequest.ReadAsync(body, options, rules, ct)).ConfigureAwait(false);
+        if (request is null)
+        {
+            return invalid!;
+        }
+
+        if (TokenProblems.KindOff(tokens, request.Kind) is { } disabled)
+        {
+            return disabled;
+        }
+
+        return request is { Kind: ApiKeyKind.Personal, Tenant: { } tenant } && await call.MembershipAsync(tenant).ConfigureAwait(false) is null
+            ? SelfServiceProblems.NoSuchTenant()
+            : await MintedAsync(call, request).ConfigureAwait(false);
+    }
+
+    private static HashSet<string> EntitiesOf(PolicyCatalog? catalog) =>
+        new(catalog?.Entities.Select(entity => entity.Key) ?? [], StringComparer.Ordinal);
+
+    private static async Task<IResult> MintedAsync(SelfServiceCall call, TokenRequest request)
+    {
+        var secret = AppTokenSecret.New(request.Kind);
+        var mint = new MintTokenRequest(
+            secret.KeyId,
+            request.Kind,
+            secret.Hash,
+            request.Name,
+            call.Person,
+            request.Kind == ApiKeyKind.Personal ? call.Person : UserId.New(),
+            request.Tenant,
+            request.Roles,
+            request.ScopeTexts,
+            request.ExpiresAt,
+            TokenProblems.MaxLive,
+            call.Now);
+        var outcome = await call.Http.RequestServices.GetRequiredService<IAppTokenStore>().MintAsync(mint, call.Ct).ConfigureAwait(false);
+        if (outcome.Status != MintTokenStatus.Minted)
+        {
+            return TokenProblems.Refused(outcome.Status);
+        }
+
+        var header = call.Http.RequestServices.GetRequiredService<IOptions<AlvoAuthOptions>>().Value.HeaderName;
+        return SelfServiceCall.Json(TokenResponse.From(outcome.Token!, secret.Presented, header), StatusCodes.Status201Created);
+    }
+}

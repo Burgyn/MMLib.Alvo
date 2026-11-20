@@ -54,7 +54,7 @@ internal static partial class AccountsDocumentation
             CodeBody,
             AcceptResponses,
             SelfServiceEndpoints.InvitationsTag);
-        return operations;
+        return WithTokenOperations(operations);
     }
 
     private static OpenApiRequestBody CodeBody(OpenApiDocument document)

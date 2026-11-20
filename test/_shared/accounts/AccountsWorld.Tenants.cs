@@ -91,6 +91,38 @@ internal sealed partial class AccountsWorld
     internal async Task<TenantId> PersonalTenantAsync(string access) => new((await MembershipsAsync(access))
         .Single(membership => membership!["kind"]!.GetValue<string>() == "personal")!["tenantId"]!.GetValue<Guid>());
 
+    /// <summary>Mints an app token as <paramref name="access"/>'s person: <c>POST /auth/v1/tokens</c> with <paramref name="body"/>.</summary>
+    /// <param name="access">The access token.</param>
+    /// <param name="body">The request body, serialized as JSON.</param>
+    internal Task<HttpResponseMessage> MintAsync(string access, object body)
+        => AsPersonAsync(HttpMethod.Post, "/auth/v1/tokens", access, JsonSerializer.SerializeToNode(body)!.AsObject());
+
+    /// <summary>Sends a request presenting an app token as <paramref name="token"/>, in the credential header a client would use.</summary>
+    /// <param name="method">The HTTP method.</param>
+    /// <param name="path">The request path.</param>
+    /// <param name="token">The whole credential, <c>keyId.secret</c>.</param>
+    /// <param name="tenant">The tenant to request, or none.</param>
+    /// <param name="body">A JSON body, or none.</param>
+    internal Task<HttpResponseMessage> AsTokenAsync(
+        HttpMethod method, string path, string token, string? tenant = null, object? body = null)
+        => Api.SendAsync(
+            method,
+            path,
+            tenant: tenant,
+            body: body is null ? null : JsonSerializer.SerializeToNode(body)!.AsObject(),
+            headers: [new KeyValuePair<string, string>(Api.CredentialHeaderName, token)]);
+
+    /// <summary>
+    /// Takes <c>tenancy.selfService</c> out of <paramref name="descriptor"/> and, with it, the service tokens that need a
+    /// shared tenant to act as (S5 plan D8) — an apply that left them would be refused.
+    /// </summary>
+    /// <param name="descriptor">The whole descriptor, edited in place.</param>
+    internal static void WithoutSelfService(JsonObject descriptor)
+    {
+        descriptor["tenancy"]!.AsObject().Remove("selfService");
+        (descriptor["auth"]?["accessTokens"] as JsonObject)?.Remove("service");
+    }
+
     private async Task<JsonObject> UserAsync(string access)
     {
         using var user = await AsPersonAsync(HttpMethod.Get, "/auth/v1/user", access);

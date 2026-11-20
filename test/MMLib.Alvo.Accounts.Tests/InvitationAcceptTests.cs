@@ -254,7 +254,7 @@ public sealed class InvitationAcceptTests
             await TenantRoutesTests.FeatureDisabledAsync(accept, SelfServiceProblems.InvitationsKey);
         }
 
-        await team.World.ReapplyAsync(descriptor => descriptor["tenancy"]!.AsObject().Remove("selfService"));
+        await team.World.ReapplyAsync(AccountsWorld.WithoutSelfService);
 
         using var offPreview = await PreviewAsync(team.World, code);
         using var offAccept = await AcceptAsync(team.World, team.Ada, code);

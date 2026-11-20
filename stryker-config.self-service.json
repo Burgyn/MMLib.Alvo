@@ -20,7 +20,10 @@
       "**/Tenants/SelfService/SelfServiceMemberships.cs",
       "**/Tenants/SelfService/MemberResponse.cs",
       "**/Tenants/SelfService/MembershipResponse.cs",
-      "**/Tenants/SelfService/TenantName.cs"
+      "**/Tenants/SelfService/TenantName.cs",
+      "**/Tenants/SelfService/TokenRoutes.cs",
+      "**/Tenants/SelfService/TokenResponse.cs",
+      "**/Tenants/SelfService/TokenProblems.cs"
     ],
     "thresholds": {
       "high": 80,

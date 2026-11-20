@@ -74,7 +74,8 @@ public sealed class AccountsOpenApiTests
         var paths = document["paths"]!.AsObject().Select(path => path.Key).ToList();
         paths.Where(path => path.Contains("auth", StringComparison.Ordinal)
                 && !path.Contains("/tenants", StringComparison.Ordinal)
-                && !path.Contains("/invitations", StringComparison.Ordinal))
+                && !path.Contains("/invitations", StringComparison.Ordinal)
+                && !path.EndsWith("/tokens", StringComparison.Ordinal))
             .ShouldBe(_authPaths, ignoreOrder: true);
         var operations = Operations(document).Where(operation => Tags(operation).Contains("auth")).ToList();
         operations.Select(operation => operation["operationId"]!.GetValue<string>()).ShouldBe(
@@ -158,6 +159,38 @@ public sealed class AccountsOpenApiTests
         Reference(Operation(document, "invitations.preview")["requestBody"]).ShouldBe("#/components/schemas/authInvitationCode");
         Reference(Operation(document, "invitations.accept")["requestBody"]).ShouldBe("#/components/schemas/authInvitationCode");
         Reference(Operation(document, "tenants.createInvitation")["responses"]!["201"]).ShouldBe("#/components/schemas/authNewInvitation");
+    }
+
+    /// <summary>
+    /// The token route (S5 plan D1): <c>tokens.create</c> appears once, tagged <c>tokens</c>, taking only the Bearer scheme,
+    /// and of the sign-in components only its 201 schema has a <c>token</c> property — the credential is in one answer.
+    /// </summary>
+    [Fact]
+    public async Task The_token_route_is_in_the_document_once_and_only_its_201_carries_the_credential()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine, openApi: true);
+
+        var document = await world.Api.OpenApiDocumentAsync();
+
+        var paths = document["paths"]!.AsObject().Select(path => path.Key).ToList();
+        paths.Where(path => path.EndsWith("/tokens", StringComparison.Ordinal)).ShouldBe(["/auth/v1/tokens"]);
+        var operations = Operations(document).Where(operation => Tags(operation).Contains("tokens")).ToList();
+        var create = operations.ShouldHaveSingleItem();
+        create["operationId"]!.GetValue<string>().ShouldBe("tokens.create");
+        create["summary"].ShouldNotBeNull();
+        Tags(create).ShouldBe(["tokens"]);
+        Security(create).ShouldBe("[{\"alvoBearer\":[]}]");
+        foreach (var status in new[] { "201", "401", "403", "404", "409", "415", "422", "429" })
+        {
+            create["responses"]![status].ShouldNotBeNull(status);
+        }
+
+        Reference(create["requestBody"]).ShouldBe("#/components/schemas/authAppTokenRequest");
+        Reference(create["responses"]!["201"]).ShouldBe("#/components/schemas/authAppToken");
+        var withToken = document["components"]!["schemas"]!.AsObject()
+            .Where(schema => schema.Value!["properties"]?["token"] != null)
+            .Select(schema => schema.Key);
+        withToken.ShouldBe(["authAppToken"]);
     }
 
     /// <summary>
