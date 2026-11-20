@@ -113,8 +113,13 @@ export default defineConfig({
             schema: './src/generated/openapi/data-api.json',
             sidebar: { label: 'Data API — example (vehicle-registry)' },
           },
+          {
+            base: 'reference/accounts-api',
+            schema: './src/generated/openapi/accounts-api.json',
+            sidebar: { label: 'Sign-in, tenants and tokens API — example (field-service)' },
+          },
         ]),
-        starlightLinksValidator({ exclude: [`${base}reference/data-api/`] }),
+        starlightLinksValidator({ exclude: [`${base}reference/data-api/`, `${base}reference/accounts-api/`] }),
       ],
       sidebar: [
         { label: 'Start here', items: [
