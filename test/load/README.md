@@ -70,6 +70,13 @@ they are the floor. A regression fires only when HEAD is **both** a factor slowe
 base **and** slower by more than an absolute floor in milliseconds. Both conditions, because a
 factor alone on a two-millisecond endpoint is noise, and a gate that fires on noise gets muted.
 
+**Each arm is the code it names, as it shipped** (#547). The base arm serves the merge base's own
+descriptor from its own database (`alvo_load_base`, beside the head's on the same PostgreSQL), seeded
+by the merge base's own `seed.sql` and read back through its API before k6 starts. Sharing the head's
+was how the gate broke on the accounts stack: the older image refused the head descriptor's new keys
+and exited before measuring anything. The seed derives every id from a row ordinal, so both databases
+hold the same rows. A container that does not become healthy has its log printed before the run stops.
+
 ## The gating statistic is `min`, and p95 is reported but never gated
 
 This was measured, not assumed. On the first real gate run every p95 landed within 8–9 ms of
@@ -214,7 +221,7 @@ the generator is off-box.
 | `scenarios.js` | the k6 script: one `exec` function and one `Trend` per shape |
 | `seed.sql` | the bulk seed, parameterised by `:rows` |
 | `baselines/gate.json` | ratio ceilings and A/B factors — the reviewable artifact |
-| `docker-compose.load.yml` | the field-service stack with a pre-built image, so the A/B can swap arms |
+| `docker-compose.load.yml` | the field-service stack with a pre-built image, its database and descriptor per arm, so the A/B can swap arms |
 | `../../tools/MMLib.Alvo.Load.Host` | the hooks arm's host: the standalone composition plus three calibration hooks and the probe |
 | `../../scripts/test-load` | the driver: image, stack, seed, cursor walk, k6, verdict |
 | `../../scripts/assert-load-baseline` | the verdict — the one authority on pass/fail |
