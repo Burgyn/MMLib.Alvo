@@ -1282,12 +1282,13 @@ And where the product answered differently from the plan's first wording (each p
 
 - **A scoped create's missing `tenant_id` names no field.** The `403` is correct but unhelpful to an agent: Alvo could
   fill the column from the tenant the request acts in, or answer a structured violation at `/tenant_id`. A DX
-  follow-up.
+  follow-up: [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538).
 - **A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.** The `401` could name `X-Alvo-Api-Key` as its
-  fix. A DX follow-up.
+  fix. A DX follow-up: [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).
 - **An `eval-assistant` run on the v10 prompt and the tenth skill** is owed (it costs tokens and is in no ring). Two
   smaller gaps sit beside it: `SkillAreas.AreaOf("/tenancy", …)` does not look for a `selfService` inside an added
-  value, and the base prompt's "You can change" list names neither `auth` nor `tenancy.selfService`.
+  value, and the base prompt's "You can change" list names neither `auth` nor `tenancy.selfService`. All three are
+  [#540](https://github.com/Burgyn/MMLib.Alvo/issues/540).
 - **No real browser signs in anywhere.** The Google console steps and `sign-in.js` follow Google's documented API;
   the demo stack signs people in through the test issuer only.
 - App tokens on a host's own `.WithAlvoCaller()` endpoints ([#536](https://github.com/Burgyn/MMLib.Alvo/issues/536)),

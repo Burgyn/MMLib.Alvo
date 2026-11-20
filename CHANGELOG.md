@@ -179,10 +179,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     OpenAPI document of a field-service host with sign-in configured.
   - **A tenth descriptor skill, `alvo-descriptor-accounts`**, in the `alvo` plugin and the schema assistant: the three
     levels, `auth.signUp`, `auth.accessTokens`, `tenancy.selfService`, tenant versus project roles, and what the
-    descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget).
+    descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget);
+    its `eval-assistant` run is owed (#540).
   - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
-    by policy." and names no field; an app token sent as `Authorization: Bearer` is `401 invalid_token` with no hint
-    to use `X-Alvo-Api-Key`. **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+    by policy." and names no field (#538); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
+    hint to use `X-Alvo-Api-Key` (#539). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

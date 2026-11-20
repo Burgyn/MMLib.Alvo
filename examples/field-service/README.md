@@ -243,13 +243,14 @@ a key are two credentials over the same rules.
 **A scoped create still echoes its tenant.** A person names the tenant she acts in with `X-Alvo-Tenant`, and a
 create on a scoped entity carries the same id as `tenant_id` in its body. Alvo checks the column, it does not fill
 it in. Leave it out and the answer is `403 The write was rejected by policy.`, which names no field
-(`170-SelfService/003` pins it).
+(`170-SelfService/003` pins it; [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538) tracks the fix).
 
 ## Worth knowing before you write against this
 
 - **A create on a tenant-scoped entity must carry `tenant_id` explicitly.** Nothing stamps it from the
   caller's context; the synthesized tenant scope's `WITH CHECK` then judges the value. Omit it and the
-  answer is `403 The write was rejected by policy.` — correct, but it names no field.
+  answer is `403 The write was rejected by policy.` — correct, but it names no field
+  ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)).
 - **`job_number` and `on_site_minutes` are Alvo's to write.** A create or update that sends either is
   refused `403`, with a detail that says why; read them back from the response.
 - **The dashboard's field rename does not carry everything yet.** Renaming a field a transition's `when`, a timer,

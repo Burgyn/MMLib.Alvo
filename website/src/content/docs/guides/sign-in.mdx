@@ -72,6 +72,7 @@ providers therefore work the same whichever provider the person used.
 
    | Setting | Why |
    |---|---|
+   | `ASPNETCORE_ENVIRONMENT: Development` | Lets you try sign-in on localhost without `Alvo__Accounts__Issuer`: in Development the tokens Alvo issues name the URL each request reached. **Never set it in production.** Without a configured issuer, a token's `iss` would follow the request's `Host` header, which the caller chooses; that is why the host refuses an unset issuer outside Development. Drop the line and set the issuer ([Running in production](/guides/production/#8-if-people-sign-in)). |
    | `Alvo__Accounts__Providers__Google__ClientIds__0` | The audience Alvo requires in every Google ID token. A token minted for anyone else's client is refused. Add a second index for an Android or iOS client. |
    | `Alvo__Accounts__Issuer` | The `iss` of every access token Alvo signs: the public `https` URL of `/auth/v1`. **Required outside Development.** In Development it may stay unset, and then tokens name the URL each request reached. |
    | `Alvo__Secrets__EncryptionKeyFile` | A mounted file with 32 random bytes in base64. Alvo encrypts its signing keys at rest with it, and sign-in refuses to start without one. |

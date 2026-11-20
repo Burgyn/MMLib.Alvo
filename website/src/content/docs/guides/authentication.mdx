@@ -144,7 +144,8 @@ A configured key and a person's token on one request are refused with `401`, rat
 ## People sign in to the dashboard
 
 The dashboard at `/admin` does not take API keys. People sign in with an email address and a password that Alvo
-holds; this build has no other sign-in provider.
+holds. The dashboard has no other sign-in provider: Google sign-in, above, is for your app's people, not its
+operators.
 
 - **The first administrator** comes from configuration: `Alvo__Admin__BootstrapEmail`, and
   `Alvo__Admin__BootstrapPasswordFile`, the path of a mounted file that holds the password. The quick start's compose

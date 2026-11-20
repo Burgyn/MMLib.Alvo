@@ -70,7 +70,8 @@ tenant is a membership they hold ([Tenants people create](#tenants-people-create
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[1]} />
 
-3. Leave `tenant_id` out, or name another tenant, and the write is refused. The refusal names no field:
+3. Leave `tenant_id` out, or name another tenant, and the write is refused. The refusal names no field
+   ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)):
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[2]} />
 

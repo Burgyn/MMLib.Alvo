@@ -19,9 +19,46 @@ minutes, starting from a host with sign-in from [Sign-in and accounts](/guides/s
 ## Before you start
 
 - A host with Google sign-in configured, and a page that signs people in:
-  [Sign-in and accounts](/guides/sign-in/), steps 2 and 3.
+  [Sign-in and accounts](/guides/sign-in/), steps 2, 3 and 5. This page carries on in the folder and the terminal
+  that guide left you in, with its variables still exported.
+- **Two Google accounts**, one for Dana and one for Theo. Sign in as Dana in a normal browser window and as Theo in a
+  private one, so each window keeps its own session. While your Google app's audience is in *Testing*, list both
+  accounts as test users.
 - [Multi-tenancy](/guides/multi-tenancy/), for what a tenant-scoped entity is. Everything there holds here: a tenant
   only ever sees its own rows.
+
+**Serve Acme Repairs from an empty database.** Both descriptors in step 1 change the time tracker's table in a way
+that discards data: level 2 drops its audit columns, and Acme Repairs drops `time_entries` altogether. Alvo refuses to
+start rather than throw data away: `docker compose logs alvo` shows "Alvo cannot start" and lists each refused step,
+marked `<- destructive`. So remove the time tracker's database, accounts included, and start Acme Repairs on a fresh
+one:
+
+```sh title="Terminal"
+docker compose down --volumes
+curl -fsSL -o acme-repairs.alvo.json https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/website/src/snippets/tenants/02-level-three.alvo.json
+sed -i.bak 's#./time-tracker.alvo.json#./acme-repairs.alvo.json#' docker-compose.override.yml
+docker compose up --wait --wait-timeout 90
+```
+
+The `sed` line points the override's `volumes:` entry at the new file, so it reads
+`./acme-repairs.alvo.json:/alvo/descriptor.json:ro`. To try level 2 instead, download `01-level-two.alvo.json` from
+the same folder and point the line at it the same way. Reload the page in both windows and sign in again: the first
+exchange creates each account afresh.
+
+**Send the requests from the page.** The exchanges below are shown as raw HTTP. To send one, open the browser console
+on the sign-in page and use `api()` from `sign-in.js`. It sends the request as the person signed in in that window,
+with their access token, refreshed when it is due. Extra headers such as `X-Alvo-Tenant` go in `headers`:
+
+```js
+const acme = await (await api('/auth/v1/tenants', { method: 'POST', body: JSON.stringify({ name: 'Acme Repairs' }) })).json();
+const inAcme = { 'X-Alvo-Tenant': acme.tenantId };
+await (await api('/api/customers', {
+  method: 'POST', headers: inAcme, body: JSON.stringify({ tenant_id: acme.tenantId, name: "Acme's first customer" }),
+})).json();
+```
+
+To use `curl` instead, type `access` in the same console. It prints the window's current access token, which you send
+as `-H "Authorization: Bearer <token>"` for the next 15 minutes.
 
 The routes below are written as their templates: `{tenantId}` is the id `POST /auth/v1/tenants` answers, `{userId}` a
 member's id. Each worked step names the case of `test/teapie-field-service/170-SelfService` that runs it for real
@@ -134,8 +171,8 @@ the answers are the same.
    }
    ```
 
-   This is a current limitation, not a policy you have to satisfy differently. Until Alvo fills the column in, put
-   `tenant_id` in every scoped create your client sends. An update never sends it.
+   This is a current limitation, not a policy you have to satisfy differently. Until Alvo fills the column in
+   ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)), put `tenant_id` in every scoped create your client sends. An update never sends it.
    (`170-SelfService/003-assigned-work`, `DanaCreatesCustomer` and `DanaCreatesWithoutTenantId`.)
 
    A tenant the person does not belong to refuses the whole request with `401`, not a quieter request with no tenant
@@ -235,8 +272,10 @@ the answers are the same.
    X-Alvo-Tenant: 3c9e…
    ```
 
-   He gets exactly one job, his own. The tenant role `technician` admits him into Acme's `work_orders`, and the rule
-   `assigned_to == @user.id` narrows it to his row. He may update it, because `update` admits the person it is
+   He gets exactly one job, his own. His membership puts him inside Acme's tenant wall, and the rule
+   `assigned_to == @user.id` narrows Acme's `work_orders` to his row. The role `technician` itself admits nothing
+   here, because no rule in this descriptor names it. It is in `@user.roles` while he acts in Acme, so a rule such as
+   `'technician' in @user.roles && assigned_to == @user.id` is how you would make the role count. He may update it, because `update` admits the person it is
    assigned to. He may not create one: every job names a customer, and `customers` admits no technician, so the
    reference does not resolve for him (`422`, code `unresolved-reference`). (`170-SelfService/003-assigned-work`.)
 
@@ -361,7 +400,8 @@ there as well.
 
 ## Limits and what is not here yet
 
-- **The duplicated tenant on a create.** A scoped create sends both `X-Alvo-Tenant` and `tenant_id`, as step 3 shows.
+- **The duplicated tenant on a create.** A scoped create sends both `X-Alvo-Tenant` and `tenant_id`, as step 3 shows
+  ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)).
 - **No deleting a tenant**, and no handing a personal tenant to someone else. `maxPerAccount` counts every shared
   tenant an account ever created.
 - **No emails.** Alvo never sends an invitation. Your app delivers the code.
