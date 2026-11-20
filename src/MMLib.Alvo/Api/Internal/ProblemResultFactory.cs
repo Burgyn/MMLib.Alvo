@@ -157,6 +157,20 @@ internal static class ProblemResultFactory
             + "decides who is; ask whoever administers it.");
 
     /// <summary>
+    /// The 403 for a personal or service token presented to the Management API (S5 plan D9, closing S1 D8).
+    /// </summary>
+    /// <remarks>
+    /// <b>The wording is fixed and names no caller</b> — identical for every token and every project, so it discloses
+    /// nothing a reader of the docs does not have, and it names the fix an agent can act on. The slug is
+    /// <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy refusal already carries.
+    /// </remarks>
+    internal static IResult AppTokenForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are app credentials and never manage a project. "
+            + "Use an operator session or a configured API key.");
+
+    /// <summary>
     /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
     /// does not admit as an administrator.
     /// </summary>

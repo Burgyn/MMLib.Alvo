@@ -38,6 +38,13 @@ namespace MMLib.Alvo.Management.Internal;
 /// is the descriptor's <c>access</c> block, evaluated behind the gate.
 /// </para>
 /// <para>
+/// <b>An app token is refused here, after it resolved</b> (S5 plan D9, closing S1 D8): a principal whose key id carries
+/// the <c>alvo_pat_</c>/<c>alvo_svc_</c> prefix — sound because <see cref="AlvoAuthOptionsValidator"/> reserves both, so
+/// no configured key can carry one — is a 403 whatever the project's <c>access</c> block says. The prefix is read, not a
+/// flag on <see cref="AlvoPrincipal"/>, which stays unchanged. It is resolved first, so an unusable token is the ordinary
+/// 401 of any key. In-process <see cref="IAlvoManagement"/> callers publish their own principal and never pass here.
+/// </para>
+/// <para>
 /// <b>Three outcomes, the same three the Data API's filter has.</b> No credential at all is anonymous rather
 /// than 401 — the gate refuses an anonymous caller through the same default-deny path a credentialled caller
 /// who matches no level takes. A credential that was presented and cannot be used is 401, before the gate is
@@ -64,6 +71,10 @@ internal sealed class ManagementCallerFilter(
             context.HttpContext.Request, resolvers, authOptions.Value, CredentialSurface.Management).ConfigureAwait(false);
 
         return admission.Refusal
+            ?? AppTokenRefusal(admission.Principal)
             ?? await CallerResolution.PublishingAsync(accessor, admission.Principal, context, next).ConfigureAwait(false);
     }
+
+    private static IResult? AppTokenRefusal(AlvoPrincipal? principal) =>
+        principal is not null && AppTokenSecret.IsAppTokenId(principal.KeyId) ? ProblemResultFactory.AppTokenForbidden() : null;
 }
