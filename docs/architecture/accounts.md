@@ -843,6 +843,16 @@ section as tests, on SQLite and on PostgreSQL.
 - **Scopes are entity × read/write, and nothing wider.** At least one, each naming an entity the applied descriptor
   declares. `*` is refused, because a wildcard would quietly grant every entity added after the mint (the GitHub
   fine-grained token precedent); a person who wants everything uses their session.
+- **Scopes bind where a route names an entity, and a token goes nowhere else.** The generated Data API (batch and
+  embeds included) checks every operation against them, and a mapped command checks its own entity: a bound command
+  needs `entity:read` and `entity:write`, and an unbound one needs `*:write`, which no token can hold, so a token never
+  calls an unbound command. Once admitted, a command's handler acts with the command's own authority — its writes,
+  to its entity or any other, are judged by the descriptor's rules as the token's caller, unscoped, exactly as a
+  configured key's are (`commands.md`). A host's own `.WithAlvoCaller()` endpoint names no entity a scope could be
+  checked against, so it **refuses** a personal or service token with 403 `forbidden` and a fixed sentence, after
+  resolving it (an unusable token is still 401); configured keys, Bearer people and the anonymous caller reach it as
+  before. Letting such an endpoint name the scope it needs is
+  [#536](https://github.com/Burgyn/MMLib.Alvo/issues/536).
 
 ### The table
 
@@ -950,7 +960,8 @@ Three behaviours, recorded so they read as decisions:
 | A token dies with its reason, in that transaction: removal and leaving, an owner's demotion, a ban; a role change and a refused write revoke nothing; enabling revives nothing | `AppTokenStoreFacts.Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only`, `…A_member_leaving_revokes_the_same`, `…Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s`, `…Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens`, `…Changing_a_member_s_roles_revokes_nothing`, `…A_refused_demotion_revokes_nothing`, `…Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none`; `AccountStoreFacts.Disabling_revokes_sessions_and_tokens_together`; `AppTokenEngineFacts.Service_token_end_to_end`, `…A_banned_person_s_tokens_die_and_stay_dead` |
 | A mint racing its minter's demotion, removal or ban never outlives it (Review Focus 2) | `AppTokenStoreFacts.A_service_mint_racing_its_minter_s_demotion_never_outlives_it`, `…A_personal_mint_racing_the_person_s_removal_never_outlives_it`, `…A_mint_racing_a_ban_never_outlives_it` (20 iterations, both engines; red on PostgreSQL without the tenant bump) |
 | Never more than 100 live tokens per account, also in parallel | `AppTokenStoreFacts.The_live_cap_counts_only_unexpired_unrevoked_tokens`, `…Concurrent_mints_at_the_cap_never_exceed_it` (red on PostgreSQL without the account lock); `TokenRoutesTests.The_live_cap_is_409` |
-| A token never mints, lists or revokes a token, never reaches Management, never acts in another tenant, never reads outside its scopes (Review Focus 3) | `TokenRoutesTests.A_token_cannot_mint_a_token`, `…A_token_cannot_list_or_revoke`, `…A_person_mints_a_personal_token_and_sees_it_once` (`notes` is 403 `out-of-scope`); `AppTokenManagementTests.A_token_is_refused_by_every_management_route`, `…A_bearer_beside_an_app_token_on_management_is_judged_by_the_token`; `AppTokenEngineFacts.A_token_never_acts_outside_its_tenant`; `AppTokenResolutionTests.A_header_naming_another_tenant_refuses_either_kind` |
+| A token never mints, lists or revokes a token, never reaches Management, never acts in another tenant, never reads outside its scopes on the Data API (Review Focus 3) | `TokenRoutesTests.A_token_cannot_mint_a_token`, `…A_token_cannot_list_or_revoke`, `…A_person_mints_a_personal_token_and_sees_it_once` (`notes` is 403 `out-of-scope`); `AppTokenManagementTests.A_token_is_refused_by_every_management_route`, `…A_bearer_beside_an_app_token_on_management_is_judged_by_the_token`; `AppTokenEngineFacts.A_token_never_acts_outside_its_tenant`; `AppTokenResolutionTests.A_header_naming_another_tenant_refuses_either_kind` |
+| A host's `.WithAlvoCaller()` endpoint refuses either kind with the fixed 403, after an unusable token's 401; a configured key, a Bearer person and the anonymous caller reach it as before; a bound command admits a token whose scopes cover its entity and refuses one whose scopes do not, and an unbound command refuses every token (final review I1) | `AppTokenCallerTests.A_token_on_a_custom_endpoint_is_refused_with_the_fixed_403_before_the_handler`, `…An_unusable_token_on_a_custom_endpoint_is_401_like_any_key`, `…A_configured_key_a_bearer_person_and_the_anonymous_caller_reach_a_custom_endpoint_as_before`, `…A_command_admits_a_token_whose_scopes_cover_its_entity`, `…A_command_refuses_a_token_outside_its_scopes_403_out_of_scope` |
 | A service token's tenant role never writes a global entity, directly or through a relation term, and never reaches Management (Review Focus 4) | `AppTokenEngineFacts.A_service_token_s_tenant_role_never_reaches_global_data_or_management` (red when its roles go into `Roles`) |
 | The descriptor moving under a live token counts on its next request: a role dropped from `assignableRoles`, a kind switched off and on, `selfService` removed (Review Focus 5) | `AppTokenEngineFacts.The_descriptor_moves_under_live_tokens`; `AppTokenResolutionTests.A_kind_the_descriptor_does_not_enable_is_refused`, `…Re_enabling_revives_an_unexpired_token`, `…A_service_token_acts_as_itself_with_its_roles_still_assignable` |
 | A service token acts as itself: its own user id, only roles its minter holds, only for a shared tenant, minted only by an owner | `TokenRoutesTests.An_owner_mints_a_service_token_that_acts_as_the_tenant`, `…A_service_token_carries_only_roles_its_owner_holds`, `…A_personal_tenant_takes_no_service_token`, `…A_member_who_is_not_an_owner_cannot_mint_a_service_token`; `AppTokenStoreFacts.A_service_token_needs_an_owner_of_a_shared_tenant`, `…A_mint_that_would_act_as_someone_other_than_its_minter_is_refused` |
@@ -994,7 +1005,8 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
   without `createTenants`. **Deviation, stricter than spec §3.1's "requires `selfService`"**, which it implies: a
   personal tenant has one member forever, so a service token there outlives nothing a personal token would not.
 - **D9** — the Management API refuses an app token with 403 `forbidden` and a fixed sentence, by its prefix and after it
-  resolved, so an unusable token is any key's 401. `AlvoPrincipal` does not grow. S1 D8 is closed.
+  resolved, so an unusable token is any key's 401. `AlvoPrincipal` does not grow. S1 D8 is closed. A host's
+  `.WithAlvoCaller()` endpoint now refuses the same way, with its own sentence — a deviation from D9, recorded below.
 - **D10** — a token dies in the transaction that kills its reason, and every mint is serialised against those
   transactions. **Deviation beyond spec §7.1** for the service half: §7.1 lists removal and demotion; a ban also
   revokes the service tokens the account minted, because a banned owner who kept a secret is exactly spec §16 B4's case.
@@ -1027,10 +1039,23 @@ And where the implementation answered differently from the plan's first wording,
   people, since nobody changes their own membership, so Carol joins as a dispatcher and Ada demotes her. Dropping
   `dispatcher` from `assignableRoles` drops it from `creatorRoles` too, which must stay within it.
 - **`team-tracker`'s `jobs` gained `audit: true`**, so a fact can read `created_by`.
+- **A host's `.WithAlvoCaller()` endpoint refuses app tokens** (final review I1). **Deviation from plan D9**, which let
+  them reach such an endpoint: a custom endpoint names no entity, so `CallerGate` checks no scope there, and
+  `AlvoCaller` exposes neither scopes nor key id — a token minted with only `jobs:read` would have acted there as its
+  whole principal, while the text told its owner it was "limited to the scopes named". `AlvoCallerFilter` now resolves
+  the token (an unusable one is still 401) and answers 403 `forbidden` with a fixed sentence
+  (`ProblemResultFactory.AppTokenCustomEndpointForbidden`), by the same key-id test Management uses
+  (`AppTokenSecret.IsAppToken`). Mapped commands are unchanged: `CommandEndpointFilter` already checks a token's
+  scopes against the command's entity, so a token within them is admitted, and the handler then acts with the
+  command's own authority. Public API unchanged. Scope opt-in for custom endpoints:
+  [#536](https://github.com/Burgyn/MMLib.Alvo/issues/536).
 
 ### Not in S5
 
 - Scopes finer than entity × read/write — a field, an operation, "only my own rows".
+- App tokens on a host's own `.WithAlvoCaller()` endpoints: refused 403 until an endpoint can name the scope it needs
+  ([#536](https://github.com/Burgyn/MMLib.Alvo/issues/536)). A command's writes beyond its own entity stay unscoped,
+  judged by the rules.
 - A per-token IP allow-list.
 - OAuth client credentials (spec D3). A service token is an API key, not an OAuth client.
 - A sweep of revoked and expired rows. Nothing deletes an `_api_keys` row yet, so the table grows by every mint —

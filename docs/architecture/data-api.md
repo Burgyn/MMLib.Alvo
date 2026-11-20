@@ -1052,7 +1052,9 @@ roles of their current membership read on every request; a service token acts as
 tenant header still only confirms**: a token's tenant is fixed when it is minted, so no header acts in it, and a header
 naming any other tenant — even one the same person belongs to — refuses the whole principal with the API key's 401.
 Whatever refuses a token — a wrong secret, its expiry, a revocation, a kind the descriptor switched off, an ended
-membership — the answer is that same 401.
+membership — the answer is that same 401. A resolved token is held to its scopes on the Data API and on a command's
+entity; a host's `.WithAlvoCaller()` endpoint, which shares the `Data` surface but names no entity, refuses it 403
+`forbidden` (accounts S5; scope opt-in is #536).
 
 **The three 401s.** A Bearer the resolver refuses answers `WWW-Authenticate: Bearer error="invalid_token"`. A malformed
 one answers `Bearer error="invalid_request"`. An ambiguous request answers with both challenges (API key and Bearer).

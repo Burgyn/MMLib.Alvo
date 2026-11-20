@@ -230,6 +230,18 @@ read it where they issue one, not only where it was decided. Narrow a key's mana
 narrowing its **roles**. A personal or service token never reaches `/management`, whatever its roles: it is refused 403
 (accounts S5 D9).
 
+**Your own endpoints do not take personal or service tokens yet.** A host endpoint mapped with `.WithAlvoCaller()` names
+no entity, so no API-key scope is checked there — and a token's scopes are the boundary its owner drew around a
+credential handed to someone else. Rather than let a `jobs:read` token act there as its whole principal, the endpoint
+resolves the token (an unusable one is still 401) and then refuses it **403** `forbidden`, before the handler runs, with
+one fixed detail: *"Personal and service tokens are not accepted on custom endpoints yet: a custom endpoint names no
+entity a token's scopes could be checked against. Use the generated Data API or a command, or call this endpoint with a
+signed-in session or a configured API key."* Configured keys, Bearer people and the anonymous caller reach it exactly
+as before. A command mapped with `MapAlvoCommand` is different, because it names its entity: a token whose scopes read
+and write that entity is admitted, and the handler then writes with the command's own authority — judged by the
+descriptor's rules as the token's caller, not by the token's scopes. Letting a custom endpoint name the scope it needs
+is [#536](https://github.com/Burgyn/MMLib.Alvo/issues/536). Pinned by `AppTokenCallerTests`.
+
 **Two homes for an API key, one store in front of them** (accounts S5 D4). `X-Alvo-Api-Key` carries two kinds of
 credential: the dev keys configured under `Alvo:Auth:DevKeys`, held in memory, and the personal and service tokens people
 mint over `POST /auth/v1/tokens`, persisted in `{prefix}_api_keys` by the relational provider. The `IApiKeyStore` the

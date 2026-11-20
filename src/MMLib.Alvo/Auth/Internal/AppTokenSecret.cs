@@ -65,6 +65,13 @@ internal readonly struct AppTokenSecret
     /// <param name="keyId">A presented or stored key id.</param>
     internal static bool IsAppTokenId(string keyId) => KindOf(keyId) is not ApiKeyKind.Configured;
 
+    /// <summary>
+    /// Whether <paramref name="principal"/> was resolved from a personal or service token: its key id carries an app-token
+    /// prefix. The one test every surface that refuses app tokens reads — the Management API and <c>.WithAlvoCaller()</c>.
+    /// </summary>
+    /// <param name="principal">A resolved caller, or <see langword="null"/> for none.</param>
+    internal static bool IsAppToken(AlvoPrincipal? principal) => principal?.KeyId is { } keyId && IsAppTokenId(keyId);
+
     /// <summary>The kind <paramref name="keyId"/>'s prefix names; <see cref="ApiKeyKind.Configured"/> when it has none.</summary>
     /// <param name="keyId">A presented or stored key id.</param>
     internal static ApiKeyKind KindOf(string keyId)

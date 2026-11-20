@@ -1,0 +1,32 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "token-caller",
+  "description": "App tokens on a host's own endpoints (S5 final review I1): a .WithAlvoCaller() endpoint refuses a personal or service token, while a command bound to regions admits one whose scopes cover reading and writing regions. Any authenticated caller may read and update a region, so only the token's scopes can tell the two apart.",
+  "auth": {
+    "providers": ["google"],
+    "roles": ["dispatcher"],
+    "signUp": { "mode": "open" },
+    "accessTokens": { "personal": true, "service": true }
+  },
+  "tenancy": {
+    "enabled": true,
+    "selfService": {
+      "personalTenant": { "roles": ["dispatcher"] },
+      "createTenants": { "creatorRoles": ["dispatcher"] },
+      "assignableRoles": ["dispatcher"]
+    }
+  },
+  "entities": {
+    "regions": {
+      "tenancy": "global",
+      "fields": { "code": { "type": "string", "maxLength": 8 } },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'dispatcher' in @user.roles",
+        "update": "'authenticated' in @user.roles"
+      }
+    }
+  }
+}

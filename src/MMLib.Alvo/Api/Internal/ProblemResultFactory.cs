@@ -171,6 +171,24 @@ internal static class ProblemResultFactory
             + "Use an operator session or a configured API key.");
 
     /// <summary>
+    /// The 403 for a personal or service token presented to a host's own endpoint mapped with <c>.WithAlvoCaller()</c>
+    /// (accounts S5, the final review's I1).
+    /// </summary>
+    /// <remarks>
+    /// <b>Why refuse rather than admit unscoped:</b> a token's scopes are the boundary its owner drew around a credential
+    /// handed to a third party, and a custom endpoint names no entity they could be checked against — so admitting it
+    /// would let a <c>jobs:read</c> token act as its whole principal. Until an endpoint can name the scope it needs
+    /// (#536), it does not take app tokens at all. The wording is fixed and names no caller, like
+    /// <see cref="AppTokenForbidden"/>; the slug is <see cref="AlvoProblemTypes.Forbidden"/>.
+    /// </remarks>
+    internal static IResult AppTokenCustomEndpointForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are not accepted on custom endpoints yet: a custom endpoint names no entity a "
+            + "token's scopes could be checked against. Use the generated Data API or a command, or call this endpoint "
+            + "with a signed-in session or a configured API key.");
+
+    /// <summary>
     /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
     /// does not admit as an administrator.
     /// </summary>

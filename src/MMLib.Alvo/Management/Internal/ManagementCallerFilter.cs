@@ -76,5 +76,5 @@ internal sealed class ManagementCallerFilter(
     }
 
     private static IResult? AppTokenRefusal(AlvoPrincipal? principal) =>
-        principal is not null && AppTokenSecret.IsAppTokenId(principal.KeyId) ? ProblemResultFactory.AppTokenForbidden() : null;
+        AppTokenSecret.IsAppToken(principal) ? ProblemResultFactory.AppTokenForbidden() : null;
 }

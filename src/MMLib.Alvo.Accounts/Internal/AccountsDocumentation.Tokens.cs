@@ -16,8 +16,10 @@ internal static partial class AccountsDocumentation
             "Mint a personal or service token",
             "A signed-in person mints a token for an integration. A `personal` token acts as the person — with the tenant roles "
             + "they hold, read on every request — in one tenant or none; a `service` token acts as a tenant the person owns, "
-            + "with roles the person holds there, and only in shared tenants. Both are limited to the `scopes` named "
-            + "(`<entity>:read` or `<entity>:write`, never `*`) and expire at `expiresAt`. The answer carries the credential "
+            + "with roles the person holds there, and only in shared tenants. On the generated Data API and on a command "
+            + "bound to an entity, a token reaches only the `scopes` named (`<entity>:read` or `<entity>:write`, never `*`); "
+            + "a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom "
+            + "endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential "
             + "in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or "
             + "mints a token.",
             Bearer: true,

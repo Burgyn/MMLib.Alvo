@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Auth;
-using MMLib.Alvo.Auth.Internal;
 using System.Net;
+using static MMLib.Alvo.Api.Tests.AppTokenFakes;
 
 namespace MMLib.Alvo.Api.Tests;
 
@@ -93,9 +93,6 @@ public sealed class AppTokenManagementTests
         response.StatusCode.ShouldBe(HttpStatusCode.OK, "the refusal is Management's only");
     }
 
-    private static KeyValuePair<string, string>[] Presenting(AlvoApiWorld world, MintedToken token) =>
-        [new(world.CredentialHeaderName, token.Presented)];
-
     private static Task<AlvoApiWorld> WorldAsync(FakeAppTokenStore store) =>
         AlvoApiWorld.FromDescriptorAsync(
             "token-desk.alvo.json",
@@ -104,47 +101,6 @@ public sealed class AppTokenManagementTests
                 ConfigureServices: services => services.AddSingleton<IAppTokenStore>(store),
                 MapManagementApi: true));
 
-    private static (FakeAppTokenStore Store, MintedToken Token) StoreWith(ApiKeyKind kind)
-    {
-        var secret = AppTokenSecret.New(kind);
-        var store = new FakeAppTokenStore();
-        store.Put(new ApiKeyRecord
-        {
-            KeyId = secret.KeyId,
-            Sha256Hash = secret.Hash,
-            User = new UserId(Guid.NewGuid()),
-            RoleNames = kind == ApiKeyKind.Service ? ["dispatcher"] : [],
-            Tenant = kind == ApiKeyKind.Service ? new TenantId(_tenant) : null,
-            Scopes = new HashSet<ApiKeyScope> { RegionsRead() },
-            ExpiresAt = DateTimeOffset.UtcNow.AddDays(30),
-            Kind = kind,
-            MintedBy = new UserId(Guid.NewGuid()),
-        });
-        return (store, new MintedToken(secret.KeyId, secret.Presented));
-    }
-
-    private static ApiKeyScope RegionsRead() =>
-        ApiKeyScope.TryParse("regions:read", out var scope) ? scope : throw new InvalidOperationException("regions:read must parse");
-
-    private sealed record MintedToken(string KeyId, string Presented);
-
-    private sealed class FakeAppTokenStore : IAppTokenStore
-    {
-        private readonly Dictionary<string, ApiKeyRecord> _tokens = new(StringComparer.Ordinal);
-
-        internal void Put(ApiKeyRecord token) => _tokens[token.KeyId] = token;
-
-        internal void Expire(string keyId) => _tokens[keyId] = _tokens[keyId] with { ExpiresAt = DateTimeOffset.UtcNow.AddDays(-1) };
-
-        public ValueTask<ApiKeyRecord?> FindAsync(string keyId, CancellationToken ct) =>
-            ValueTask.FromResult(_tokens.GetValueOrDefault(keyId));
-
-        public ValueTask TouchAsync(string keyId, DateTimeOffset usedAt, CancellationToken ct) => ValueTask.CompletedTask;
-
-        public Task<MintTokenOutcome> MintAsync(MintTokenRequest request, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<AppTokenView>> ListAsync(UserId person, CancellationToken ct) => throw new NotSupportedException();
-
-        public Task<RevokeTokenStatus> RevokeAsync(TokenRevocation revocation, CancellationToken ct) => throw new NotSupportedException();
-    }
+    private static (FakeAppTokenStore Store, MintedToken Token) StoreWith(ApiKeyKind kind) =>
+        AppTokenFakes.StoreWith(kind, _tenant, "regions:read");
 }

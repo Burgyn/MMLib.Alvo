@@ -120,9 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     as `X-Alvo-Api-Key`, exactly as it sends an API key. `GET /auth/v1/tokens` lists a person's own tokens and the
     service tokens of tenants they own, with minter and last use, never a secret; `DELETE /auth/v1/tokens/{keyId}`
     revokes one.
-  - **Narrow by construction.** Scopes are `entity:read` / `entity:write`, at least one, only entities the descriptor
-    declares, no wildcard. Every token expires within `maxLifetimeDays` (1–365, default 90). A token's tenant is fixed
-    at mint, and `X-Alvo-Tenant` naming another one is 401. A token never mints, lists or revokes a token, never calls a
+  - **Scoped where a route names an entity, refused where none does.** Scopes are `entity:read` / `entity:write`, at
+    least one, only entities the descriptor declares, no wildcard. The generated Data API checks them on every
+    operation, and a mapped command checks its own entity (read and write; an unbound command needs `*:write`, so it
+    never takes a token) — once admitted, the command's handler writes as the token's caller under the descriptor's
+    rules, unscoped beyond its entity. **A host's own `.WithAlvoCaller()` endpoint refuses every personal and service
+    token with 403** `forbidden` and a fixed sentence, because it names no entity a scope could be checked against;
+    configured keys, Bearer people and anonymous callers reach it as before (an endpoint-level scope opt-in is #536).
+    Every token expires within `maxLifetimeDays` (1–365, default 90). A token's tenant is fixed at mint, and
+    `X-Alvo-Tenant` naming another one is 401. A token never mints, lists or revokes a token, never calls a
     self-service route (403), and **the Management API refuses every personal and service token with 403**, whatever its
     roles. At most 100 live tokens per account.
   - **A token dies with its reason.** A member's removal or departure, an owner's demotion and an account ban revoke the
