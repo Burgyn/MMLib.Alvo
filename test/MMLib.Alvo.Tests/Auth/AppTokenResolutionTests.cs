@@ -189,6 +189,24 @@ public sealed class AppTokenResolutionTests
         var entry = logger.Entries.ShouldHaveSingleItem();
         entry.Level.ShouldBe(LogLevel.Warning);
         entry.Message.ShouldContain(ServiceId);
+        entry.Message.ShouldContain(nameof(InvalidOperationException));
+        entry.Message.ShouldNotContain(Secret, Case.Sensitive, "the secret is never logged");
+    }
+
+    [Fact]
+    public async Task A_store_timeout_on_a_live_request_does_not_fail_it()
+    {
+        Apply();
+        Stored(ServiceId, _tenant, ["dispatcher"]);
+        _registry.TouchFailure = new OperationCanceledException("the store's own timeout " + Secret);
+        var logger = new CapturingLogger();
+
+        var principal = await Resolver(logger).ResolveAsync(ServiceId + "." + Secret, null, Ct);
+
+        principal.ShouldNotBeNull().KeyId.ShouldBe(ServiceId);
+        var entry = logger.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Warning);
+        entry.Message.ShouldContain(nameof(OperationCanceledException));
         entry.Message.ShouldNotContain(Secret, Case.Sensitive, "the secret is never logged");
     }
 
@@ -198,8 +216,11 @@ public sealed class AppTokenResolutionTests
         Apply();
         Stored(ServiceId, _tenant, ["dispatcher"]);
         _registry.TouchFailure = new OperationCanceledException();
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
 
-        await Should.ThrowAsync<OperationCanceledException>(async () => await Present(ServiceId));
+        await Should.ThrowAsync<OperationCanceledException>(
+            async () => await Resolver().ResolveAsync(ServiceId + "." + Secret, null, cancelled.Token));
     }
 
     private sealed class CapturingLogger : ILogger<ApiKeyContextResolver>

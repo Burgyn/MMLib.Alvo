@@ -118,16 +118,16 @@ internal sealed partial class ApiKeyContextResolver(
         {
             await store.TouchAsync(keyId, now, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            TouchFailed(logger ?? NullLogger<ApiKeyContextResolver>.Instance, keyId);
+            TouchFailed(logger ?? NullLogger<ApiKeyContextResolver>.Instance, keyId, exception.GetType().Name);
         }
     }
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Recording the last use of app token {KeyId} failed; the request goes on and the token stays valid.")]
-    private static partial void TouchFailed(ILogger logger, string keyId);
+        Message = "Recording the last use of app token {KeyId} failed with {ExceptionType}; the request goes on and the token stays valid.")]
+    private static partial void TouchFailed(ILogger logger, string keyId, string exceptionType);
 
     private static bool TrySplitPresentedKey(
         [NotNullWhen(true)] string? presented, out string keyId, out string secret)

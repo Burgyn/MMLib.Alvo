@@ -115,7 +115,7 @@ public sealed class AppTokenManagementTests
             User = new UserId(Guid.NewGuid()),
             RoleNames = kind == ApiKeyKind.Service ? ["dispatcher"] : [],
             Tenant = kind == ApiKeyKind.Service ? new TenantId(_tenant) : null,
-            Scopes = new HashSet<ApiKeyScope> { ReadAll() },
+            Scopes = new HashSet<ApiKeyScope> { RegionsRead() },
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(30),
             Kind = kind,
             MintedBy = new UserId(Guid.NewGuid()),
@@ -123,8 +123,8 @@ public sealed class AppTokenManagementTests
         return (store, new MintedToken(secret.KeyId, secret.Presented));
     }
 
-    private static ApiKeyScope ReadAll() =>
-        ApiKeyScope.TryParse("*:read", out var scope) ? scope : throw new InvalidOperationException("*:read must parse");
+    private static ApiKeyScope RegionsRead() =>
+        ApiKeyScope.TryParse("regions:read", out var scope) ? scope : throw new InvalidOperationException("regions:read must parse");
 
     private sealed record MintedToken(string KeyId, string Presented);
 

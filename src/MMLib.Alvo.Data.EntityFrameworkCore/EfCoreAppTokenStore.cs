@@ -92,8 +92,9 @@ internal sealed class EfCoreAppTokenStore : IAppTokenStore
     }
 
     /// <summary>
-    /// Defence in depth for the one thing a token must never do — act as a user it was not minted for (S5 plan D5): a
-    /// personal token acts as its minter and carries no roles of its own; a service token acts as itself, never as its minter.
+    /// Defence in depth for the two mistakes a caller could make with <see cref="MintTokenRequest.Actor"/> (S5 plan D5): a
+    /// personal token must act as its minter and carry no roles of its own, and a service token's actor must not be its
+    /// minter. It cannot tell a service token's fresh actor from another account's id — choosing a fresh one is the caller's.
     /// </summary>
     private static void EnsureActsAsItsOwn(MintTokenRequest request)
     {
