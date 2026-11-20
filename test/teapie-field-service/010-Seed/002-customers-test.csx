@@ -26,13 +26,21 @@ tp.Test("`customers` is not audited, so no row of it is ever handed an ETag.", (
     Null(tp.Responses["CreateBorovica"].Headers.ETag);
 });
 
-await tp.Test("Both tenancy refusals are policy denials over the candidate row, and neither wrote a row.", async () =>
+await tp.Test("Both tenancy refusals name tenant_id and the fix, repeat no tenant, and neither wrote a row.", async () =>
 {
-    Equal("https://alvo.dev/errors/forbidden", await ProblemType(tp.Responses["CreateWithoutTenant"]));
-    Equal("https://alvo.dev/errors/forbidden", await ProblemType(tp.Responses["CreateIntoAnotherTenant"]));
+    const string ForeignTenant = "Field 'tenant_id' names a tenant other than the one this call acts in, and a row can "
+        + "only be created in the caller's own tenant. Remove it from the payload: a created row is placed in the "
+        + "caller's tenant.";
 
-    Null(tp.Responses["CreateWithoutTenant"].Headers.Location);
-    Null(tp.Responses["CreateIntoAnotherTenant"].Headers.Location);
+    foreach (var request in new[] { "CreateWithNullTenant", "CreateIntoAnotherTenant" })
+    {
+        var refused = await BodyOf(tp.Responses[request]);
+        Equal("https://alvo.dev/errors/forbidden", refused.GetProperty("type").GetString());
+        Equal(ForeignTenant, refused.GetProperty("detail").GetString());
+        Null(tp.Responses[request].Headers.Location);
+    }
+
+    DoesNotContain(Constant("tenantSouth"), (await BodyOf(tp.Responses["CreateIntoAnotherTenant"])).GetRawText());
 });
 
 await tp.Test("The state after the two refusals is exactly the two rows that were accepted.", async () =>

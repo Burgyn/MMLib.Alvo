@@ -35,18 +35,20 @@ await tp.Test("A person's create in a tenant lands in that tenant, under her nam
     Equal(Constant("TheoId"), job.GetProperty("assigned_to").GetString());
 });
 
-await tp.Test("A scoped create without tenant_id is refused by policy: Alvo checks the tenant, never fills it in.", async () =>
+await tp.Test("A scoped create naming another tenant is refused with the fix; leaving tenant_id out is how it works.", async () =>
 {
-    var refused = tp.Responses["DanaCreatesWithoutTenantId"];
+    var refused = tp.Responses["DanaCreatesInAnotherTenant"];
     var body = await BodyOf(refused);
 
-    // The answer the guides quote, whole: a policy refusal that names no field. It is the known DX gap (plan D11),
-    // pinned as it stands so a change to it — a 422 at /tenant_id, or a column filled in from the header — is seen.
+    // The answer the guides quote, whole (#538): it names the field and says to remove it, and repeats no tenant.
     Equal("https://alvo.dev/errors/forbidden", body.GetProperty("type").GetString());
-    Equal("The write was rejected by policy.", body.GetProperty("detail").GetString());
-    False(body.TryGetProperty("violations", out _), "a policy refusal names no field");
+    Equal(
+        "Field 'tenant_id' names a tenant other than the one this call acts in, and a row can only be created in the "
+        + "caller's own tenant. Remove it from the payload: a created row is placed in the caller's tenant.",
+        body.GetProperty("detail").GetString());
+    DoesNotContain(Constant("RegionId"), body.GetRawText());
 
-    // Control: the same body WITH tenant_id was a 201 a moment earlier, so the one difference is the refusal's cause.
+    // Control: the same body WITHOUT tenant_id was a 201 a moment earlier, so the one difference is the refusal's cause.
     Equal(201, (int)tp.Responses["DanaCreatesCustomer"].StatusCode);
 });
 

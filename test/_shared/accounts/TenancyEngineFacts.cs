@@ -319,6 +319,8 @@ public abstract class TenancyEngineFacts
             HttpMethod.Post, Jobs, ada, new JsonObject { ["title"] = "Placed" }, tenant: Header(acme));
         using var foreign = await world.AsPersonAsync(
             HttpMethod.Post, Jobs, ada, new JsonObject { ["title"] = "Smuggled", ["tenant_id"] = Header(globex) }, tenant: Header(acme));
+        using var nulled = await world.AsPersonAsync(
+            HttpMethod.Post, Jobs, ada, new JsonObject { ["title"] = "Nulled", ["tenant_id"] = null }, tenant: Header(acme));
 
         placed.StatusCode.ShouldBe(HttpStatusCode.Created, await placed.ReadTextAsync());
         (await placed.ReadJsonObjectAsync())["tenant_id"]!.GetValue<Guid>().ShouldBe(acme);
@@ -327,6 +329,8 @@ public abstract class TenancyEngineFacts
         var detail = await foreign.ReadProblemDetailAsync();
         detail.ShouldBe(AlvoAuthorizationException.ForeignTenant);
         detail.ShouldNotContain(Header(globex));
+        nulled.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await nulled.ReadTextAsync());
+        (await nulled.ReadProblemDetailAsync()).ShouldBe(AlvoAuthorizationException.ForeignTenant);
         (await ItemsAsync(world, Jobs, ada, acme)).Select(job => job!["title"]!.GetValue<string>()).ShouldBe(["Placed"]);
         (await ItemsAsync(world, Jobs, ada, globex)).ShouldBeEmpty();
     }

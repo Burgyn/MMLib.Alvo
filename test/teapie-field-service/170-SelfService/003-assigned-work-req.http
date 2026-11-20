@@ -1,5 +1,5 @@
 ### Dana's first customer in Acme. A person names the tenant she acts in with `X-Alvo-Tenant`, and a scoped create
-### carries the same id as `tenant_id` in its body: Alvo checks the column against the tenant, it does not fill it in.
+### needs nothing more: the body carries no `tenant_id`, and the row is placed in the tenant the call acts in (#538).
 # @name DanaCreatesCustomer
 ## TEST-EXPECT-STATUS: [201]
 POST {{fsBaseUrl}}/api/customers
@@ -8,16 +8,14 @@ X-Alvo-Tenant: {{AcmeId}}
 Content-Type: application/json
 
 {
-  "tenant_id": "{{AcmeId}}",
   "name": "Acme's first customer",
   "tier": "standard"
 }
 
-### The same create without `tenant_id` — the mistake a reader of the guides makes first, and the answer they get.
-### Alvo never fills the column in from the header: the row it would write names no tenant, the tenant scope (the
-### same check that stops a write INTO another tenant) does not hold for it, and the write is refused by policy —
-### a 403 naming no field, not a 422 at /tenant_id.
-# @name DanaCreatesWithoutTenantId
+### The same create naming a tenant other than the one the call acts in — here the region's id, which is no tenant
+### of Dana's. Refused before any row is read, with a detail that names the field and the fix and never repeats the
+### value sent.
+# @name DanaCreatesInAnotherTenant
 ## TEST-EXPECT-STATUS: [403]
 POST {{fsBaseUrl}}/api/customers
 Authorization: Bearer {{DanaAccess}}
@@ -25,6 +23,7 @@ X-Alvo-Tenant: {{AcmeId}}
 Content-Type: application/json
 
 {
+  "tenant_id": "{{RegionId}}",
   "name": "Acme's first customer",
   "tier": "standard"
 }
