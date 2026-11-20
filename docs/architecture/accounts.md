@@ -886,20 +886,23 @@ ApiKeyContextResolver (D5)
    2. ApiKeyStores.FindAsync — the prefix routes: alvo_pat_/alvo_svc_ → the registry (one read); else → the dev keys
    3. the secret, compared in constant time (an unknown id still compares against a dummy hash)
    4. usable: not revoked, not expired
-   5. its kind is on in the applied descriptor (a service token also needs selfService)
-   6. TenantResolver: the token's own tenant; a header naming another refuses
-   7. AppTokenPrincipals
+   5. TenantResolver: the token's own tenant; a header naming another refuses
+   6. AppTokenPrincipals: its kind is on in the applied descriptor (a service token also needs selfService), then
         personal, no tenant → the person, in no tenant, no read
         personal, a tenant  → IMembershipResolution (S3's rules, one read): refused → REFUSE; else its roles, live
         service             → its own user id; stored roles ∩ the current assignableRoles
-   8. last_used_at — written at most once a minute per token per replica, best effort
+   7. last_used_at — written at most once a minute per token per replica, best effort
    ▼
 AlvoPrincipal: User = the person | the token's own id, Roles = {authenticated}, Tenant, TenantRoles,
                ActorKind = User (personal) | ApiKey (service), Scopes and KeyId = the token's
 ```
 
+The tenant is resolved before the kind is judged (`ApiKeyContextResolver.ResolveAppTokenAsync`, then
+`AppTokenPrincipals.ResolveAsync`); both refuse with the same 401, so the order is not observable, only recorded.
 Every refusal is the API key's ordinary 401, so a wrong secret, an expired token, a switched-off kind and an ended
-membership look alike. A service token or a tenantless personal token costs one read; **a personal token in a tenant
+membership look alike. The principal then meets its surface: the Data API and a command check its scopes (403
+`out-of-scope`); the Management API and a host's `.WithAlvoCaller()` endpoint refuse it outright (403 `forbidden`).
+A service token or a tenantless personal token costs one read; **a personal token in a tenant
 costs two**, the token row and the membership. Spec §14 AC2's one round trip is about sessions — recorded here, not
 hidden. A failed `last_used_at` write is logged as a warning naming the key id, never the secret, and the request goes
 on.
@@ -996,7 +999,9 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
   rather than replacing it, and tokens keep resolving; a host that replaces it owns key resolution entirely, and its
   `POST /tokens` answers 404 `feature-disabled` naming `auth.accessTokens` and the cause instead of minting a token
   nothing would accept (`host.md`). `last_used_at` is written at most once a minute per token per replica.
-- **D5** — the resolution order above; a personal token in a tenant costs two reads.
+- **D5** — the resolution order above; a personal token in a tenant costs two reads. **Corrected from the plan's
+  listing**, which judged the kind before `TenantResolver`: the code resolves the tenant first and judges the kind
+  inside `AppTokenPrincipals`. Both refusals are the same 401, so nothing observable differs.
 - **D6** — a personal token's principal is a `User` actor, a service token's an `ApiKey` actor. **Deviation from the
   master plan's description of `User`** ("a principal resolved from a person's session"): no route relied on it — the
   self-service routes admit by channel, and Management refuses tokens by D9, not by kind.
