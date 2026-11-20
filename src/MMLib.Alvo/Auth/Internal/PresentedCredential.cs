@@ -27,6 +27,12 @@ internal enum CredentialChannel
 
     /// <summary>A Bearer token Alvo owns that is empty, carries whitespace, or arrives beside another <c>Authorization</c> line.</summary>
     MalformedBearer,
+
+    /// <summary>
+    /// A well-formed Bearer token Alvo owns that carries a reserved app-token prefix (#539): a personal or service token in
+    /// the wrong header — refused with the fix, never resolved by either resolver.
+    /// </summary>
+    AppTokenBearer,
 }
 
 /// <summary>The one credential a request presented, as <see cref="CallerResolution.Read"/> read it.</summary>

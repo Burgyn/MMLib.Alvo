@@ -22,6 +22,10 @@ public sealed class PersonCredentialTests
 {
     private const string Token = "person-token";
 
+    private const string AppTokenAsBearerDetail =
+        "Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, "
+        + "not as 'Authorization: Bearer'.";
+
     private static readonly AlvoPrincipal _person = TestPersonResolver.Person("person:p", tenant: null);
 
     [Fact]
@@ -119,6 +123,37 @@ public sealed class PersonCredentialTests
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, "the first line alone names an admitted person");
         response.Headers.WwwAuthenticate.ToString().ShouldContain("invalid_request");
         people.Calls.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// #539: a personal or service token sent as a Bearer is the one 401 <c>invalid_token</c> with a fixed detail naming
+    /// the header it belongs in — identical for every such string, never resolved by either resolver, never echoed.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/bookings")]
+    [InlineData("/commands/quote")]
+    public async Task An_app_token_as_a_bearer_is_401_naming_the_api_key_header_and_reaches_no_resolver(string path)
+    {
+        var people = People();
+        await using var world = await WorldAsync(people);
+        var method = path.StartsWith("/commands", StringComparison.Ordinal) ? HttpMethod.Post : HttpMethod.Get;
+        string[] presented = ["alvo_pat_Xk2p9QmZ1sT7vL0aB3cD4e.secret", "alvo_svc_Xk2p9QmZ1sT7vL0aB3cD4e.secret", "alvo_pat_"];
+
+        var answers = new List<(HttpStatusCode, string, string, string)>();
+        foreach (var token in presented)
+        {
+            using var response = await world.SendAsync(
+                method, path, body: method == HttpMethod.Post ? Nights(2) : null, headers: Bearer(token));
+            var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            body.ShouldNotContain("Xk2p9QmZ1sT7vL0aB3cD4e", Case.Sensitive, "a presented token is never echoed");
+            body.ShouldNotContain("alvo_", Case.Sensitive, "not even its prefix");
+            answers.Add((response.StatusCode, await response.ReadProblemTypeAsync(), await response.ReadProblemDetailAsync(),
+                response.Headers.WwwAuthenticate.ToString()));
+        }
+
+        answers.Distinct().ShouldHaveSingleItem("personal, service and a bare prefix answer alike").ShouldBe(
+            (HttpStatusCode.Unauthorized, AlvoProblemTypes.Unauthenticated, AppTokenAsBearerDetail, "Bearer error=\"invalid_token\""));
+        people.Calls.ShouldBeEmpty("an app token in the wrong header is never handed to the person resolver");
     }
 
     [Fact]
