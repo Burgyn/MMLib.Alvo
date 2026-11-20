@@ -240,6 +240,21 @@ internal sealed class AuthTables(string schemaPrefix)
          WHERE id = @session_id
         """;
 
+    /// <summary>
+    /// Gets the statement locking one live session of one account — a write that changes nothing, as
+    /// <see cref="TenantTables.LockAccountSql"/> is — run by a write that hands out a credential or power for that session
+    /// (a mint, an invitation's creation; stack review A-I1). Zero rows is a session that is revoked, expired or not the
+    /// account's. On PostgreSQL it waits on a reuse, sign-out or ban that is revoking the row and then re-checks
+    /// <c>revoked_at IS NULL</c> against the committed row; and a reuse that comes after it waits until the write commits,
+    /// so the reuse's sweep then sees what the write inserted. SQLite's write gate serialises the two outright. Always
+    /// taken before any tenant row, the order a refresh takes them in (session, then the personal tenant it ensures).
+    /// </summary>
+    internal string LockLiveSessionSql =>
+        $"""
+        UPDATE {Sessions} SET last_refreshed_at = last_refreshed_at
+         WHERE id = @session_id AND account_id = @account_id AND revoked_at IS NULL AND expires_at > @now
+        """;
+
     /// <summary>Gets the statement revoking every live session of one account.</summary>
     internal string RevokeAccountSessionsSql =>
         $"UPDATE {Sessions} SET revoked_at = @now, revoked_reason = @reason WHERE account_id = @account_id AND revoked_at IS NULL";

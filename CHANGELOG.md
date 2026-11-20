@@ -187,7 +187,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
   - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
     transaction, every personal and service token the person minted and every invitation they created, in any tenant,
-    since that session started. What they created before it started survives.
+    since that session started. What they created before it started survives. A mint or an invitation still in flight
+    on that session when it ends writes nothing and answers `401 invalid_token`: each re-reads the session under its
+    row lock in its own transaction, so a thief who triggers the reuse mid-request gets nothing past the sweep. A
+    membership someone already accepted, and a member change the session made, are not undone.
   - **A banned person's queued work loses their tenant roles.** A delivery running as the event's actor no longer
     honours the memberships of a disabled account; enabling it honours them again, and an owner can still remove a
     banned member.

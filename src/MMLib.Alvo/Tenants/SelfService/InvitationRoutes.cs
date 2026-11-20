@@ -174,7 +174,7 @@ internal static class InvitationRoutes
         var now = call.Now;
         var creation = new CreateInvitationRequest(
             Guid.NewGuid(), tenant, call.Person, code.Hashed, request.Roles, request.IsOwner, request.Email, request.MaxUses,
-            request.ExpiresAt, now);
+            request.ExpiresAt, now, call.Session);
         var outcome = await call.Store.CreateInvitationAsync(creation, call.Ct).ConfigureAwait(false);
         return outcome.Status == MemberChangeStatus.Changed
             ? SelfServiceCall.Json(

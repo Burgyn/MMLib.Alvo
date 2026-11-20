@@ -100,7 +100,8 @@ internal interface ITenantStore
     /// <param name="ct">A token to cancel the operation.</param>
     /// <returns>
     /// <see cref="MemberChangeStatus.Changed"/> with the stored invitation, or <see cref="MemberChangeStatus.NotFound"/>,
-    /// <see cref="MemberChangeStatus.PersonalTenant"/> or <see cref="MemberChangeStatus.NotOwner"/> with none.
+    /// <see cref="MemberChangeStatus.PersonalTenant"/>, <see cref="MemberChangeStatus.NotOwner"/> or
+    /// <see cref="MemberChangeStatus.SessionEnded"/> with none.
     /// </returns>
     Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct);
 
@@ -256,4 +257,10 @@ internal enum MemberChangeStatus
 
     /// <summary>The invitation is not one of this tenant's.</summary>
     NoSuchInvitation,
+
+    /// <summary>
+    /// The actor's session the write named has ended — by a refresh-token reuse, a sign-out or a ban while the request was
+    /// in flight; nothing was written.
+    /// </summary>
+    SessionEnded,
 }

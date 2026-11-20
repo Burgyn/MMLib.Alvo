@@ -246,9 +246,11 @@ transaction as the change that causes it:
 - **A session is ended as stolen.** A spent refresh token that comes back after the 10-second window ends its
   session ([Sign in](/guides/sign-in/#where-to-keep-the-tokens-and-why)). The same transaction kills every token the
   person minted, personal or service, and every invitation they created, in any tenant, since that session started:
-  whatever a thief holding the session could have made. What they created before it started keeps working. Nothing
-  records which session minted a token, so one minted from the person's other session in that time dies too; they
-  mint it again.
+  whatever a thief holding the session could have made. A mint or an invitation still in flight on that session when
+  it ends writes nothing and answers `401`, so none slips in after the sweep. What they created before it started
+  keeps working. Nothing records which session minted a token, so one minted from the person's other session in that
+  time dies too; they mint it again. An invitation someone already *accepted* is a membership by then, and the reuse
+  does not remove that member: check the tenant's members after an unexpected sign-out.
 - **A token expires, or is revoked.**
 
 **Dead stays dead.** Invite the removed person back, or enable the banned account, and their old tokens still answer

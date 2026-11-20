@@ -37,9 +37,6 @@ namespace MMLib.Alvo.Accounts.Internal;
 internal sealed class PersonResolver(PersonSessions sessions, DescriptorSignIn signIn, IHttpContextAccessor http)
     : IAlvoContextResolver
 {
-    /// <summary>The prefix of a person principal's key id; the session id follows, as 32 hex digits.</summary>
-    internal const string KeyIdPrefix = "session:";
-
     private static readonly IReadOnlySet<Role> _roles = new HashSet<Role> { Role.Authenticated };
 
     private static readonly IReadOnlySet<ApiKeyScope> _sessionScopes = new HashSet<ApiKeyScope>
@@ -105,6 +102,6 @@ internal sealed class PersonResolver(PersonSessions sessions, DescriptorSignIn s
             ActorKind = AlvoActorKind.User,
         },
         Scopes = _sessionScopes,
-        KeyId = KeyIdPrefix + session.Session.ToString("N"),
+        KeyId = PersonSessionKey.Of(session.Session),
     };
 }

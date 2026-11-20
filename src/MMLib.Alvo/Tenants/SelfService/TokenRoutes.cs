@@ -134,7 +134,8 @@ internal static class TokenRoutes
             request.ScopeTexts,
             request.ExpiresAt,
             AppTokenProblems.MaxLive,
-            call.Now);
+            call.Now,
+            call.Session);
         var outcome = await call.Http.RequestServices.GetRequiredService<IAppTokenStore>().MintAsync(mint, call.Ct).ConfigureAwait(false);
         if (outcome.Status != MintTokenStatus.Minted)
         {
