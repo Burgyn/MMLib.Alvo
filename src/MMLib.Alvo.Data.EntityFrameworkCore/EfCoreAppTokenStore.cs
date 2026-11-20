@@ -151,8 +151,9 @@ internal sealed class EfCoreAppTokenStore : IAppTokenStore
     }
 
     /// <summary>
-    /// The refusal of a mint, judged in the lock order (D10): the minter's account, the live cap, then — for a token with a
-    /// tenant — the tenant's lock and the minter's membership; <see langword="null"/> to insert.
+    /// The refusal of a mint, judged in the lock order (D10): the minter's account, the session the request came from
+    /// (stack review A-I1), the live cap, then — for a token with a tenant — the tenant's lock and the minter's membership;
+    /// <see langword="null"/> to insert.
     /// </summary>
     private async Task<MintTokenStatus?> RefusedAsync(
         DbConnection connection, DbTransaction transaction, MintTokenRequest request, CancellationToken ct)
@@ -163,6 +164,11 @@ internal sealed class EfCoreAppTokenStore : IAppTokenStore
             .ConfigureAwait(false) != 1)
         {
             return MintTokenStatus.NoAccount;
+        }
+
+        if (request.Session is { } session && !await SessionLiveAsync(connection, transaction, request, session, ct).ConfigureAwait(false))
+        {
+            return MintTokenStatus.SessionEnded;
         }
 
         if (await CountAsync(
@@ -202,6 +208,15 @@ internal sealed class EfCoreAppTokenStore : IAppTokenStore
             : request.Kind == ApiKeyKind.Service ? ServiceRefusal(memberships[0], request.Roles)
             : null;
     }
+
+    /// <summary>Locks the minter's <paramref name="session"/> if it is still live; <see langword="false"/> when it has ended.</summary>
+    private async Task<bool> SessionLiveAsync(
+        DbConnection connection, DbTransaction transaction, MintTokenRequest request, Guid session, CancellationToken ct) =>
+        await ExecuteAsync(
+            connection, transaction, _authTables.LockLiveSessionSql,
+            command => Bind(
+                command, ("@session_id", Id(session)), ("@account_id", Id(request.Minter.Value)), ("@now", Instant(request.Now))),
+            ct).ConfigureAwait(false) == 1;
 
     private static MintTokenStatus? ServiceRefusal(StoredMembership minter, IReadOnlyList<string> roles) =>
         minter.Kind == TenantKind.Personal ? MintTokenStatus.PersonalTenant

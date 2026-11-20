@@ -37,6 +37,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </remarks>
 internal sealed partial class EfCoreTenantStore
 {
+    private delegate Task<bool> SessionGate(DbConnection connection, DbTransaction transaction, CancellationToken ct);
+
     private delegate Task<MemberChangeStatus> Judgement(
         DbConnection connection, DbTransaction transaction, StoredMembership actor, CancellationToken ct);
 
@@ -228,13 +230,20 @@ internal sealed partial class EfCoreTenantStore
         ExecuteAsync(connection, transaction, sweep, command => BindMemberKey(command, tenant, member, ("@now", Instant(now))), ct);
 
     /// <summary>
-    /// One membership write: bump the tenant's version, read the actor's membership, then <paramref name="judge"/> — in one
-    /// transaction, committed only on <see cref="MemberChangeStatus.Changed"/>, so a refusal leaves even the bump undone.
+    /// One membership write: the actor's live session when <paramref name="session"/> is given, bump the tenant's version,
+    /// read the actor's membership, then <paramref name="judge"/> — in one transaction, committed only on
+    /// <see cref="MemberChangeStatus.Changed"/>, so a refusal leaves even the bump undone.
     /// </summary>
-    private Task<MemberChangeStatus> MemberWriteAsync(TenantId tenant, UserId actor, Judgement judge, CancellationToken ct) =>
+    private Task<MemberChangeStatus> MemberWriteAsync(
+        TenantId tenant, UserId actor, Judgement judge, CancellationToken ct, SessionGate? session = null) =>
         InTransactionAsync(
             async (connection, transaction, token) =>
             {
+                if (session is not null && !await session(connection, transaction, token).ConfigureAwait(false))
+                {
+                    return MemberChangeStatus.SessionEnded;
+                }
+
                 if (await ExecuteAsync(
                     connection, transaction, _tables.BumpVersionSql, command => Bind(command, ("@tenant_id", Id(tenant))), token)
                     .ConfigureAwait(false) != 1)

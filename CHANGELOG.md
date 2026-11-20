@@ -152,6 +152,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Management, and the descriptor moving under live tokens, on SQLite and PostgreSQL (`AppTokenEngineFacts`); the races
     of a mint against a demotion, a removal and a ban (`AppTokenStoreFacts`). A log scan at Trace finds no token, no
     secret part and no hash of one. **Docs:** `docs/architecture/accounts.md`, *Tokens for integrators (S5)*.
+- **Self-service in the field-service demo, the guides, the reference and the skill** (accounts initiative, slice S6;
+  no product behaviour changes):
+  - **The demo.** `examples/field-service` lets people sign in with Google, found a company, invite technicians and
+    mint tokens, beside its five dev keys: `auth.providers` gains `google`, with `auth.signUp` (`open`),
+    `auth.accessTokens` (`personal`, `service`) and `tenancy.selfService` (`createTenants` for `dispatcher`,
+    `invitations`, `assignableRoles` `dispatcher` and `technician`). `docker-compose.field-service.yml` points the
+    Google provider at a **test OpenID issuer** that the WireMock `sink` serves (`Authority` + `AllowHttpMetadata`, so
+    the stack runs `ASPNETCORE_ENVIRONMENT=Development`), takes a sign-in secrets key from `ALVO_FS_SECRETS_KEY` as a
+    Compose secret, and widens the per-IP rate budgets. **To start the stack by hand you now also export
+    `ALVO_FS_SECRETS_KEY`** (`openssl rand -base64 32`); `scripts/test-e2e` and `scripts/test-load` do it for you, and
+    the load stack resets every sign-in setting so it measures the host its baselines describe. The suite's signing
+    key is made on the machine that runs it and registered in the sink per run; no private key is committed. The
+    embedded sample serves the same descriptor without sign-in.
+  - **`test/teapie-field-service/170-SelfService`**, inside the required e2e check: three people sign in; a dispatcher
+    founds *Acme Repairs*, invites a technician who sees only his assigned job and completes it, mints a read-only
+    billing service token, and removes the technician, whose next request and personal token are refused; then the
+    walls — a foreign tenant, roles per tenant and the global `regions`, dead invitations answering alike, what a token
+    cannot reach — and last, refresh reuse ending the session. It runs alone and again on a live stack. `090-Docs`
+    pins the 15 `/auth/v1` paths beside the entity paths.
+  - **Three guides under *Secure it*:** *Sign-in and accounts* (the Google client, a sign-in page in plain `fetch`,
+    sessions, where to keep the tokens), *Tenants, members and invitations* and *Tokens for integrators*, each starting
+    from what you will build and naming the `170` case that runs its flow. Stale claims across the site (only local
+    accounts and API keys, Google "tracked in #36", the generated routes taking API keys only) are corrected.
+  - **A generated reference page, `reference/accounts-api`:** the sign-in, tenant, invitation and token routes, from the
+    OpenAPI document of a field-service host with sign-in configured.
+  - **A tenth descriptor skill, `alvo-descriptor-accounts`**, in the `alvo` plugin and the schema assistant: the three
+    levels, `auth.signUp`, `auth.accessTokens`, `tenancy.selfService`, tenant versus project roles, and what the
+    descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget);
+    its `eval-assistant` run is owed (#540).
+  - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
+    by policy." and names no field (#538); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
+    hint to use `X-Alvo-Api-Key` (#539). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+- **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
+  - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
+    transaction, every personal and service token the person minted and every invitation they created, in any tenant,
+    since that session started. What they created before it started survives. A mint or an invitation still in flight
+    on that session when it ends writes nothing and answers `401 invalid_token`: each re-reads the session under its
+    row lock in its own transaction, so a thief who triggers the reuse mid-request gets nothing past the sweep. A
+    membership someone already accepted, and a member change the session made, are not undone.
+  - **A banned person's queued work loses their tenant roles.** A delivery running as the event's actor no longer
+    honours the memberships of a disabled account; enabling it honours them again, and an owner can still remove a
+    banned member.
+  - **Apply warns when nobody could ever sign up:** `auth.signUp.mode: invitationOnly` without
+    `tenancy.selfService.invitations` is a warning at `/auth/signUp/mode` (registration closed is legitimate, so not a
+    refusal). The `examples/complex-crm` showcase had that shape and now declares self-service invitations.
+  - **Corrected:** `AlvoRateLimitOptions.Create`'s doc (it also charges `POST /auth/v1/tokens`) and the `rate-limited`
+    problem type's causes; *Timers, schedules and data migrations* and *Automation*, which still said a per-tenant
+    schedule or cron rule needs a host `IAlvoTenantCatalog` (with `tenancy.selfService` the registry is the default).
+  - **Open before v0.1:** the `/auth/v1` HTTP contract's names, credential errors, rate-limit keys and idempotency
+    (#542); recovering a tenant whose only owner is banned, and the owner-removal × ban lock order (#543); signing-key
+    rotation, an emergency procedure, and checking Google's `azp` (#544); undoing the ownership a stolen session
+    already granted before its reuse ended it (#546).
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

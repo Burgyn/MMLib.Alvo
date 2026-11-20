@@ -1,16 +1,26 @@
-# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3), invitations (S4) and integrator tokens (S5)
+# End-user accounts: sign-in, sessions, the person resolver (S2), self-service tenants (S3), invitations (S4), integrator tokens (S5) and the field-service demo (S6)
 
 > The contributor's view of `MMLib.Alvo.Accounts` and the parts of the core and the EF adapter it uses: the tables, the
 > path a request takes, the invariants and the tests that hold them, and where Alvo deviates from the standards it
 > adopts. The design is `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
-> (§3–§7, §14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
+> (§3–§7, §12–§14). Sign-in's decisions D1–D17 are in `docs/superpowers/plans/2026-11-13-accounts-s2-sign-in.md`; the
 > tenants' D1–D15 in `docs/superpowers/plans/2026-11-13-accounts-s3-tenants.md`; the invitations' D1–D15 in
 > `docs/superpowers/plans/2026-11-13-accounts-s4-invitations.md`; the tokens' D1–D16 in
-> `docs/superpowers/plans/2026-11-13-accounts-s5-tokens.md`. The first half of this page is sign-in (level 1);
+> `docs/superpowers/plans/2026-11-13-accounts-s5-tokens.md`; the demo's and the docs' D1–D16 in
+> `docs/superpowers/plans/2026-11-13-accounts-s6-demo-docs.md`. The first half of this page is sign-in (level 1);
 > [*Tenants a person creates (S3)*](#tenants-a-person-creates-s3) is levels 2 and 3,
 > [*Invitations and `invitationOnly` sign-up (S4)*](#invitations-and-invitationonly-sign-up-s4) is how a second person
-> joins them, and [*Tokens for integrators (S5)*](#tokens-for-integrators-personal-and-service-tokens-s5) is how a
-> program acts as a person or as a tenant. Users' guides arrive in S6.
+> joins them, [*Tokens for integrators (S5)*](#tokens-for-integrators-personal-and-service-tokens-s5) is how a
+> program acts as a person or as a tenant, and [*The demo (S6)*](#the-demo-s6) is all of it running in a real
+> container.
+>
+> **Users read the guides, not this page.** *Sign-in and accounts*
+> (`website/src/content/docs/guides/sign-in.mdx`, https://alvo.burgyn.online/guides/sign-in/), *Tenants, members and
+> invitations* (`…/guides/tenants-and-invitations.mdx`, https://alvo.burgyn.online/guides/tenants-and-invitations/) and
+> *Tokens for integrators* (`…/guides/tokens.mdx`, https://alvo.burgyn.online/guides/tokens/) say what an app author
+> can build and how; the routes are the generated *Sign-in, tenants and tokens API* reference
+> (https://alvo.burgyn.online/reference/accounts-api/). When a behaviour here changes, the guide that shows it changes
+> in the same commit.
 
 ## What you can build with it
 
@@ -177,6 +187,7 @@ The token endpoint follows the same pattern:
 |---|---|
 | Level 1 end to end, on both engines: exchange → Data API → refresh → logout leaves every token of the session dead | `AccountsEngineFacts.Level_one_end_to_end` (`SqliteAccountsEngineTests`, `PostgresAccountsEngineTests`) |
 | Reuse inside the grace window answers the same child; after it, the whole session dies before the response | `AccountsEngineFacts.Reuse_inside_the_window_returns_the_same_child_and_after_it_kills_the_session`; `RefreshGrantTests.A_reuse_after_the_window_kills_every_token_of_the_session_before_answering` |
+| A reuse also revokes, in its transaction, every app token (personal or service) and every invitation the account created since the reused session started, and nothing older; a replay inside the window revokes nothing; a mint or an invitation in flight on the session either writes nothing or is swept (stack review A-I1) | `AccountStoreFacts.A_reuse_revokes_the_tokens_and_invitations_created_since_its_session_started`, `…A_replay_inside_the_window_revokes_nothing_the_person_minted` (both engines; red on both without the sweep); `…A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`, `…A_mint_racing_a_reuse_of_its_session_never_outlives_it`, `…An_invitation_racing_a_reuse_of_its_session_never_outlives_it` (20 iterations, both engines; red on both without the session re-read); `CredentialWritesMidReuseTests` |
 | Two tabs refreshing at once get one child, and the session survives (Review Focus 1) | `AccountStoreFacts.Two_concurrent_refreshes_of_one_token_get_the_same_child` (20 iterations, both engines); `AccountsEngineFacts.Two_concurrent_refreshes_get_the_same_child_and_the_session_survives` |
 | A refresh racing a sign-out or a disable commits no child; a sign-in racing a disable starts no session | `PostgreSqlAccountStoreTests.A_refresh_racing_a_revocation_commits_no_child`, `…A_sign_in_racing_a_disable_starts_no_session`, both staged with a held row lock |
 | Two replicas on a fresh database converge on one signing key and one HMAC key (Review Focus 2) | `AccountStoreFacts.Two_concurrent_first_keys_converge_on_one`; `AccountKeysTests.Two_replicas_over_one_store_mint_tokens_each_other_validates` |
@@ -220,7 +231,9 @@ D1 (a tenant registry) and D8 (no tenant header means the personal tenant) are S
   request.
 - **D6 — A grace window that never forks.** A rotated token presented again within 10 s gets the same child, so the
   family keeps one tip. After the window, reuse revokes the session (RFC 9700 §4.14). The inclusive boundary and the
-  zero setting (strict) are both facts.
+  zero setting (strict) are both facts. **Beyond RFC 9700**, which revokes the token family: since S4 and S5 a session
+  can mint credentials that outlive it, so the reuse's transaction also revokes every app token and invitation the
+  account created since the session started (stack review A-I1; [below](#the-stack-reviews-fixes)).
 - **D7 — The refresh token travels in the body, not in an `httpOnly` cookie.** A cookie would make the token endpoint
   cookie-authenticated, which is the CSRF surface #191 removed. Rotation, reuse detection and a 15-minute access token
   carry the risk instead.
@@ -238,7 +251,8 @@ The S2 plan adds its own recorded deviations:
 - Tenants, memberships and every `selfService` refusal — S3, below.
 - Invitations (S4).
 - Personal and service tokens — S5, [below](#tokens-for-integrators-personal-and-service-tokens-s5).
-- Key rotation (D12): one key per purpose, generation 1.
+- Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation, and checking a Google ID
+  token's `azp`: [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544).
 - Auth events and role-change audit (spec D9).
 - A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
   yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
@@ -424,7 +438,7 @@ A name is trimmed, 1–100 code points, no control character — the display nam
 | A non-member gets the unknown id's 404 on every route; a membership the descriptor does not honour is managed by no route | `MemberRoutesTests.A_non_member_gets_404_on_every_member_route`, `…An_unhonoured_personal_membership_is_managed_by_no_route`; `TenantRoutesTests.A_non_member_and_an_unknown_tenant_get_the_same_404` |
 | Person only: an API key is 403, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_403_and_no_credential_is_a_bearer_challenge`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
 | `feature-disabled` names its key on all six routes; creating is rate-limited and only creating | `TenantRoutesTests.Without_self_service_every_route_is_404_feature_disabled`, `…Without_create_tenants_creating_is_404_naming_its_key`, `…Tenant_creation_answers_429_after_its_limit` |
-| An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests` |
+| An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10); a banned person holds none while banned (stack review B-M1) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests`; `TenantStoreFacts.A_banned_person_s_memberships_are_not_found_until_the_account_is_enabled` (both engines; red on both without the account condition) |
 | The registry is the tenant list only under `selfService` and only when the host registers none (D13) | `TenantCatalogsTests` |
 | The default tenant list honours what a request honours: shared tenants, personal ones only while `personalTenant` is on — one predicate for a tenant, a membership and every listing | `TenantCatalogsTests.Without_personal_tenant_the_registry_lists_only_shared_tenants`, `…A_migration_starts_once_per_registry_tenant_only_at_a_self_service_revision`; `MembershipRulesTests.Honours_is_one_test_for_a_tenant_and_its_membership`, `…A_listing_drops_a_personal_row_that_is_not_its_owner_s` |
 
@@ -451,7 +465,8 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   yet, so handing one over and leaving frees nothing.
 - **D10** — an event actor keeps a recorded tenant role only while it is assignable, and a person actor's roles are
   narrowed at delivery to their current membership — never widened. A removed member's queued delivery still runs in
-  the tenant, with project roles only (`events.md`).
+  the tenant, with project roles only (`events.md`). So does a banned person's: the registry read the delivery uses
+  (`ITenantStore.FindMembershipAsync`) does not honour the membership of a disabled account (stack review B-M1).
 - **D11** — `invitations` was accepted by the schema and warned as unhonoured in S3. S4 honours it (S4 D14).
 - **D12** — the global-write warning lists each `create`/`update`/`delete` rule of a global entity whose role literals
   include `authenticated`; a rule that admits without naming a role is not listed.
@@ -465,7 +480,8 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   schema mints one more run per account, a per-tick cost any member of the public grows by signing up (bounded only by the
   token rate limit). It is a cost, not a wall breach: each run is the system in its own tenant. A host that wants it
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
-- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only.
+- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. **Superseded by
+  S5 D15**: minting (`POST /tokens`) draws on the same budget (the S5 decisions, below).
 - **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
 
 And where the implementation answered differently from the plan's first wording:
@@ -537,8 +553,10 @@ POST /auth/v1/token   application/x-www-form-urlencoded
 → 403 { "error": "access_denied", "policy": "invitationOnly" }                         no code at all
 ```
 
-The first owner has to come from somewhere: sign them in under `open`, or let the operator seed them, then re-apply
-with `invitationOnly`. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
+The first owner has to come from somewhere: sign them in under `open`, then re-apply with `invitationOnly`. No route
+or port creates an account for someone else, so an operator cannot seed one; an account exists only once its person
+has signed in. `invitationOnly` without `tenancy.selfService.invitations` applies with a warning at
+`/auth/signUp/mode` (`SignUpCheck.NobodyCanBeInvited`, stack review C-I6), since nobody new could ever sign up. The exchange takes `invitation_code` in `open` mode too, so "sign up and join" is one request
 there as well. `InvitationEngineFacts.Level_three_with_invitations_end_to_end` and `…Invitation_only_end_to_end` are
 these two sections as tests, on SQLite and on PostgreSQL.
 
@@ -714,6 +732,9 @@ And where the implementation answered differently from the plan's first wording,
 - Membership events — spec D9 defers them.
 - Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.
+- Recovering a tenant whose only owner is banned. A ban leaves memberships, and no operator route grants ownership, so
+  nobody can manage it until the account is enabled again; and the lock order of an owner's removal racing their ban:
+  [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543).
 
 ## Tokens for integrators: personal and service tokens (S5)
 
@@ -909,7 +930,7 @@ on.
 
 **A personal token is a `User` actor, a service token an `ApiKey` one** (D6). An event a personal token causes reports
 `authtype user` and the person as `authid`, so S3 D10's delivery narrowing applies to it unchanged: a queued delivery of
-a person removed since loses their tenant roles, whether they acted by session or by token. A service token's queued
+a person removed or banned since loses their tenant roles, whether they acted by session or by token. A service token's queued
 deliveries keep the tenant roles recorded at the event, bounded by `assignableRoles`, as any API key's do.
 
 ### The routes
@@ -960,8 +981,8 @@ Three behaviours, recorded so they read as decisions:
 |---|---|
 | Personal and service tokens end to end, and a tenantless personal token at level 1, on both engines | `AppTokenEngineFacts.Personal_token_end_to_end`, `…Service_token_end_to_end`, `…Level_one_personal_token` (`SqliteAppTokenEngineTests`, `PostgresAppTokenEngineTests`) |
 | A personal token's roles are its person's current ones: demoted → the lost role is gone on the next request; removed → 401; invited back → the old token is still 401 (Review Focus 1) | `AppTokenEngineFacts.Personal_token_end_to_end` (red on both engines without the removal sweep); `AppTokenResolutionTests.A_personal_token_acts_as_its_person_with_live_tenant_roles`, `…A_personal_token_whose_membership_ended_is_refused`; `AppTokenStoreFacts.A_rejoined_member_s_old_personal_token_stays_revoked` |
-| A token dies with its reason, in that transaction: removal and leaving, an owner's demotion, a ban; a role change and a refused write revoke nothing; enabling revives nothing | `AppTokenStoreFacts.Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only`, `…A_member_leaving_revokes_the_same`, `…Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s`, `…Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens`, `…Changing_a_member_s_roles_revokes_nothing`, `…A_refused_demotion_revokes_nothing`, `…Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none`; `AccountStoreFacts.Disabling_revokes_sessions_and_tokens_together`; `AppTokenEngineFacts.Service_token_end_to_end`, `…A_banned_person_s_tokens_die_and_stay_dead` |
-| A mint racing its minter's demotion, removal or ban never outlives it (Review Focus 2) | `AppTokenStoreFacts.A_service_mint_racing_its_minter_s_demotion_never_outlives_it`, `…A_personal_mint_racing_the_person_s_removal_never_outlives_it`, `…A_mint_racing_a_ban_never_outlives_it` (20 iterations, both engines; red on PostgreSQL without the tenant bump) |
+| A token dies with its reason, in that transaction: removal and leaving, an owner's demotion, a ban, a refresh-token reuse ending a session that was open when it was minted; a role change and a refused write revoke nothing; enabling revives nothing | `AppTokenStoreFacts.Removing_a_member_revokes_their_personal_tokens_for_that_tenant_only`, `…A_member_leaving_revokes_the_same`, `…Removing_an_owner_revokes_the_service_tokens_they_minted_and_no_one_else_s`, `…Demoting_an_owner_revokes_their_service_tokens_and_leaves_their_personal_tokens`, `…Changing_a_member_s_roles_revokes_nothing`, `…A_refused_demotion_revokes_nothing`, `…Disabling_an_account_revokes_every_token_it_minted_and_enabling_revives_none`; `AccountStoreFacts.Disabling_revokes_sessions_and_tokens_together`, `…A_reuse_revokes_the_tokens_and_invitations_created_since_its_session_started`; `AppTokenEngineFacts.Service_token_end_to_end`, `…A_banned_person_s_tokens_die_and_stay_dead` |
+| A mint racing its minter's demotion, removal or ban — or a reuse of its session (stack review A-I1) — never outlives it (Review Focus 2) | `AppTokenStoreFacts.A_service_mint_racing_its_minter_s_demotion_never_outlives_it`, `…A_personal_mint_racing_the_person_s_removal_never_outlives_it`, `…A_mint_racing_a_ban_never_outlives_it` (20 iterations, both engines; red on PostgreSQL without the tenant bump); `AccountStoreFacts.A_mint_racing_a_reuse_of_its_session_never_outlives_it` |
 | Never more than 100 live tokens per account, also in parallel | `AppTokenStoreFacts.The_live_cap_counts_only_unexpired_unrevoked_tokens`, `…Concurrent_mints_at_the_cap_never_exceed_it` (red on PostgreSQL without the account lock); `TokenRoutesTests.The_live_cap_is_409` |
 | A token never mints, lists or revokes a token, never reaches Management, never acts in another tenant, never reads outside its scopes on the Data API (Review Focus 3) | `TokenRoutesTests.A_token_cannot_mint_a_token`, `…A_token_cannot_list_or_revoke`, `…A_person_mints_a_personal_token_and_sees_it_once` (`notes` is 403 `out-of-scope`); `AppTokenManagementTests.A_token_is_refused_by_every_management_route`, `…A_bearer_beside_an_app_token_on_management_is_judged_by_the_token`; `AppTokenEngineFacts.A_token_never_acts_outside_its_tenant`; `AppTokenResolutionTests.A_header_naming_another_tenant_refuses_either_kind` |
 | A host's `.WithAlvoCaller()` endpoint refuses either kind with the fixed 403, after an unusable token's 401; a configured key, a Bearer person and the anonymous caller reach it as before; a bound command admits a token whose scopes cover its entity and refuses one whose scopes do not, and an unbound command refuses every token (final review I1) | `AppTokenCallerTests.A_token_on_a_custom_endpoint_is_refused_with_the_fixed_403_before_the_handler`, `…An_unusable_token_on_a_custom_endpoint_is_401_like_any_key`, `…A_configured_key_a_bearer_person_and_the_anonymous_caller_reach_a_custom_endpoint_as_before`, `…A_command_admits_a_token_whose_scopes_cover_its_entity`, `…A_command_refuses_a_token_outside_its_scopes_403_out_of_scope` |
@@ -1067,4 +1088,284 @@ And where the implementation answered differently from the plan's first wording,
   bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
   grows by this table).
 - Events and an audit trail for minting and revoking (spec D9).
-- The field-service demo, its TeaPie suite, the website guides and the descriptor skills (S6).
+- A settled `/auth/v1` contract before v0.1: one name per thing, one answer for the wrong kind of credential, the
+  rate-limit keys (`RateLimits:Create` also charges `POST /tokens`, `RateLimits:Token` is the OAuth endpoint), the
+  `auth.accessTokens` name, and `Idempotency-Key` on `POST /tenants`, `…/invitations` and `/tokens`:
+  [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542).
+- The field-service demo, its TeaPie suite, the users' guides and the descriptor skill — S6, [below](#the-demo-s6).
+
+## The demo (S6)
+
+S6 changes no product behaviour. It takes everything S2–S5 built and runs it the way an app's users would: in the
+published container, over PostgreSQL, through HTTP, with people who sign in rather than dev keys. The vehicle for it is
+`examples/field-service`, the advanced demo, which was already a multi-tenant dispatch backend driven by five dev keys.
+It became the spec's level-3 showcase (§12) **without losing a test**: the dev keys keep working beside sign-in, and
+every suite that ran against the stack before still runs unchanged.
+
+S6 also shipped what an app author reads — three guides, a generated reference page and a descriptor skill — and that
+is covered at the end of this section. The plan is `docs/superpowers/plans/2026-11-13-accounts-s6-demo-docs.md`
+(D1–D16); where the build answered differently, the deviation is recorded [below](#recorded-decisions-and-deviations-2).
+
+### What it proves
+
+A new TeaPie collection, `test/teapie-field-service/170-SelfService`, tells one story with three people: **Dana**, a
+dispatcher who founds a company; **Theo**, the technician she invites; and **Olga**, an outsider who belongs to nothing.
+Each is a brand-new Google account made for the run. The cases run in order, and each one leans on what the one before
+it set up:
+
+| Case | What happens, and what it pins |
+|---|---|
+| `001-sign-in` | The three people sign in. Each sign-in is an RFC 8693 token exchange that answers a 15-minute access token and a rotating refresh token, never cached. A token signed by a key the issuer never published is refused, a replayed ID token starts no second session, and a new person has an account and no membership. The admin key creates a region for the run. |
+| `002-invite-and-accept` | Dana creates *Acme Repairs* and is its owner and a `dispatcher`. She invites Theo as a `technician`: the code is answered once, the anonymous preview shows only the tenant, the inviter and the roles, and accepting twice changes nothing. Acme then has exactly two members, and the invitation list never carries a code. |
+| `003-assigned-work` | Dana creates a customer and two jobs, one assigned to Theo. A create without `tenant_id` in the body is refused (see D11 below). In Acme, Theo lists exactly his own job; naming no tenant, he is refused by the tenant guard. He cannot place a job or create a customer, and he walks his job through the state machine to `completed` with his tenant role. |
+| `004-billing-token` | Dana mints a `billing` service token (`dispatcher`, `work_orders:read`). It reads exactly Acme's completed job and cannot write (`403 out-of-scope`), whatever its role would allow. Theo's personal token reads only his job. Dana's token list carries no secret. |
+| `005-member-removed` | Dana removes Theo. His next request in Acme is `401 invalid_token`, and his personal token died with his membership. He stays signed in, and the billing token, which is Dana's, keeps reading. |
+| `006-foreign-tenant` | Olga naming Acme is refused outright (`401`); naming no tenant she meets the tenant guard (`403`). She still reads global data — the run's region. |
+| `007-roles-per-tenant` | Theo founds his own garage, where he is owner and dispatcher. A self-made dispatcher cannot write the global `regions`, in his tenant or in Dana's (the admin key's create is the control). Dana joins the garage as a technician, and the same body she sends is refused there and created in Acme. |
+| `008-dead-invitations` | A revoked invitation, and one that expires 15 seconds after it is made; the suite polls until it has lapsed. |
+| `009-dead-invitations-answer-alike` | Used-up, revoked, expired and unknown codes are one `404`, identical apart from the trace id, and none of them made Olga a member of anything. |
+| `010-tokens-reach` | A token cannot mint a token. An app token sent as `Authorization: Bearer` is `401 invalid_token` (the same secret in `X-Alvo-Api-Key` is the control). Personal and service tokens are refused at Management with its fixed sentence; a Bearer session there is an anonymous caller and gets the same refusal, never a `200`. An operator key is the control. |
+| `011-refresh-rotation` | A refresh rotates the token. Replaying the old one inside the 10-second grace window answers the same child. Replaying it after the window is `400 invalid_grant`; the suite polls until it is. |
+| `012-reuse-ends-the-session` | That reuse ended Dana's session: every refresh token of the family is dead and her newest access token is `401`. Theo, whose session it was not, is still signed in. |
+
+Every item of §12's list maps to a row: the story is `001`–`005`, and the adversarial half is `005` (a personal token
+dying with its owner's membership), `006` (a header naming a tenant you are not in), `007` (a role from one tenant absent
+in another and on `regions`, and a self-made dispatcher refused there), `009` (dead invitations answering alike) and
+`010` (a token minting a token, and a personal token refused by Management). Every scoped create carries both
+`X-Alvo-Tenant` and `tenant_id`, as a real client has to today.
+
+The two waits — an invitation's expiry and the grace window — are polls (`## RETRY-UNTIL-TEST-PASS`, at most 30 × 1 s),
+never sleeps, so a slow runner waits longer instead of failing. Measured: about 16 s and 11 s.
+
+### How to run it
+
+**The whole e2e:** `scripts/test-e2e`. It makes every secret fresh, starts all three stacks and runs every TeaPie
+suite, `170-SelfService` last in the field-service one. It is the required **Build & test** check's e2e half; it is in
+no ring.
+
+**Just this collection, while you work on it.** `170` does not need a fresh database: it creates its own people,
+region and tenants, so it runs alone and runs again on a live stack. The other field-service collections do not —
+they own the database and need `down --volumes` first.
+
+```bash
+set -a; . examples/field-service/demo-identities.env; set +a
+export ALVO_FS_DISPATCHER_NORTH_SECRET=$(openssl rand -hex 16)   # and the other four, as the example's README shows
+export ALVO_FS_SECRETS_KEY=$(openssl rand -base64 32)
+docker compose --env-file examples/field-service/demo-identities.env \
+  -f docker-compose.field-service.yml up --build --detach --wait
+# artifacts/teapie/env.json: scripts/test-e2e's shape (test/teapie-field-service/env.example.json shows it)
+dotnet tool run teapie -- test test/teapie-field-service/170-SelfService \
+  -e compose --env-file artifacts/teapie/env.json --no-cache-vars --no-logo
+```
+
+If something else holds port 8081, export `ALVO_FS_PORT` after sourcing the env file and use the same port in
+`fsBaseUrl`. `scripts/test-e2e` cannot be moved that way: it reads `demo-identities.env` again itself.
+
+### How the stack signs people in
+
+Nobody can sign in to a CI container with a real Google account, so the stack points Alvo's **Google provider at a
+test issuer** and the suite plays Google. Only configuration differs from a real deployment; the code path is the one
+production runs.
+
+- **The issuer is the `sink`** (D3). The WireMock that already plays the billing system shares Alvo's network
+  namespace, so `http://localhost:9090/oidc` is it. Compose sets
+  `Alvo__Accounts__Providers__Google__Authority` to that URL and `AllowHttpMetadata: "true"`. The discovery document is
+  a committed mapping (`examples/field-service/sink/mappings/test-oidc-issuer.json`, named TEST-ONLY); it says
+  `issuer: https://accounts.google.com`, because Google's preset finds its provider by that issuer, and names the key
+  set at `http://localhost:9090/oidc/jwks.json`. The ID tokens are RS256, the preset's only algorithm.
+- **The key is made per machine and registered per run** (D4, a recorded deviation). `_shared/TestIssuer.csx` creates
+  an RSA-2048 key the first time a run needs one and keeps it under `$TMPDIR/alvo-field-service-e2e/`; its `kid` is the
+  key's RFC 7638 thumbprint. The first request of `001-sign-in` publishes the key's public half to the sink through
+  WireMock's admin API, before anyone signs in. No private key is in the repository. The key is kept between runs
+  rather than made per run because Alvo refetches a provider's key set for an unknown `kid` at most once every five
+  minutes (`OidcMetadata.UnknownKidInterval`); a new key per run would refuse the third run inside five minutes on a
+  live stack.
+- **The stack runs `ASPNETCORE_ENVIRONMENT=Development`** (D5), because `AllowHttpMetadata` is refused in every other
+  environment (spec §11.2). `Alvo:Accounts:Issuer` stays unset, so Alvo names its tokens after the URL a request
+  reached; the audience defaults to the descriptor's name. Only `MMLib.Alvo.Accounts` reads the host environment, the
+  image ships no `appsettings.Development.json`, and Alvo's own exception handler masks the developer exception page,
+  so nothing else changes.
+- **A secrets key per run** (D6). Accounts refuses to start without `Alvo:Secrets:EncryptionKeyFile`.
+  `scripts/test-e2e` exports `ALVO_FS_SECRETS_KEY` fresh, and compose hands it over as a Compose secret mounted at
+  `/run/secrets/alvo_fs_secrets_key`; `${…:?}` refuses a start without it.
+- **Wider rate budgets** (D7): `Token` 120, `Create` 30 and `Invitations` 120 a minute per IP, instead of 30, 10 and 20.
+  One suite run comes from one address, and the limits themselves are pinned in process (`TokenRoutesTests`,
+  `TenantRoutesTests`, `InvitationRoutesTests`), so a `429` in the e2e would be a flake, not a finding.
+
+A consequence worth knowing: on a stack you start by hand, only the suite holds the signing key, so only a `170` run can
+sign anyone in. `examples/field-service/README.md`, *Self-service*, says how to point the provider at real Google
+instead.
+
+### What else the stack change reached
+
+- **The `090-Docs` path pin grew by exactly the sign-in surface** (D9): the 15 `/auth/v1` paths S5's Accounts OpenAPI
+  snapshot holds, beside the 16 entity paths, and no others.
+- **The load stack resets it all.** `test/load/docker-compose.load.yml` composes the demo's file, so it resets the
+  Development environment, the three Google settings, the secrets-key file and the three rate budgets (`!reset null`)
+  and the secret's mount (`secrets: !reset []`). The merged `alvo` service is identical to the one before S6, so load
+  stays comparable to its baselines. `scripts/test-load` also exports `ALVO_FS_SECRETS_KEY`, as a safeguard.
+- **`scripts/test-e2e`'s PostgreSQL partition check counts only the two seeded tenants.** It counted every distinct
+  `tenant_id` in `work_orders`, and `170` adds Acme's jobs as a third. The claim is unchanged: storing everything under
+  one discriminator would answer 1 or 0.
+- **The embedded sample serves the same descriptor without sign-in** (D1). `samples/MMLib.Alvo.Samples.FieldService`
+  registers no `AddAlvoAccounts`, so it logs the boot warning that the descriptor lists `google` and the host signs
+  nobody in, and every request there behaves as before. Sign-in is the standalone stack's story.
+
+### The guides, the reference and the skill
+
+- **Three guides under *Secure it*** (D15): *Sign-in and accounts*, *Tenants, members and invitations* and *Tokens for
+  integrators*. Each opens with what you will build, shows the smallest working thing, then explains the mechanics and
+  the limits. Stale claims elsewhere on the site ("only local accounts and API keys", Google "tracked in #36", the
+  generated routes taking "API keys only") were swept for the claim, not by file.
+- **The guides' exchanges are hand-written, and held three ways** (D12): every descriptor a guide shows is a snippet
+  `DocsSnippetTests` applies; every `METHOD /auth/v1/…` a guide names is checked against the generated reference; and
+  each worked flow names the `170` case that runs it for real (on the fuller field-service descriptor, with the same
+  answers).
+- **The reference** (D13): `tools/MMLib.Alvo.DocsGen` boots a second in-process host over the field-service descriptor
+  with Google configured (a placeholder client id, an `https` issuer, a key file in its temp directory — no network) and
+  publishes only the `/auth/v1` paths, as `reference/accounts-api`.
+- **A tenth descriptor skill, `alvo-descriptor-accounts`** (D14), the catalogue's last slot. `SkillAreas.Accounts`
+  owns `/auth/**` except `/auth/roles`, and `/tenancy/selfService/**`. Its line in the always-on skill list did not fit
+  the schema assistant's budget, so two sentences of the base prompt were cut (each repeated by a skill or by a
+  refusal's own fix) and the prompt is now **v10**.
+
+### Invariants, and the tests that hold them
+
+| Invariant | Held by |
+|---|---|
+| People sign in through the real container, and every wall of §12 holds there: tenant walls, roles per tenant, the global `regions`, dead invitations, a token's reach, refresh reuse (AC5, over HTTP) | `test/teapie-field-service/170-SelfService/001`–`012`, inside the required e2e check |
+| No private key is committed anywhere, and the sink serves only the public half of the run's key | `FieldServiceTestIssuerTests.No_private_key_is_committed` (every path `git ls-files` lists, staged ones included), `…The_committed_issuer_carries_no_key_material`; `170-SelfService/001`'s "The sink publishes the public half of the run's key, under its kid, and nothing private." (the live key set's members are exactly `alg`, `e`, `kid`, `kty`, `n`, `use`, and `n`/`e` are the run's key) |
+| Only the demo stack trusts `http` metadata, beside Development; the compose authority, the discovery document and the suite's registration agree; the stack and the suite read one client id; the secrets key comes from the run | `FieldServiceTestIssuerTests.The_demo_stack_trusts_http_metadata_only_in_development`, `…The_discovery_document_names_googles_issuer_and_the_sinks_key_set`, `…The_suite_registers_its_key_set_where_the_discovery_document_points`, `…The_stack_and_the_suite_read_one_client_id`, `…The_secrets_key_comes_from_the_run_and_is_never_committed`; the product side is `AccountsOptionsTests.Allowing_http_metadata_is_refused_outside_development_naming_the_setting` |
+| The load stack resets the demo's sign-in, so load measures the host its baselines describe | `FieldServiceTestIssuerTests.The_load_stack_resets_the_demos_sign_in` |
+| Every existing suite stays green under the grown descriptor and the Development + accounts stack (AC7) | `scripts/test-e2e` whole (`test/teapie` 22, `test/teapie-field-service` 632, `test/teapie-field-service-host` 69, the PostgreSQL checks); `090-Docs` pins the path set by equality |
+| Every route a guide names exists, and the reference holds exactly the sign-in routes | `AccountsReferenceTests.Every_route_a_guide_names_is_a_sign_in_operation`, `…The_reference_holds_exactly_the_sign_in_routes`, `…No_entity_route_reaches_the_sign_in_reference`, `…The_description_links_the_three_guides` |
+| Every descriptor a guide shows applies | `DocsSnippetTests` (the `website/src/snippets/{sign-in,tenants,tokens}/*.alvo.json` files) |
+| The skill's worked examples are real outcomes, it fits the caps, and the accounts paths load it | `SkillExampleOutcomeTests`, `SkillConformanceTests`, `SkillAreasTests.The_accounts_paths_belong_to_the_accounts_skill`, `AlvoAssistantTests.The_always_in_context_instructions_do_not_outgrow_the_v3_base_prompt` |
+
+### Recorded decisions and deviations
+
+From the plan (`2026-11-13-accounts-s6-demo-docs.md`, D1–D16), one line each:
+
+- **D1** — sign-in lives on the standalone stack only; the embedded sample serves the same descriptor with no
+  `AddAlvoAccounts`. **Correction to the plan's wording:** D1 said the sample's "`.WithAlvoCaller()` endpoints
+  (dispatch, technician app)" would refuse app tokens. The sample maps no `.WithAlvoCaller()` endpoint: dispatch is a
+  `MapAlvoCommand`, which takes a token within its entity's read and write scopes, and the technician app is a
+  `MapAlvoWebhookReceiver`, which authenticates by its signing secret. The sample's README states the general rule
+  (#536) and nothing about its own routes.
+- **D2** — the descriptor gains exactly §12's keys, with `local` kept and no `personalTenant`; `regions` is untouched,
+  so a self-made dispatcher's refusal there is pinned as a `403` with the admin's `201` as control.
+- **D3** — the test issuer is Google's preset under another authority.
+- **D4** — **Deviation from the plan and from spec §12**, which committed one test-only private key under `test/` and
+  had the sink serve a static key set. No key is committed: it is made per machine and registered per run, as
+  described above. The plan's reason for committing one ("a per-run key would leave a hand-started stack unable to
+  sign anyone in") no longer applies — any `170` run publishes the key on a hand-started stack too — and a public
+  repository then holds no private key for a secret scanner to flag. The cost: if the temp key file is deleted while a
+  stack stays up, two fresh keys inside five minutes fail on the refetch throttle; restarting the stack clears it.
+- **D5** — the stack runs Development, with `Issuer` unset.
+- **D6** — a secrets key per run, as a Compose secret.
+- **D7** — wider rate budgets. **Deviation from the plan's number:** `Invitations` is 120, not 60. All five
+  invitation routes share one budget, and one `170` run spends about 31 calls on it (the expiry poll alone about 16
+  previews), so two runs inside a minute on a live stack — how a contributor iterates — were refused `429` at 60.
+- **D8** — the grace window keeps its default and is waited out by polling; so is a 15-second invitation expiry.
+- **D9** — the `090-Docs` pin moves by exactly the 15 sign-in paths.
+- **D10** — three people per run, minted fresh; `170` creates its own region and tenants.
+- **D11** — the story runs in §12's order, and every scoped create carries `tenant_id` and `X-Alvo-Tenant`.
+  **Deviation from the plan's expected answer:** a scoped create without `tenant_id` is `403 forbidden`, *"The write
+  was rejected by policy."*, with no `violations` — not a `422` at `/tenant_id`. A candidate with no tenant fails the
+  synthesized tenant scope's `WITH CHECK`. `170-SelfService/003` pins the real answer and the guides quote it, as a
+  current limitation.
+- **D12** — the guides' exchanges are hand-written and held three ways (above).
+- **D13** — the reference publishes the sign-in routes from OpenAPI.
+- **D14** — a tenth descriptor skill. **Beyond the plan:** the skill list's new line did not fit the always-on budget
+  (`AlvoAssistantTests`, 22 758 bytes), so the base prompt lost two sentences rather than the budget growing, and its
+  version moved to **v10**.
+- **D15** — three guides under *Secure it*, each opening with what you will build.
+- **D16** — no public API moves and no product behaviour changes; every `PublicApi.*.verified.txt` is unchanged.
+
+And where the product answered differently from the plan's first wording (each pinned by the case named):
+
+- **A technician placing a job is `422 unresolved-reference` at `/customer_id`, not `403`** (`003`). Reference
+  resolution runs, as the caller, before the row-level `create` rule, and a technician reads no customer. A customer
+  create, which has no reference, reaches the rule and is the `403`.
+- **A token writing outside its scopes carries the `out-of-scope` type** (`004`).
+- **Management answers an anonymous caller `403`, not `401`**, so a Bearer session there is pinned as "the same refusal
+  as anonymous" (`010`).
+- **An app token sent as `Authorization: Bearer` is the generic `401 invalid_token`** (`010`): *"The presented bearer
+  token could not be used. …"*. It does not say the secret belongs in `X-Alvo-Api-Key`; the tokens guide says it.
+
+### Not in S6, and owed
+
+- **A scoped create's missing `tenant_id` names no field.** The `403` is correct but unhelpful to an agent: Alvo could
+  fill the column from the tenant the request acts in, or answer a structured violation at `/tenant_id`. A DX
+  follow-up: [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538).
+- **A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.** The `401` could name `X-Alvo-Api-Key` as its
+  fix. A DX follow-up: [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).
+- **An `eval-assistant` run on the v10 prompt and the tenth skill** is owed (it costs tokens and is in no ring). Two
+  smaller gaps sit beside it: `SkillAreas.AreaOf("/tenancy", …)` does not look for a `selfService` inside an added
+  value, and the base prompt's "You can change" list names neither `auth` nor `tenancy.selfService`. All three are
+  [#540](https://github.com/Burgyn/MMLib.Alvo/issues/540).
+- **No real browser signs in anywhere.** The Google console steps and `sign-in.js` follow Google's documented API;
+  the demo stack signs people in through the test issuer only.
+- App tokens on a host's own `.WithAlvoCaller()` endpoints ([#536](https://github.com/Burgyn/MMLib.Alvo/issues/536)),
+  and everything else under *Not in S5* above.
+
+## The stack review's fixes
+
+The whole-stack review of S0–S6 (`.superpowers/sdd/2026-11-13-accounts-00-master/stack-review-{A,B,C}.md`) found
+defects that no slice could see, because each sits where two slices meet. Each fix below is a fact on both engines.
+
+- **A refresh-token reuse also kills what the thief minted** (A-I1, S2 × S4 × S5). Reuse is Alvo's one affirmative
+  signal that a refresh token was stolen, and a stolen session could mint a personal token, a service token and an
+  owner-granting invitation, none of which the session's revocation touched. The reuse's transaction now also revokes
+  every live app token the account minted (`_api_keys.minted_by`) and every live invitation it created
+  (`created_by`), in any tenant, whose `created_at` is at or after the reused session's own — invitations first, then
+  tokens, the ban's lock order (`EfCoreAccountStore.RevokeMintedSinceAsync`). Nothing records the session a token was
+  minted in, so the sweep is by time: a token the person minted from another of their sessions after the stolen one
+  started dies too, and is minted again; one minted before it started survives.
+  **The write in flight is closed too** (round 2 of the review). The thief can trigger the reuse at will — it holds the
+  refresh token its own refresh spent — and the routes check the session when the request arrives, then read the body,
+  then open the store's transaction, so a slow body held a gap of seconds in which a mint or an invitation committed
+  after the sweep and lived. The routes now carry the caller's session (`PersonSessionKey`, read back from the person
+  principal's `session:<sid>` key id) into `MintTokenRequest.Session` and `CreateInvitationRequest.Session`, and each
+  store transaction re-reads it with `AuthTables.LockLiveSessionSql` — a no-op `UPDATE … WHERE revoked_at IS NULL AND
+  expires_at > @now` that takes the session row's lock — before it writes. Either the write takes that lock first, and
+  the reuse's revocation waits for it to commit and its sweep then revokes what it wrote, or the reuse revokes the row
+  first, and the write finds no live session and writes nothing: `MintTokenStatus.SessionEnded` /
+  `MemberChangeStatus.SessionEnded`, answered as the dead session's own `401 invalid_token`. SQLite's write gate
+  serialises the two outright. **Lock order**: a mint takes the account row, then the session, then the tenant; an
+  invitation's creation takes the session, then the tenant (before its version bump); a refresh takes the session, then
+  the personal tenant it ensures; reuse takes the session, then invitations, then `_api_keys`; a ban takes the account
+  row first, then the same three in the same order. No pair takes two
+  of these rows in opposite orders. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
+  `…A_mint_racing_a_reuse_of_its_session_never_outlives_it`, `…An_invitation_racing_a_reuse_of_its_session_never_outlives_it`
+  (20 iterations; red on both engines without the re-read), and over HTTP `CredentialWritesMidReuseTests` (the store
+  ends the session between the route's check and its own transaction; red when the route drops the session).
+  **What it does not undo:** what the session already *used* rather than minted. An owner-granting invitation that
+  the thief's accomplice accepted before the reuse is a membership by then, and a promotion or role change the session
+  made is a member write; neither is a credential of the session, and the reuse leaves both. A host without Alvo's
+  person resolver names no session (`PersonSessionKey.SessionOf` is `null`), so its writes are not tied to one.
+- **A banned person's queued work loses their tenant roles** (B-M1, S2 ban × S3 D10). A ban revokes sessions,
+  invitations and tokens but leaves membership rows, and the registry read an `EventActor` delivery narrows by
+  (`RegistryMembershipResolution` → `ITenantStore.FindMembershipAsync`) did not look at the account, so a queued,
+  retried or replayed delivery ran with the banned person's full tenant roles. That read now uses
+  `TenantTables.HonouredMembershipSql`, which adds `NOT EXISTS` a disabled account. **Narrower than "every path using
+  the same SQL"**, deliberately: the member writes read the *target* member with `MembershipSql`, and honouring the ban
+  there would stop an owner from demoting or removing a banned member. The in-transaction actor reads (a mint, an
+  accept, a member write) need no change: each first locks the actor's account row with `disabled_at IS NULL`, or runs
+  for a person whose live session already proved it. Enabling the account honours the memberships again.
+- **Apply warns when nobody could ever sign up** (C-I6, S2 × S4). `auth.signUp.mode: invitationOnly` with an end-user
+  provider and without `tenancy.selfService.invitations: true` — no tenancy at all, or self-service without
+  invitations — now draws a **warning**, not a refusal, at `/auth/signUp/mode` (`SignUpCheck.Warnings`), naming both
+  ways out. A warning, following `GlobalWriteWarnings`' precedent rather than `SelfServiceCheck`'s refusals: those
+  refuse descriptors that cannot work at all (invitations with no shared tenant to invite into), while this one is a
+  legitimate "registration closed" state in which existing accounts keep signing in. `examples/complex-crm`, the
+  schema showcase, had exactly this shape (S2 added `invitationOnly` before invitations existed), so it now declares
+  `tenancy.selfService` with `invitations: true`. Its one tenant role is a role of its own, `member`, because every
+  other role it declares is named in an `access` level, and a tenant role there is refused.
+
+Still open after these fixes, each filed: the HTTP contract's coherence before v0.1
+([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
+lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
+sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
+race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).

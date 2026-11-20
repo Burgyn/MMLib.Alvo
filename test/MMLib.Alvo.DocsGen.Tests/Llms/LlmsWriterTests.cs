@@ -42,6 +42,7 @@ public class LlmsWriterTests
         order.Select(heading => index.IndexOf(heading, StringComparison.Ordinal)).ShouldBeInOrder();
         index.IndexOf("[For coding agents]", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf("[Why Alvo]", StringComparison.Ordinal));
         index.ShouldContain("- [Data API — example (vehicle-registry)](https://alvo.burgyn.online/reference/data-api/): ");
+        index.ShouldContain("- [Sign-in, tenants and tokens API — example (field-service)](https://alvo.burgyn.online/reference/accounts-api/): ");
         index.ShouldContain("- [Data API conventions](https://alvo.burgyn.online/data-api/conventions/): D.\n");
     }
 

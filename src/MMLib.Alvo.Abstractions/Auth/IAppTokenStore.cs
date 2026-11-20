@@ -75,6 +75,11 @@ internal interface IAppTokenStore
 /// <param name="ExpiresAt">When the token expires.</param>
 /// <param name="MaxLive">How many live (unexpired, unrevoked) tokens one account may have minted (S5 plan D13).</param>
 /// <param name="Now">The instant of the mint.</param>
+/// <param name="Session">
+/// The minter's session the request came from, or <see langword="null"/> when none is known. When set, the mint re-reads
+/// it under a lock in its own transaction and is <see cref="MintTokenStatus.SessionEnded"/> once it has ended — so a mint
+/// that raced a refresh-token reuse never leaves a token the reuse's sweep missed (stack review A-I1).
+/// </param>
 internal sealed record MintTokenRequest(
     string KeyId,
     ApiKeyKind Kind,
@@ -87,7 +92,8 @@ internal sealed record MintTokenRequest(
     IReadOnlyList<string> Scopes,
     DateTimeOffset ExpiresAt,
     int MaxLive,
-    DateTimeOffset Now)
+    DateTimeOffset Now,
+    Guid? Session = null)
 {
     /// <summary>Prints the request without its secret hash.</summary>
     /// <param name="builder">The builder to print into.</param>
@@ -122,6 +128,12 @@ internal enum MintTokenStatus
 
     /// <summary>The minter already has <see cref="MintTokenRequest.MaxLive"/> live tokens; nothing was written.</summary>
     LimitReached,
+
+    /// <summary>
+    /// <see cref="MintTokenRequest.Session"/> is revoked, expired or not the minter's — ended by a refresh-token reuse, a
+    /// sign-out or a ban while the request was in flight; nothing was written.
+    /// </summary>
+    SessionEnded,
 }
 
 /// <summary>A mint's status and, when it stored the token, the token's view.</summary>

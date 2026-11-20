@@ -129,8 +129,15 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   `/auth/v1/tokens` and shown once (`alvo_pat_`/`alvo_svc_`, `_api_keys`), sent as `X-Alvo-Api-Key`, refused by the
   Management API and by a host's own `.WithAlvoCaller()` endpoints (a scope opt-in for those is #536), and revoked in
   the transaction that removes, demotes or bans their minter; proven end to end on SQLite
-  and PostgreSQL with no secret in any log (`AppTokenEngineFacts`). The initiative's `← YOU ARE HERE` is **S6** — the
-  field-service self-service demo, the users' guides and the descriptor skills.
+  and PostgreSQL with no secret in any log (`AppTokenEngineFacts`). **S6**: the demo and the docs — the field-service
+  stack signs people in through a test OpenID issuer (Development only, its key made per machine and never committed),
+  and `test/teapie-field-service/170-SelfService` runs level 3 against the real container: a founder, an invited
+  technician, a billing service token, a removed member, every tenant wall and refresh reuse, with every existing suite
+  still green; three guides (*Sign-in and accounts*, *Tenants, members and invitations*, *Tokens for integrators*), a
+  generated sign-in reference, and a tenth descriptor skill, `alvo-descriptor-accounts`
+  (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are complete as stacked PRs #524, #525, #528, #529,
+  #530, #537 and S6's; a whole-stack review precedes the merge. Follow-ups: #523, #526, #527, #536, #538, #539 and
+  #540 (the v10 assistant eval is owed).
 
 ## 3a. What closed F4
 

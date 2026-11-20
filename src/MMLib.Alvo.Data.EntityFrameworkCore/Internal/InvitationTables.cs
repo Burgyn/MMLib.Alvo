@@ -101,6 +101,13 @@ internal sealed class InvitationTables(string schemaPrefix)
         $"UPDATE {Invitations} SET revoked_at = @now WHERE created_by = @user_id AND revoked_at IS NULL";
 
     /// <summary>
+    /// Gets the sweep of a refresh-token reuse (stack review A-I1): every live invitation the account created at or after
+    /// <c>@since</c>, the instant the reused session started, in every tenant. Enabling nothing revives them.
+    /// </summary>
+    internal string RevokeCreatedSinceSql =>
+        $"UPDATE {Invitations} SET revoked_at = @now WHERE created_by = @user_id AND created_at >= @since AND revoked_at IS NULL";
+
+    /// <summary>
     /// The condition a live invitation <c>i</c>, joined to its tenant <c>t</c>, meets for <c>@code_hash</c> at <c>@now</c>
     /// (<see cref="InvitationAcceptance"/>'s step 3): its tenant a shared one — a personal tenant is never invited into,
     /// which the store enforces here because the table does not — not revoked, not expired, not used up, and its creator

@@ -55,7 +55,7 @@ internal static class AppTokenProblems
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="status"/> is <see cref="MintTokenStatus.Minted"/>.</exception>
     internal static IResult Refused(MintTokenStatus status) => status switch
     {
-        MintTokenStatus.NoAccount => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
+        MintTokenStatus.NoAccount or MintTokenStatus.SessionEnded => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
         MintTokenStatus.NotFound => SelfServiceProblems.NoSuchTenant(),
         MintTokenStatus.NotOwner => ProblemResultFactory.PersonForbidden(NotOwner),
         MintTokenStatus.PersonalTenant => ProblemResultFactory.MembershipConflict(Personal),

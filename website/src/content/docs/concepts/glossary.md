@@ -24,6 +24,16 @@ The CEL profile of the `access` block's three levels: a boolean over `@user` alo
 
 </dd>
 
+<dt id="account">Account</dt>
+<dd>
+
+A person who signed in to your app, as Alvo knows them: an id (`@user.id` in a rule), a display name and an email
+address. One is created at the first sign-in when `auth.signUp` admits the person, and found again by the provider's
+own id for that person, never by email. Separate from the dashboard's operator accounts.
+[Sign-in and accounts](/guides/sign-in/)
+
+</dd>
+
 <dt id="after-hook">After-hook</dt>
 <dd>
 
@@ -209,6 +219,15 @@ Not a [custom CEL function](#custom-cel-function). [Functions in the descriptor]
 
 </dd>
 
+<dt id="invitation">Invitation</dt>
+<dd>
+
+A one-time code (`alvo_inv_…`) an owner of a shared tenant creates, which makes whoever accepts it a member with the
+roles it names. It is shown once, travels only in request bodies, and every dead code gets the same `404`.
+[Tenants, members and invitations](/guides/tenants-and-invitations/)
+
+</dd>
+
 <dt id="lifecycle-tab">Lifecycle tab</dt>
 <dd>
 
@@ -244,6 +263,15 @@ and no event without a change. Every [delivery](#delivery) — an after-hook act
 
 </dd>
 
+<dt id="personal-token">Personal token</dt>
+<dd>
+
+A token (`alvo_pat_…`) a signed-in person mints for a script or another program that should act as them, in one
+tenant or none. It holds the person's current roles there, is limited by its [scopes](#scope), travels in
+`X-Alvo-Api-Key`, and dies when the person leaves the tenant or is banned. [Tokens for integrators](/guides/tokens/)
+
+</dd>
+
 <dt id="problem-type">Problem type</dt>
 <dd>
 
@@ -274,7 +302,8 @@ version. [Apply and evolve your descriptor](/guides/apply-and-evolve/)
 
 A name a caller holds, such as `agent`, that rules test with `'agent' in @user.roles`. The descriptor declares its roles
 in `auth.roles`; `anon`, `authenticated` and `admin` are built in. A key carrying a role the descriptor does not declare
-authenticates nothing. [Authentication and API keys](/guides/authentication/)
+authenticates nothing. A role held through a tenant membership is a [tenant role](#tenant-role).
+[Authentication and API keys](/guides/authentication/)
 
 </dd>
 
@@ -322,6 +351,15 @@ rules allow. Scopes do not limit the Management API, where a key reaches what it
 
 </dd>
 
+<dt id="service-token">Service token</dt>
+<dd>
+
+A token (`alvo_svc_…`) an owner of a shared tenant mints for an integration that acts as the tenant: its own id,
+fixed tenant roles the owner holds, and [scopes](#scope). It travels in `X-Alvo-Api-Key` and dies when its minter
+stops being an owner. [Tokens for integrators](/guides/tokens/)
+
+</dd>
+
 <dt id="standalone">Standalone</dt>
 <dd>
 
@@ -343,8 +381,18 @@ or a descriptor after-hook or automation action, named by its JSON pointer and a
 <dt id="tenant">Tenant, @tenant</dt>
 <dd>
 
-The customer or organisation a caller acts for, at most one per caller. On a tenant-scoped entity every row belongs to
-one tenant, and `@tenant.id` is the caller's tenant in a rule. [Multi-tenancy](/guides/multi-tenancy/)
+The customer or organisation a caller acts for, at most one per caller: the tenant an API key was issued for, or a
+membership a signed-in person names with `X-Alvo-Tenant`. On a tenant-scoped entity every row belongs to one tenant,
+and `@tenant.id` is the caller's tenant in a rule. [Multi-tenancy](/guides/multi-tenancy/)
+
+</dd>
+
+<dt id="tenant-role">Tenant role</dt>
+<dd>
+
+A role a person holds in one tenant through their membership, from the descriptor's `assignableRoles`. A rule spells
+it like any role, but it counts only in that tenant's scoped data: never in a rule of a global entity, and never on
+the Management API. [Tenants, members and invitations](/guides/tenants-and-invitations/#tenant-roles-and-project-roles)
 
 </dd>
 

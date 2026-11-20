@@ -8,8 +8,9 @@ namespace MMLib.Alvo.Samples.FieldService.Reports;
 /// <summary>Every morning, per tenant, the open jobs past their slot or their respond-by time go to the dispatch desk.</summary>
 /// <remarks>
 /// <para>
-/// <b>Why C#:</b> a descriptor cron automation takes no condition and runs once per tenant only with an
-/// <see cref="IAlvoTenantCatalog"/>, which the standalone image does not register; and the report is a query plus a message
+/// <b>Why C#:</b> a descriptor cron automation takes no condition, and runs once per tenant only for the tenants a list
+/// names: the standalone image has only the self-service registry's, which holds no API-key tenant such as this demo's, so
+/// this host registers an <see cref="IAlvoTenantCatalog"/>; and the report is a query plus a message
 /// to a gateway, not a write or a webhook. A scheduled job runs one occurrence once across every replica, per tenant
 /// (<see cref="AlvoScheduleScope.EachTenant"/>), as the system in that tenant — so each run reads only its own rows.
 /// </para>

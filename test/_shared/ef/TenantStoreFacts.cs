@@ -284,6 +284,30 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         (await VersionAsync(services, tenant)).ShouldBe(0, "every refusal rolled its bump back");
     }
 
+    /// <summary>
+    /// A ban leaves the membership rows in place, so the registry read every caller without a session uses — an
+    /// <c>EventActor</c> delivery, a personal token — must not honour them (stack review B-M1): a banned person's queued work
+    /// loses its tenant roles. Enabling the account honours them again, and an owner can still remove the banned member.
+    /// </summary>
+    [Fact]
+    public async Task A_banned_person_s_memberships_are_not_found_until_the_account_is_enabled()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, member) = await TeamAsync(store, services);
+        await TenantSeed.AddPersonalTenantAsync(services, TenantId.New(), member, "Bob", _now);
+        var accounts = services.GetRequiredService<IAccountStore>();
+
+        (await accounts.SetDisabledAsync(member, disabled: true, _now.AddHours(1), Ct)).ShouldBeTrue();
+
+        (await store.FindMembershipAsync(member, tenant, Ct)).ShouldBeNull("a banned person's tenant roles are not honoured");
+        (await store.FindMembershipAsync(member, null, Ct)).ShouldBeNull("nor their personal tenant");
+        (await store.FindMembershipAsync(owner, tenant, Ct)).ShouldNotBeNull("the ban is the member's alone");
+        (await accounts.SetDisabledAsync(member, disabled: false, _now.AddHours(2), Ct)).ShouldBeTrue();
+        (await store.FindMembershipAsync(member, tenant, Ct)).ShouldNotBeNull("the row survived the ban");
+        (await accounts.SetDisabledAsync(member, disabled: true, _now.AddHours(3), Ct)).ShouldBeTrue();
+        (await store.RemoveMemberAsync(Remove(tenant, owner, member), Ct)).ShouldBe(MemberChangeStatus.Changed, "an owner removes a banned member");
+    }
+
     [Fact]
     public async Task A_second_owner_makes_leaving_possible()
     {

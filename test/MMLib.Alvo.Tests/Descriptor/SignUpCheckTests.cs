@@ -12,15 +12,33 @@ public sealed class SignUpCheckTests
     private static IReadOnlyList<DescriptorValidationError> Check(string auth) =>
         SignUpCheck.Check(AlvoDescriptor.Parse(Descriptor(auth)));
 
-    private static string Descriptor(string auth) =>
+    private static string Descriptor(string auth, string tenancy = "") =>
         $$"""
         {
           "apiVersion": "alvo.dev/v1",
           "name": "sign-up",
-          "auth": {{auth}},
+          "auth": {{auth}},{{tenancy}}
           "entities": { "notes": { "fields": { "title": { "type": "string" } } } }
         }
         """;
+
+    private const string InvitationOnly =
+        """{ "providers": ["google"], "roles": ["member"], "signUp": { "mode": "invitationOnly" } }""";
+
+    private static string SelfService(string invitations) =>
+        $$"""
+
+          "tenancy": {
+            "enabled": true,
+            "selfService": {
+              "assignableRoles": ["member"],
+              "createTenants": { "creatorRoles": ["member"] }{{invitations}}
+            }
+          },
+        """;
+
+    private static IReadOnlyList<DescriptorValidationError> Warnings(string auth, string tenancy = "") =>
+        SignUpCheck.Warnings(AlvoDescriptor.Parse(Descriptor(auth, tenancy)));
 
     [Fact]
     public void Google_without_sign_up_is_refused_with_both_choices()
@@ -61,6 +79,53 @@ public sealed class SignUpCheckTests
         result.IsValid.ShouldBeFalse();
         result.Errors.Where(error => error == SignUpCheck.Refusal).ShouldHaveSingleItem("the schema pass and the rule pass must not both report it");
         result.Errors.ShouldNotContain(error => error.Message.Contains("required property 'signUp'", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <c>invitationOnly</c> where nobody can ever be invited (stack review C-I6): no tenancy, or self-service without
+    /// invitations. A legitimate "registration closed" state — existing accounts still sign in — so a warning with both
+    /// ways out, never a refusal.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("selfService-without-invitations")]
+    [InlineData("selfService-with-invitations-off")]
+    public void Invitation_only_without_invitations_is_warned_with_both_fixes(string tenancy)
+    {
+        var block = tenancy switch
+        {
+            "selfService-without-invitations" => SelfService(""),
+            "selfService-with-invitations-off" => SelfService(",\r\n      \"invitations\": false"),
+            _ => "",
+        };
+
+        var warning = Warnings(InvitationOnly, block).ShouldHaveSingleItem();
+
+        warning.ShouldBe(SignUpCheck.NobodyCanBeInvited);
+        warning.Path.ShouldBe("/auth/signUp/mode");
+        warning.Severity.ShouldBe(DescriptorValidationSeverity.Warning);
+        warning.FixSuggestion.ShouldNotBeNull().ShouldContain("\"invitations\": true");
+        warning.FixSuggestion.ShouldContain("\"open\"");
+    }
+
+    [Fact]
+    public void Invitation_only_with_invitations_is_not_warned() =>
+        Warnings(InvitationOnly, SelfService(",\r\n      \"invitations\": true")).ShouldBeEmpty();
+
+    [Fact]
+    public void Open_sign_up_and_invitation_only_without_an_end_user_provider_are_not_warned()
+    {
+        Warnings("""{ "providers": ["google"], "signUp": { "mode": "open" } }""").ShouldBeEmpty();
+        Warnings("""{ "providers": ["local"], "signUp": { "mode": "invitationOnly" } }""").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void The_validator_carries_the_warning_and_still_applies()
+    {
+        var result = new DescriptorValidator().Validate(Descriptor(InvitationOnly));
+
+        result.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Error).ShouldBeEmpty();
+        result.Errors.ShouldContain(SignUpCheck.NobodyCanBeInvited);
     }
 
     [Fact]

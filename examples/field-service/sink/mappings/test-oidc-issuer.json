@@ -1,0 +1,19 @@
+{
+  "mappings": [
+    {
+      "name": "TEST-ONLY OpenID issuer for the field-service e2e (see test/teapie-field-service/_shared/TestIssuer.csx)",
+      "request": { "method": "GET", "urlPath": "/oidc/.well-known/openid-configuration" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "issuer": "https://accounts.google.com",
+          "jwks_uri": "http://localhost:9090/oidc/jwks.json",
+          "id_token_signing_alg_values_supported": ["RS256"],
+          "response_types_supported": ["id_token"],
+          "subject_types_supported": ["public"]
+        }
+      }
+    }
+  ]
+}

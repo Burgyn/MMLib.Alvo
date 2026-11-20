@@ -66,7 +66,8 @@ internal interface IAccountStore
     /// <summary>
     /// Rotates a refresh token, in one transaction (spec §5.5, D6): an unrotated token gets the request's child; a token
     /// rotated within the grace window answers the child it already has, so the family never forks; one rotated longer ago
-    /// is reuse, and revokes its session (<see cref="SessionRevocations.Reuse"/>) before answering. An unknown token, an
+    /// is reuse, and revokes its session (<see cref="SessionRevocations.Reuse"/>) before answering — and, in the same
+    /// transaction, every app token and invitation the account created since that session started. An unknown token, an
     /// idle one, a revoked or expired session and a disabled account are each refused, identically. A refresh that
     /// answers a child ensures the account's personal tenant when <see cref="RefreshRequest.PersonalTenant"/> is set —
     /// how a descriptor that adds <c>personalTenant</c> after people signed up reaches them (spec §6.5).
@@ -242,7 +243,10 @@ internal enum RefreshStatus
     /// <summary>The token was rotated within the grace window; its existing child is answered again.</summary>
     Replayed,
 
-    /// <summary>The token was rotated before the grace window; its session is now revoked.</summary>
+    /// <summary>
+    /// The token was rotated before the grace window; its session is now revoked, with every app token and invitation the
+    /// account created since the session started.
+    /// </summary>
     Reused,
 
     /// <summary>The token, its session or its account is not usable; nothing was written.</summary>

@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Data.EntityFrameworkCore;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Secrets;
 using MMLib.Alvo.Tenants;
@@ -598,6 +599,140 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await IsLiveAsync(store, account, session.SessionId, rotated.Now.AddSeconds(12))).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// Reuse is the one signal that a refresh token was stolen: the session it ends takes with it every app token and
+    /// invitation the person created since that session started — whatever a thief holding it could have minted — and
+    /// nothing created before it. The person's other session lives on.
+    /// </summary>
+    [Fact]
+    public async Task A_reuse_revokes_the_tokens_and_invitations_created_since_its_session_started()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, earlier) = await SignedInAsync(store);
+        var tenant = await OwnedTenantAsync(services, account);
+        var oldToken = await MintAsync(services, account, ApiKeyKind.Personal, tenant, _now.AddMinutes(30));
+        var oldInvitation = await InviteAsync(services, tenant, account, [], now: _now.AddMinutes(30));
+        var stolen = SignIn(earlier.Identity) with { Now = _now.AddHours(1) };
+        (await store.SignInAsync(stolen, Ct)).Status.ShouldBe(SignInStatus.SignedIn);
+        var rotated = Refresh(stolen.RefreshTokenId, _now.AddHours(2));
+        await store.RefreshAsync(rotated, Ct);
+        var personal = await MintAsync(services, account, ApiKeyKind.Personal, tenant, rotated.Now);
+        var service = await MintAsync(services, account, ApiKeyKind.Service, tenant, rotated.Now);
+        var owner = await InviteAsync(services, tenant, account, [], grantsOwner: true, now: rotated.Now);
+
+        (await store.RefreshAsync(Refresh(stolen.RefreshTokenId, _now.AddHours(3)), Ct)).Status.ShouldBe(RefreshStatus.Reused);
+
+        (await TokenRevokedAtAsync(services, personal)).ShouldBe(_now.AddHours(3));
+        (await TokenRevokedAtAsync(services, service)).ShouldBe(_now.AddHours(3), "a service token minted in the session dies with it");
+        (await InvitationRevokedAtAsync(services, owner.Id)).ShouldBe(_now.AddHours(3), "so does an owner invitation");
+        (await TokenRevokedAtAsync(services, oldToken)).ShouldBeNull("a token minted before the session started is not the thief's");
+        (await InvitationRevokedAtAsync(services, oldInvitation.Id)).ShouldBeNull();
+        (await IsLiveAsync(store, account, earlier.SessionId, _now.AddHours(3))).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The sweep's other half (stack review A-I1, round 2): a mint or an invitation naming a session a reuse already ended
+    /// writes nothing — the request checked the session when it arrived, the store re-checks it in the write — and the
+    /// person's other, live session still mints and invites.
+    /// </summary>
+    [Fact]
+    public async Task A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, other) = await SignedInAsync(store);
+        var tenant = await OwnedTenantAsync(services, account);
+        var stolen = SignIn(other.Identity) with { Now = _now.AddHours(1) };
+        (await store.SignInAsync(stolen, Ct)).Status.ShouldBe(SignInStatus.SignedIn);
+        await store.RefreshAsync(Refresh(stolen.RefreshTokenId, _now.AddHours(2)), Ct);
+        (await store.RefreshAsync(Refresh(stolen.RefreshTokenId, _now.AddHours(3)), Ct)).Status.ShouldBe(RefreshStatus.Reused);
+        var tokens = services.GetRequiredService<IAppTokenStore>();
+        var mint = MintRequest(account, ApiKeyKind.Service, tenant, _now.AddHours(3), stolen.SessionId);
+        var invitation = InvitationRequest(tenant, account, _now.AddHours(3), stolen.SessionId);
+
+        (await tokens.MintAsync(mint, Ct)).Status.ShouldBe(MintTokenStatus.SessionEnded);
+        (await Tenants(services).CreateInvitationAsync(invitation, Ct)).Status.ShouldBe(MemberChangeStatus.SessionEnded);
+
+        (await tokens.FindAsync(mint.KeyId, Ct)).ShouldBeNull();
+        (await InvitationCountAsync(services, invitation.Id)).ShouldBe(0);
+        (await tokens.MintAsync(MintRequest(account, ApiKeyKind.Service, tenant, _now.AddHours(3), other.SessionId), Ct))
+            .Status.ShouldBe(MintTokenStatus.Minted, "another live session of the person still mints");
+        (await Tenants(services).CreateInvitationAsync(InvitationRequest(tenant, account, _now.AddHours(3), other.SessionId), Ct))
+            .Status.ShouldBe(MemberChangeStatus.Changed, "and still invites");
+    }
+
+    /// <summary>
+    /// A-I1 round 2, the race the thief can start at will: a service-token mint naming the session while its spent refresh
+    /// token is presented again. The session's lock decides — the mint either finds the session ended and writes nothing,
+    /// or commits first and is swept by the reuse. Never a live token of the stolen session.
+    /// </summary>
+    [Fact]
+    public async Task A_mint_racing_a_reuse_of_its_session_never_outlives_it()
+    {
+        var (store, services) = await StoreAsync();
+        var tokens = services.GetRequiredService<IAppTokenStore>();
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (account, session, tenant) = await RotatedSessionAsync(store, services);
+            var mint = MintRequest(account, ApiKeyKind.Service, tenant, _now.AddMinutes(2), session.SessionId);
+
+            var (minted, reused) = await RaceAsync(
+                () => tokens.MintAsync(mint, Ct),
+                () => store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(2)), Ct));
+
+            reused.Status.ShouldBe(RefreshStatus.Reused, $"iteration {iteration}");
+            var record = await tokens.FindAsync(mint.KeyId, Ct);
+            if (minted.Status == MintTokenStatus.SessionEnded)
+            {
+                record.ShouldBeNull($"iteration {iteration}: a refused mint stores nothing");
+                continue;
+            }
+
+            minted.Status.ShouldBe(MintTokenStatus.Minted, $"iteration {iteration}");
+            record.ShouldNotBeNull().RevokedAt.ShouldNotBeNull($"iteration {iteration}: the token outlived the stolen session");
+        }
+    }
+
+    /// <summary>A-I1 round 2: an owner-granting invitation created on the session while it is reused — the same two outcomes.</summary>
+    [Fact]
+    public async Task An_invitation_racing_a_reuse_of_its_session_never_outlives_it()
+    {
+        var (store, services) = await StoreAsync();
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (account, session, tenant) = await RotatedSessionAsync(store, services);
+            var invitation = InvitationRequest(tenant, account, _now.AddMinutes(2), session.SessionId);
+
+            var (created, reused) = await RaceAsync(
+                () => Tenants(services).CreateInvitationAsync(invitation, Ct),
+                () => store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(2)), Ct));
+
+            reused.Status.ShouldBe(RefreshStatus.Reused, $"iteration {iteration}");
+            if (created.Status == MemberChangeStatus.SessionEnded)
+            {
+                (await InvitationCountAsync(services, invitation.Id)).ShouldBe(0, $"iteration {iteration}: a refused creation stores nothing");
+                continue;
+            }
+
+            created.Status.ShouldBe(MemberChangeStatus.Changed, $"iteration {iteration}");
+            (await InvitationRevokedAtAsync(services, invitation.Id))
+                .ShouldNotBeNull($"iteration {iteration}: the invitation outlived the stolen session");
+        }
+    }
+
+    [Fact]
+    public async Task A_replay_inside_the_window_revokes_nothing_the_person_minted()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var token = await MintAsync(services, account, ApiKeyKind.Personal, null, _now.AddMinutes(1));
+        var rotated = Refresh(session.RefreshTokenId, _now.AddMinutes(2));
+        await store.RefreshAsync(rotated, Ct);
+
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, rotated.Now.AddSeconds(5)), Ct)).Status.ShouldBe(RefreshStatus.Replayed);
+
+        (await TokenRevokedAtAsync(services, token)).ShouldBeNull();
+    }
+
     [Fact]
     public async Task The_window_boundary_is_inclusive()
     {
@@ -900,13 +1035,94 @@ public abstract class AccountStoreFacts : IAsyncDisposable
 
     /// <summary>A live invitation of <paramref name="owner"/>'s into <paramref name="tenant"/>, under a fresh code hash.</summary>
     private protected static async Task<CreateInvitationRequest> InviteAsync(
-        IServiceProvider services, TenantId tenant, UserId owner, IReadOnlyList<string> roles, string? email = null, int maxUses = 1)
+        IServiceProvider services,
+        TenantId tenant,
+        UserId owner,
+        IReadOnlyList<string> roles,
+        string? email = null,
+        int maxUses = 1,
+        bool grantsOwner = false,
+        DateTimeOffset? now = null)
     {
         var request = new CreateInvitationRequest(
-            Guid.NewGuid(), tenant, owner, InvitationHash(), roles, GrantsOwner: false, email, maxUses, _now.AddDays(7), _now.AddHours(-1));
+            Guid.NewGuid(), tenant, owner, InvitationHash(), roles, grantsOwner, email, maxUses, _now.AddDays(7), now ?? _now.AddHours(-1));
         (await Tenants(services).CreateInvitationAsync(request, Ct)).Status.ShouldBe(MemberChangeStatus.Changed);
         return request;
     }
+
+    /// <summary>A shared tenant <c>Acme</c> whose one owner is <paramref name="owner"/>, holding <c>dispatcher</c>.</summary>
+    private static async Task<TenantId> OwnedTenantAsync(IServiceProvider services, UserId owner)
+    {
+        var tenant = new TenantId(Guid.NewGuid());
+        (await Tenants(services).CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", owner, ["dispatcher"], 5, _now), Ct))
+            .Status.ShouldBe(CreateTenantStatus.Created);
+        return tenant;
+    }
+
+    /// <summary>
+    /// Mints one token of <paramref name="minter"/>'s at <paramref name="now"/> — a personal one acting as the minter, a
+    /// service one holding <c>dispatcher</c> — and returns its key id.
+    /// </summary>
+    private static async Task<string> MintAsync(
+        IServiceProvider services, UserId minter, ApiKeyKind kind, TenantId? tenant, DateTimeOffset now)
+    {
+        var request = MintRequest(minter, kind, tenant, now);
+        (await services.GetRequiredService<IAppTokenStore>().MintAsync(request, Ct)).Status.ShouldBe(MintTokenStatus.Minted);
+        return request.KeyId;
+    }
+
+    /// <summary>A mint of <paramref name="minter"/>'s — a personal token acting as the minter, a service one holding <c>dispatcher</c>.</summary>
+    private static MintTokenRequest MintRequest(
+        UserId minter, ApiKeyKind kind, TenantId? tenant, DateTimeOffset now, Guid? session = null)
+    {
+        var keyId = (kind == ApiKeyKind.Service ? "alvo_svc_" : "alvo_pat_") + Guid.NewGuid().ToString("N");
+        var (actor, roles) = kind == ApiKeyKind.Service ? (UserId.New(), (string[])["dispatcher"]) : (minter, []);
+        return new MintTokenRequest(
+            keyId, kind, InvitationHash(), "ci", minter, actor, tenant, roles, ["orders:read"], _now.AddDays(30), 10, now, session);
+    }
+
+    /// <summary>A single-use, owner-granting invitation of <paramref name="owner"/>'s into <paramref name="tenant"/>.</summary>
+    private static CreateInvitationRequest InvitationRequest(TenantId tenant, UserId owner, DateTimeOffset now, Guid session) =>
+        new(Guid.NewGuid(), tenant, owner, InvitationHash(), [], GrantsOwner: true, null, 1, now.AddDays(7), now, session);
+
+    /// <summary>
+    /// A fresh account signed in at the facts' start, owning <c>Acme</c>, whose first refresh token was rotated a minute
+    /// later — so presenting it again at two minutes is a reuse.
+    /// </summary>
+    private static async Task<(UserId Account, SignInRequest Session, TenantId Tenant)> RotatedSessionAsync(
+        IAccountStore store, IServiceProvider services)
+    {
+        var (account, session) = await SignedInAsync(store);
+        var tenant = await OwnedTenantAsync(services, account);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        return (account, session, tenant);
+    }
+
+    /// <summary>Runs both operations at once, released together.</summary>
+    private static async Task<(TFirst First, TSecond Second)> RaceAsync<TFirst, TSecond>(
+        Func<Task<TFirst>> first, Func<Task<TSecond>> second)
+    {
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var one = Task.Run(async () => { await start.Task; return await first(); }, Ct);
+        var two = Task.Run(async () => { await start.Task; return await second(); }, Ct);
+        start.SetResult();
+        return (await one, await two);
+    }
+
+    private static async Task<long> InvitationCountAsync(IServiceProvider services, Guid invitation) => Convert.ToInt64(
+        await ScalarAsync(
+            services,
+            $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} WHERE id = '{invitation:D}'"),
+        CultureInfo.InvariantCulture);
+
+    private static async Task<DateTimeOffset?> TokenRevokedAtAsync(IServiceProvider services, string keyId) =>
+        (await services.GetRequiredService<IAppTokenStore>().FindAsync(keyId, Ct)).ShouldNotBeNull().RevokedAt;
+
+    private static async Task<DateTimeOffset?> InvitationRevokedAtAsync(IServiceProvider services, Guid invitation) =>
+        await ScalarAsync(
+            services,
+            $"SELECT revoked_at FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} WHERE id = '{invitation:D}'")
+            is string text ? StoredInstant.Of(text) : null;
 
     /// <summary>The one owner of <paramref name="tenant"/>.</summary>
     private protected static async Task<UserId> OwnerOfAsync(IServiceProvider services, TenantId tenant) => UserIdOf(
