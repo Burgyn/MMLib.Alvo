@@ -45,6 +45,12 @@
          Shipping it does not configure it — an image with no AI connection has an assistant that
          resolves to "not configured", and no launcher renders. -->
     <ProjectReference Include="../MMLib.Alvo.Ai/MMLib.Alvo.Ai.csproj" />
+
+    <!-- End-user sign-in. The same category once more: the standalone image ships it, an embedded host
+         chooses whether to. Shipping it does not switch it on — AlvoHost calls AddAlvoAccounts only when
+         Alvo:Accounts:Providers configures a provider (S2 D9), so an image without one starts without a
+         key file, maps no /auth route and publishes no Bearer scheme. -->
+    <ProjectReference Include="../MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

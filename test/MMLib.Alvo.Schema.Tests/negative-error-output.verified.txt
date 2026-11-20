@@ -1,5 +1,8 @@
 [
   {
+    file: assignable-role-in-access.json
+  },
+  {
     file: decimal-without-scale.json,
     failures: [
       {
@@ -44,6 +47,23 @@
     ]
   },
   {
+    file: google-without-sign-up.json,
+    failures: [
+      {
+        Pointer: #/auth,
+        Message: Validation - allOf failed to validate against the schema.
+      },
+      {
+        Pointer: #/auth,
+        Message: Validation required - the required property 'signUp' was not present.
+      },
+      {
+        Pointer: #/auth,
+        Message: Validation then - failed to validate against the then schema
+      }
+    ]
+  },
+  {
     file: index-exclude-missing-to.json,
     failures: [
       {
@@ -71,6 +91,12 @@
     ]
   },
   {
+    file: self-service-admin-assignable.json
+  },
+  {
+    file: self-service-without-tenancy.json
+  },
+  {
     file: sequence-two-numbers.json,
     failures: [
       {
@@ -96,6 +122,9 @@
         Message: Validation pattern - Central Europe Standard Time did not match '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$'
       }
     ]
+  },
+  {
+    file: service-tokens-without-shared-tenants.json
   },
   {
     file: state-machine-no-transitions.json,

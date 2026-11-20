@@ -11,7 +11,11 @@ public class ExamplesTests
         SchemaPaths.Examples().Select(path => new object[] { path });
 
     public static IEnumerable<object[]> Negative() =>
-        SchemaPaths.NegativeExamples().Select(path => new object[] { path });
+        SchemaPaths.NegativeExamples().Where(path => !RefusedByApply(path)).Select(path => new object[] { path });
+
+    /// <summary>The negative examples whose refusal is the apply's own cross-key check (<c>"refusedBy": "apply"</c>).</summary>
+    public static IEnumerable<object[]> ApplyRefused() =>
+        SchemaPaths.NegativeExamples().Where(RefusedByApply).Select(path => new object[] { path });
 
     public static IEnumerable<object[]> Snippets() =>
         DocsSnippets.All().Select(path => new object[] { path });
@@ -61,6 +65,20 @@ public class ExamplesTests
                 + (expected.MessageContains == null ? "" : $" mentioning '{expected.MessageContains}'"));
     }
 
+    /// <summary>
+    /// <b>An apply-refused example passes the schema</b>: its rule spans keys, and a schema conditional beside the apply's
+    /// check would report the same fault twice, the second time without a fix (the <c>auth.signUp</c> lesson). The core
+    /// suite's <c>ApplyRefusedNegativeExamplesTests</c> holds each to its pointer through the real validator.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ApplyRefused))]
+    public void Apply_refused_negative_example_passes_the_schema(string path)
+    {
+        var failures = SchemaValidator.Failures(SchemaValidator.Load(), File.ReadAllText(path));
+
+        failures.ShouldBeEmpty($"{Path.GetFileName(path)} is refused by the apply alone; the schema must hold no cross-key rule for it");
+    }
+
     private static Dictionary<string, Expectation> LoadExpectations()
     {
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(SchemaPaths.NegativeExpectationsFile));
@@ -71,11 +89,17 @@ public class ExamplesTests
             string? messageContains = entry.Value.TryGetProperty("messageContains", out JsonElement value)
                 ? value.GetString()
                 : null;
-            map[entry.Name] = new Expectation(pointer, messageContains);
+            string? refusedBy = entry.Value.TryGetProperty("refusedBy", out JsonElement stage)
+                ? stage.GetString()
+                : null;
+            map[entry.Name] = new Expectation(pointer, messageContains, refusedBy);
         }
 
         return map;
     }
 
-    private sealed record Expectation(string Pointer, string? MessageContains);
+    private static bool RefusedByApply(string path) =>
+        _expectations.TryGetValue(Path.GetFileName(path), out var expected) && expected.RefusedBy == "apply";
+
+    private sealed record Expectation(string Pointer, string? MessageContains, string? RefusedBy);
 }

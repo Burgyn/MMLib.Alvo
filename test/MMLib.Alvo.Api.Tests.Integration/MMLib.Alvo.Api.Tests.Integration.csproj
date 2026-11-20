@@ -30,6 +30,9 @@
          alternative — a second copy of the world with the default removed — is exactly the drift the shared
          directory exists to prevent, and one unused reference is the cheaper half of that trade. -->
     <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <!-- End-user sign-in, for PostgresAccountsEngineTests: level 1 end to end on this engine, where two refreshes of one
+         token really overlap. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -59,6 +62,13 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/%(Filename)%(Extension)" />
     <Content Include="$(MSBuildThisFileDirectory)../_shared/api/descriptors/*.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The accounts world and AccountsEngineFacts, linked exactly as MMLib.Alvo.Accounts.Tests links them, so "level 1 on
+       SQLite and PostgreSQL" is one suite run twice. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/accounts/*.cs" Link="_shared/accounts/%(Filename)%(Extension)" />
+    <Content Include="$(MSBuildThisFileDirectory)../_shared/accounts/descriptors/*.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

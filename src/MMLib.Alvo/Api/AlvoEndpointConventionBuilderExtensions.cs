@@ -69,9 +69,11 @@ public static class AlvoEndpointConventionBuilderExtensions
     /// No credential binds the anonymous caller; a credential that cannot be used is answered 401 before the handler runs.
     /// The caller is also published through <c>IAlvoContextAccessor</c> while the handler runs. No API-key scope is checked:
     /// a plain endpoint names no entity, so what it allows is the host's code — and every <c>IAlvoData</c> call it makes as
-    /// the caller is still judged by the descriptor's rules. No gate witness checks these endpoints, because they fail
-    /// closed (Ruling 5): a convention that removes this filter leaves an <see cref="AlvoCaller"/> parameter that throws
-    /// and an accessor that publishes no caller, so the handler can never act as anyone but the anonymous caller.
+    /// the caller is still judged by the descriptor's rules. For that reason a personal or service token
+    /// (<c>alvo_pat_…</c>, <c>alvo_svc_…</c>) is refused 403 before the handler runs: its scopes could not be kept here.
+    /// No gate witness checks these endpoints, because they fail closed (Ruling 5): a convention that removes this filter
+    /// leaves an <see cref="AlvoCaller"/> parameter that throws and an accessor that publishes no caller, so the handler
+    /// can never act as anyone but the anonymous caller.
     /// </remarks>
     /// <typeparam name="TBuilder">The convention builder.</typeparam>
     /// <param name="builder">The endpoint's builder.</param>

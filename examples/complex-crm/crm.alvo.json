@@ -6,7 +6,8 @@
   "x-generator": "alvo-examples/complex-crm",
   "auth": {
     "providers": ["local", "google"],
-    "roles": ["sales", "manager", "finance"]
+    "roles": ["sales", "manager", "finance", "member"],
+    "signUp": { "mode": "invitationOnly" }
   },
   "description": "Customer relationship management: companies, contacts, deals, and invoicing.",
   "branding": {
@@ -18,7 +19,12 @@
     "viewer": "'sales' in @user.roles || 'manager' in @user.roles || 'finance' in @user.roles"
   },
   "tenancy": {
-    "enabled": true
+    "enabled": true,
+    "selfService": {
+      "assignableRoles": ["member"],
+      "createTenants": { "creatorRoles": ["member"] },
+      "invitations": true
+    }
   },
   "dynamicEntities": {
     "enabled": true,

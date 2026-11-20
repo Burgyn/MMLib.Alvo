@@ -1,0 +1,147 @@
+### Dana's first customer in Acme. A person names the tenant she acts in with `X-Alvo-Tenant`, and a scoped create
+### carries the same id as `tenant_id` in its body: Alvo checks the column against the tenant, it does not fill it in.
+# @name DanaCreatesCustomer
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "name": "Acme's first customer",
+  "tier": "standard"
+}
+
+### The same create without `tenant_id` — the mistake a reader of the guides makes first, and the answer they get.
+### Alvo never fills the column in from the header: the row it would write names no tenant, the tenant scope (the
+### same check that stops a write INTO another tenant) does not hold for it, and the write is refused by policy —
+### a 403 naming no field, not a 422 at /tenant_id.
+# @name DanaCreatesWithoutTenantId
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/customers
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "name": "Acme's first customer",
+  "tier": "standard"
+}
+
+### A job for Theo: scheduled, assigned to him
+# @name DanaCreatesTheosJob
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "reference": "{{TheoJobReference}}",
+  "title": "Replace the kitchen tap",
+  "status": "scheduled",
+  "priority": 2,
+  "scheduled_for": "{{TomorrowMorning}}",
+  "assigned_to": "{{TheoId}}",
+  "access_code": "ACME-TAP",
+  "customer_id": "{{DanaCreatesCustomer.response.body.$.id}}",
+  "region_id": "{{RegionId}}"
+}
+
+### A job for nobody yet, in the same tenant
+# @name DanaCreatesOtherJob
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/work_orders
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "reference": "{{OtherJobReference}}",
+  "title": "Service the boiler",
+  "status": "scheduled",
+  "priority": 3,
+  "access_code": "ACME-BOILER",
+  "customer_id": "{{DanaCreatesCustomer.response.body.$.id}}",
+  "region_id": "{{RegionId}}"
+}
+
+### Theo's list in Acme: the row rule (`assigned_to == @user.id`) narrows it, his tenant role does not widen it
+# @name TheoListsInAcme
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+
+### The same read naming no tenant. Theo has no personal tenant (the descriptor declares none), so he acts in none,
+### and a scoped entity answers the tenant guard rather than an empty page — or a page of anyone's rows.
+# @name TheoListsWithoutTenant
+## TEST-EXPECT-STATUS: [403]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{TheoAccess}}
+
+### A technician cannot place a job. Every job names a customer, and `customers` admits no technician to read one, so
+### the reference does not resolve for him — answered before the row rule, as a 422 at /customer_id: a row he cannot
+### read is indistinguishable from one that does not exist. (Dana's 201 with the same customer_id is the control.)
+# @name TheoCreatesAJob
+## TEST-EXPECT-STATUS: [422]
+POST {{fsBaseUrl}}/api/work_orders
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "reference": "{{OtherJobReference}}9",
+  "title": "A job Theo would like",
+  "status": "new",
+  "priority": 5,
+  "access_code": "ACME-THEO",
+  "customer_id": "{{DanaCreatesCustomer.response.body.$.id}}",
+  "region_id": "{{RegionId}}"
+}
+
+### The `create` rule itself, where nothing is left to resolve first: a customer carries no reference, so the row
+### rule (`'dispatcher' in @user.roles || 'admin' in @user.roles`) is what answers, and a technician holds neither
+# @name TheoCreatesACustomer
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/customers
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "name": "Theo's own customer",
+  "tier": "standard"
+}
+
+### He arrives on site: `start` admits a technician, and the job is his
+# @name TheoStarts
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{DanaCreatesTheosJob.response.body.$.id}}
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{ "status": "in_progress" }
+
+### And signs it off: `complete` demands the day
+# @name TheoCompletes
+## TEST-EXPECT-STATUS: [200]
+PATCH {{fsBaseUrl}}/api/work_orders/{{DanaCreatesTheosJob.response.body.$.id}}
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{ "status": "completed", "completed_on": "{{Today}}" }
+
+### Dana's list in Acme — the control: both jobs exist, so Theo's single row is the rule, not the data
+# @name DanaListsInAcme
+## TEST-EXPECT-STATUS: [200]
+GET {{fsBaseUrl}}/api/work_orders?order=reference.asc
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}

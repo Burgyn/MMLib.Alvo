@@ -29,6 +29,8 @@ What you can use today:
   multi-tenancy.
 - Host C# in the same pipeline: write hooks, event handlers, commands, timers and state machines, read shaping and
   a test host. [Extending in code](/extending/) is the map.
+- Sign-in with Google for your app's users, tenants they create and invite each other into, and tokens for
+  integrations: [Sign-in and accounts](/guides/sign-in/).
 - The Management API, with dry runs, revisions and rollback, and the admin dashboard with its schema assistant.
 
 ## Honoured, warned, refused
@@ -41,7 +43,7 @@ with it without saying so.
   indexes), `auth`, `tenancy`, `access`, `formats` and `automation`.
 - **Declared but not run in this build**: the descriptor applies, and the dashboard and the capabilities answer warn
   that nothing runs. That covers `dynamicEntities`, `functions` (csx; a host function registered in C# runs),
-  sign-in providers other than `local`, `entity.storage: dynamic`, `entity.realtime`, and webhook signing: deliveries
+  sign-in providers other than `local` and `google`, `entity.storage: dynamic`, `entity.realtime`, and webhook signing: deliveries
   from after-hooks and automation are made, but not signed yet.
 - **Refused at apply**: the descriptor is rejected with a reason and a fix, because accepting it would silently give
   you something other than what it says. Examples: a `$cel` default, `softDelete`, JSONata transformations, the

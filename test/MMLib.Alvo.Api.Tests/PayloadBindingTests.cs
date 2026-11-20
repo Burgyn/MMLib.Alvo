@@ -105,6 +105,28 @@ public sealed class PayloadBindingTests
         (await pastBound.ReadProblemDetailAsync()).ShouldContain("nests deeper than 4");
     }
 
+    /// <summary>
+    /// The same boundary when the innermost container is <em>empty</em>: it holds no token one level further in, so
+    /// a scan that judged only the tokens inside a container admitted it, and the parse then threw — a 500.
+    /// </summary>
+    [Fact]
+    public async Task A_body_whose_innermost_container_is_empty_is_held_to_the_same_bound()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(api => api.MaxPayloadDepth = 4));
+
+        using var atBound = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(EmptyNested(depth: 3)));
+        using var pastBound = await world.SendRawAsync(
+            HttpMethod.Post, "/api/owners", _admin, content: AlvoApiWorld.RawJson(EmptyNested(depth: 4)));
+
+        atBound.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await atBound.ReadTextAsync());
+        (await atBound.ReadViolationsAsync()).ShouldContain(
+            violation => violation.Pointer == "/name" && violation.Code == "invalid-value");
+        pastBound.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await pastBound.ReadTextAsync());
+        (await pastBound.ReadProblemDetailAsync()).ShouldContain("nests deeper than 4");
+    }
+
     [Fact]
     public async Task A_body_with_more_keys_than_the_configured_maximum_is_refused_and_names_the_bound()
     {
@@ -554,6 +576,9 @@ public sealed class PayloadBindingTests
 
     private static string Nested(int depth) =>
         $@"{{""name"":{new string('[', depth)}1{new string(']', depth)}}}";
+
+    private static string EmptyNested(int depth) =>
+        $@"{{""name"":{new string('[', depth)}{new string(']', depth)}}}";
 
     private static string WideObject(int keys) =>
         "{" + string.Join(

@@ -113,8 +113,13 @@ export default defineConfig({
             schema: './src/generated/openapi/data-api.json',
             sidebar: { label: 'Data API — example (vehicle-registry)' },
           },
+          {
+            base: 'reference/accounts-api',
+            schema: './src/generated/openapi/accounts-api.json',
+            sidebar: { label: 'Sign-in, tenants and tokens API — example (field-service)' },
+          },
         ]),
-        starlightLinksValidator({ exclude: [`${base}reference/data-api/`] }),
+        starlightLinksValidator({ exclude: [`${base}reference/data-api/`, `${base}reference/accounts-api/`] }),
       ],
       sidebar: [
         { label: 'Start here', items: [
@@ -135,6 +140,9 @@ export default defineConfig({
         ] },
         { label: 'Secure it', collapsed: true, items: [
           page('Authentication and API keys', 'guides/authentication'),
+          page('Sign-in and accounts', 'guides/sign-in'),
+          page('Tenants, members and invitations', 'guides/tenants-and-invitations'),
+          page('Tokens for integrators', 'guides/tokens'),
           page('Access rules', 'guides/access-rules'),
           page('Rules over relations', 'extending/relation-rules'),
           page('Multi-tenancy', 'guides/multi-tenancy'),

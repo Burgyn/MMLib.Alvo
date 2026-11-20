@@ -719,7 +719,9 @@ internal static class DataApiEndpoints
     {
         var witness = new AlvoGateWitness(entity.Name, kind);
         var route = builder
-            // First, so it wraps the authorization filter and stamps the 401 and 403 that filter answers
+            // CORS first of all (AlvoCors says why): a refusal a browser script cannot read is one it cannot act on.
+            .AddEndpointFilter(filters.Cors.Filter)
+            // Then no-store, so it wraps the authorization filter and stamps the 401 and 403 that filter answers
             // with too — see NoStoreResponseFilter for why an uncacheable response is what pays for a
             // strong entity tag minted over a row version rather than over the response bytes.
             .AddEndpointFilter(NoStoreResponseFilter.Instance)

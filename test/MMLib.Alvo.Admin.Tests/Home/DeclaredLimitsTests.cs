@@ -69,11 +69,16 @@ public class DeclaredLimitsTests
     public void A_physical_entity_with_nothing_declared_lists_nothing()
         => Slots("""{ "entities": { "notes": { "storage": "physical" } } }""").ShouldBeEmpty();
 
-    /// <summary>A provider other than <c>local</c> names the provider slot, and <c>local</c> alone does not (§8d item 27).</summary>
+    /// <summary>
+    /// A provider other than <c>local</c> or <c>google</c> names the provider slot, and those two do not (§8d item 27;
+    /// <c>google</c> is honoured since S2).
+    /// </summary>
     [Theory]
-    [InlineData("""{ "auth": { "providers": ["local", "google"] } }""", true)]
+    [InlineData("""{ "auth": { "providers": ["local", "microsoft"] } }""", true)]
+    [InlineData("""{ "auth": { "providers": ["local", "google"] } }""", false)]
+    [InlineData("""{ "auth": { "providers": ["google", "apple"] } }""", true)]
     [InlineData("""{ "auth": { "providers": ["local"], "roles": ["clerk"] } }""", false)]
-    public void Only_a_provider_other_than_local_lists_the_provider_slot(string descriptor, bool listed)
+    public void Only_a_provider_other_than_local_or_google_lists_the_provider_slot(string descriptor, bool listed)
         => Slots(descriptor).Contains("auth.providers").ShouldBe(listed);
 
     /// <summary>
@@ -108,6 +113,23 @@ public class DeclaredLimitsTests
     public void Metadata_that_is_absent_or_empty_is_not_said()
         => DeclaredLimits.UnshownLine("""{ "description": "", "branding": {}, "formats": { "sku": { "pattern": "^S" } } }""")
             .ShouldBeNull();
+
+    /// <summary>
+    /// <c>invitations</c> is honoured (S4 plan D14), so the Overview never lists it — not even where an older build still
+    /// reports it as warned, because a qualified slot this screen does not detect has no fallback.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": true } } }""")]
+    [InlineData("""{ "tenancy": { "enabled": true, "selfService": { "createTenants": {}, "invitations": false } } }""")]
+    public void Invitations_are_never_listed(string descriptor)
+    {
+        var invitations = new ManagementWarnedBlock("tenancy.selfService.invitations", "owners cannot invite anyone in this build");
+        var older = new ManagementCapabilities(["entities"], [invitations], []);
+        var olderBesideTheRest = _capabilities with { Warned = [.. _capabilities.Warned, invitations] };
+
+        DeclaredLimits.Of(descriptor, older).ShouldBeEmpty();
+        DeclaredLimits.Of(descriptor, olderBesideTheRest).Select(block => block.Block).ShouldNotContain(invitations.Block);
+    }
 
     /// <summary>Every qualified slot this screen detects, which a Host test holds against the real build's report.</summary>
     [Fact]

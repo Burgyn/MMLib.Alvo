@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.DocsGen.Examples;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.DocsGen.Tests.Examples;
 
@@ -59,6 +60,25 @@ public class ExampleCatalogTests
         fieldService.OwnStack.Command().ShouldEndWith(
             "docker compose --env-file examples/field-service/demo-identities.env -f docker-compose.field-service.yml up --build --wait");
         ExampleCatalog.Read(_root).Where(e => e.Directory != "field-service").ShouldAllBe(e => e.OwnStack == null);
+    }
+
+    [Fact]
+    public void The_command_of_every_own_stack_sets_every_variable_its_compose_file_requires()
+    {
+        foreach (var stack in ExampleCatalog.Read(_root).Select(e => e.OwnStack).OfType<ExampleStack>())
+        {
+            var compose = File.ReadAllText(Path.Combine(_root, stack.ComposeFile));
+            var required = Regex.Matches(compose, @"\$\{(?<name>[A-Z0-9_]+):\?").Select(m => m.Groups["name"].Value)
+                .Concat(Regex.Matches(compose, @"^\s+environment:\s+(?<name>[A-Z0-9_]+)\s*$", RegexOptions.Multiline).Select(m => m.Groups["name"].Value))
+                .Distinct().ToList();
+
+            var fromEnvFile = stack.EnvFile is null ? [] : File.ReadAllLines(Path.Combine(_root, stack.EnvFile))
+                .Select(line => line.Split('=')[0].Trim()).ToList();
+
+            required.ShouldNotBeEmpty();
+            required.ShouldAllBe(
+                name => fromEnvFile.Contains(name) || stack.Command().Contains($"export {name}="), stack.ComposeFile);
+        }
     }
 
     [Fact]

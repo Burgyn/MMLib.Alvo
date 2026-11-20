@@ -19,7 +19,8 @@ membership. It sees no row and no tenant, so a field name or `@tenant` is refuse
 - refused: `user_id == @user.id` `now()` `@tenant.id == @user.id`
 <!-- /gen:cel-access -->
 
-A role literal must be a built-in role or one declared in `auth.roles`; a typo is refused at apply, as in a rule.
+A role literal must be a built-in role or one declared in `auth.roles`; a typo is refused at apply, as in a rule. A
+tenant role (`tenancy.selfService.assignableRoles`) is refused here too: see `alvo-descriptor-accounts`.
 
 **Only an administrator may change `access`.** For anyone else the change is refused with an `access` violation:
 say that an administrator has to make it, and do not look for a way around it.

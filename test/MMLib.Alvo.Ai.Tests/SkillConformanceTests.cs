@@ -20,10 +20,10 @@ public sealed class SkillConformanceTests
     private const int MaximumResourceBytes = 16_384;
     private const int MaximumSkills = 10;
 
-    /// <summary>The nine areas, in ordinal order (spec §7.3).</summary>
+    /// <summary>The ten areas, in ordinal order (spec §7.3, and the accounts skill of S6 plan D14).</summary>
     private static readonly string[] _areas =
     [
-        "capabilities-and-limits", "computed-and-rollups", "entities-and-fields", "field-types-and-formats", "hooks", "indexes",
+        "accounts", "capabilities-and-limits", "computed-and-rollups", "entities-and-fields", "field-types-and-formats", "hooks", "indexes",
         "project-access", "rules-and-cel", "traits-and-tenancy",
     ];
 

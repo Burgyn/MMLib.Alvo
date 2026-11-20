@@ -1,6 +1,6 @@
 #load "../_shared/Rows.csx"
 
-await tp.Test("The document is OpenAPI 3.1 and its paths are this descriptor's entities, and no others.", async () =>
+await tp.Test("The document is OpenAPI 3.1 and its paths are the descriptor's entities plus the sign-in surface, and no others.", async () =>
 {
     var document = await BodyOf(tp.Responses["Document"]);
 
@@ -9,13 +9,21 @@ await tp.Test("The document is OpenAPI 3.1 and its paths are this descriptor's e
     var paths = document.GetProperty("paths").EnumerateObject()
         .Select(path => path.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
+    // Two families, and only two: the descriptor's entities, and — because this stack configures a sign-in
+    // provider — the 15 routes under /auth/v1 (tokens, the account, tenants, members, invitations, app tokens and
+    // the RFC 8414 metadata with its key set). A route under either prefix that is not listed is a regression.
     Equal(
         new[]
         {
-            "/api/customers", "/api/customers/batch", "/api/customers/query", "/api/customers/{id}",
-            "/api/regions", "/api/regions/batch", "/api/regions/query", "/api/regions/{id}",
-            "/api/visits", "/api/visits/batch", "/api/visits/query", "/api/visits/{id}",
-            "/api/work_orders", "/api/work_orders/batch", "/api/work_orders/query", "/api/work_orders/{id}",
+            "/api/customers", "/api/customers/batch", "/api/customers/query", "/api/customers/{id}", "/api/regions",
+            "/api/regions/batch", "/api/regions/query", "/api/regions/{id}", "/api/visits", "/api/visits/batch",
+            "/api/visits/query", "/api/visits/{id}", "/api/work_orders", "/api/work_orders/batch",
+            "/api/work_orders/query", "/api/work_orders/{id}", "/auth/v1/.well-known/jwks.json",
+            "/auth/v1/.well-known/oauth-authorization-server", "/auth/v1/invitations/accept",
+            "/auth/v1/invitations/preview", "/auth/v1/logout", "/auth/v1/tenants", "/auth/v1/tenants/{tenantId}",
+            "/auth/v1/tenants/{tenantId}/invitations", "/auth/v1/tenants/{tenantId}/invitations/{invitationId}",
+            "/auth/v1/tenants/{tenantId}/members", "/auth/v1/tenants/{tenantId}/members/{userId}", "/auth/v1/token",
+            "/auth/v1/tokens", "/auth/v1/tokens/{keyId}", "/auth/v1/user",
         },
         paths);
 });

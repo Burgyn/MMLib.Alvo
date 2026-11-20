@@ -36,7 +36,7 @@ internal static class ExtensionBindingCompiler
         var relationalHooks = WriteHookBinding.Relational(services);
         problems.AddRange(registry.WriteHooks.SelectMany(hook => new WriteHookBinding(hook, compiler).CheckRegistration(services, relationalHooks).Problems));
         problems.AddRange(registry.ReadExtensions.SelectMany(read => new ReadExtensionBinding(read).CheckRegistration(services, relationalHooks).Problems));
-        problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow));
+        problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow, selfService: true));
         var refused = Refused(problems);
 
         return new(problems, [.. Ties(registry.Handlers.Where(handler => !refused.Contains(handler.Id))), .. HookTies(registry.WriteHooks.Where(hook => !refused.Contains(hook.Id)))]);
@@ -56,7 +56,7 @@ internal static class ExtensionBindingCompiler
         var commands = BindCommands(registry, catalog, compiler, services, problems);
         var hooks = BindWriteHooks(registry, catalog, compiler, services, problems);
         var reads = BindReads(registry, catalog, services, problems);
-        problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow));
+        problems.AddRange(ScheduleChecks.Check(registry, services, now ?? DateTimeOffset.UtcNow, catalog.SelfService.Enabled));
         var refused = Refused(problems);
         List<BoundHandler> binds = [.. bound.Where(handler => !refused.Contains(handler.Id))];
         var actions = DescriptorActionBindings.Bind(catalog, actionTimeout ?? AlvoHandlerOptions.DefaultTimeout).ToList();

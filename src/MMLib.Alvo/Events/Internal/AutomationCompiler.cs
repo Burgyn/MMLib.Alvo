@@ -191,9 +191,9 @@ internal static class AutomationCompiler
             return null;
         }
 
-        if (tenanted && !scope.Host.Host.HasTenantCatalog)
+        if (tenanted && !TenantCatalogs.Lists(scope.Host.Host, scope.Descriptor.Tenancy?.SelfService is not null))
         {
-            scope.Errors.Add(Error(path, NoTenantCatalog, NoTenantCatalogFix));
+            scope.Errors.Add(NoTenantList(path, scope.Host.Host.HasTenantRegistry));
             return null;
         }
 
@@ -233,6 +233,11 @@ internal static class AutomationCompiler
     private static DescriptorValidationError Refused(string path, UnhonouredSlot slot) =>
         Error(path, $"'{slot.Feature}' is refused: {slot.Consequence}", slot.Fix);
 
+    /// <summary>A cron rule with no tenant list; on a host with a registry the cure is <c>tenancy.selfService</c> too (S3 plan D13).</summary>
+    private static DescriptorValidationError NoTenantList(string path, bool registry) => registry
+        ? Error(path, $"{NoTenantListPrefix}{ScheduleChecks.NoTenantList(registry)}.", ScheduleChecks.ListTheTenants(registry) + NoTenantCatalogFixTail)
+        : Error(path, NoTenantCatalog, NoTenantCatalogFix);
+
     private static DescriptorValidationError Error(string path, string message, string fix) =>
         new(path, message, fix, DescriptorValidationSeverity.Error);
 
@@ -241,10 +246,13 @@ internal static class AutomationCompiler
 
     private const string CronConditionFix = "Remove 'condition', and decide inside the function the rule calls.";
 
-    private const string NoTenantCatalog =
-        "A schedule rule on a tenanted project runs once per tenant, and this host registers no IAlvoTenantCatalog.";
+    private const string NoTenantListPrefix = "A schedule rule on a tenanted project runs once per tenant, and ";
 
-    private const string NoTenantCatalogFix = "Register an IAlvoTenantCatalog, or trigger the rule from an entity event.";
+    private const string NoTenantCatalog = NoTenantListPrefix + "this host registers no IAlvoTenantCatalog.";
+
+    private const string NoTenantCatalogFixTail = ", or trigger the rule from an entity event.";
+
+    private const string NoTenantCatalogFix = "Register an IAlvoTenantCatalog" + NoTenantCatalogFixTail;
 }
 
 /// <summary>The framework event type a cron rule's schedule mints: <c>alvo.automation.&lt;rule&gt;</c>, <c>-</c> read as <c>_</c>.</summary>

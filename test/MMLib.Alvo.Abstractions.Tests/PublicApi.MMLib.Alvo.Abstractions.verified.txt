@@ -1,6 +1,8 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Abstractions.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Accounts.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Admin")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Admin.Tests.EndToEnd")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Ai")]
@@ -305,12 +307,20 @@ namespace MMLib.Alvo.Auth
         public required string KeyId { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
     }
+    public enum ApiKeyKind
+    {
+        Configured = 0,
+        Personal = 1,
+        Service = 2,
+    }
     public sealed class ApiKeyRecord : System.IEquatable<MMLib.Alvo.Auth.ApiKeyRecord>
     {
         public ApiKeyRecord() { }
         public System.DateTimeOffset? ExpiresAt { get; init; }
         public required string KeyId { get; init; }
+        public MMLib.Alvo.Auth.ApiKeyKind Kind { get; init; }
         public System.DateTimeOffset? LastUsedAt { get; init; }
+        public MMLib.Alvo.UserId? MintedBy { get; init; }
         public System.DateTimeOffset? RevokedAt { get; init; }
         public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
         public required System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Auth.ApiKeyScope> Scopes { get; init; }
@@ -665,8 +675,17 @@ namespace MMLib.Alvo.Descriptor
     public sealed class Auth : System.IEquatable<MMLib.Alvo.Descriptor.Auth>
     {
         public Auth() { }
+        public MMLib.Alvo.Descriptor.AuthAccessTokens? AccessTokens { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.AuthProvider>? Providers { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+        public MMLib.Alvo.Descriptor.AuthSignUp? SignUp { get; init; }
+    }
+    public sealed class AuthAccessTokens : System.IEquatable<MMLib.Alvo.Descriptor.AuthAccessTokens>
+    {
+        public AuthAccessTokens() { }
+        public int? MaxLifetimeDays { get; init; }
+        public bool? Personal { get; init; }
+        public bool? Service { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.AuthProvider>))]
     public enum AuthProvider
@@ -683,6 +702,12 @@ namespace MMLib.Alvo.Descriptor
         Apple = 4,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("oidc")]
         Oidc = 5,
+    }
+    public sealed class AuthSignUp : System.IEquatable<MMLib.Alvo.Descriptor.AuthSignUp>
+    {
+        public AuthSignUp() { }
+        public System.Collections.Generic.IReadOnlyList<string>? AllowedEmailDomains { get; init; }
+        public required MMLib.Alvo.Descriptor.SignUpMode Mode { get; init; }
     }
     [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.EmailAction), "email")]
     [System.Text.Json.Serialization.JsonDerivedType(typeof(MMLib.Alvo.Descriptor.EntityUpdateAction), "entity.update")]
@@ -1059,6 +1084,17 @@ namespace MMLib.Alvo.Descriptor
         [System.Text.Json.Serialization.JsonStringEnumMemberName("max")]
         Max = 4,
     }
+    public sealed class SelfServiceCreateTenants : System.IEquatable<MMLib.Alvo.Descriptor.SelfServiceCreateTenants>
+    {
+        public SelfServiceCreateTenants() { }
+        public System.Collections.Generic.IReadOnlyList<string>? CreatorRoles { get; init; }
+        public int? MaxPerAccount { get; init; }
+    }
+    public sealed class SelfServicePersonalTenant : System.IEquatable<MMLib.Alvo.Descriptor.SelfServicePersonalTenant>
+    {
+        public SelfServicePersonalTenant() { }
+        public System.Collections.Generic.IReadOnlyList<string>? Roles { get; init; }
+    }
     [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SequencePeriod>))]
     public enum SequencePeriod
     {
@@ -1068,6 +1104,14 @@ namespace MMLib.Alvo.Descriptor
         Month = 1,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("day")]
         Day = 2,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Descriptor.SignUpMode>))]
+    public enum SignUpMode
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("open")]
+        Open = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("invitationOnly")]
+        InvitationOnly = 1,
     }
     public sealed class StateTransition : System.IEquatable<MMLib.Alvo.Descriptor.StateTransition>
     {
@@ -1090,6 +1134,15 @@ namespace MMLib.Alvo.Descriptor
     {
         public Tenancy() { }
         public bool? Enabled { get; init; }
+        public MMLib.Alvo.Descriptor.TenancySelfService? SelfService { get; init; }
+    }
+    public sealed class TenancySelfService : System.IEquatable<MMLib.Alvo.Descriptor.TenancySelfService>
+    {
+        public TenancySelfService() { }
+        public System.Collections.Generic.IReadOnlyList<string>? AssignableRoles { get; init; }
+        public MMLib.Alvo.Descriptor.SelfServiceCreateTenants? CreateTenants { get; init; }
+        public bool? Invitations { get; init; }
+        public MMLib.Alvo.Descriptor.SelfServicePersonalTenant? PersonalTenant { get; init; }
     }
     [System.Text.Json.Serialization.JsonConverter(typeof(MMLib.Alvo.Descriptor.ValueOrExprConverter?))]
     public sealed class ValueOrExpr : System.IEquatable<MMLib.Alvo.Descriptor.ValueOrExpr>

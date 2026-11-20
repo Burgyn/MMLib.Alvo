@@ -39,7 +39,7 @@ internal static class SkillsRead
     internal static IReadOnlyList<string> Areas { get; } =
         [
             SkillAreas.ProjectAccess, SkillAreas.RulesAndCel, SkillAreas.Hooks, SkillAreas.Indexes, SkillAreas.TraitsAndTenancy,
-            SkillAreas.ComputedAndRollups, SkillAreas.EntitiesAndFields,
+            SkillAreas.ComputedAndRollups, SkillAreas.EntitiesAndFields, SkillAreas.Accounts,
         ];
 
     /// <summary>The names of the skills the assistant is given.</summary>

@@ -25,6 +25,10 @@ internal static class LlmsWriter
         "- [Data API — example (vehicle-registry)](" + SiteLinks.SiteUrl + SiteLinks.BasePath + "/reference/data-api/): "
         + "The generated REST API of the vehicle-registry example; every descriptor generates its own at GET /openapi/v1.json.";
 
+    private const string AccountsApiLine =
+        "- [Sign-in, tenants and tokens API — example (field-service)](" + SiteLinks.SiteUrl + SiteLinks.BasePath + "/reference/accounts-api/): "
+        + "The /auth/v1 sign-in, self-service tenant, invitation and app-token routes of the field-service example; they exist only on a host that configures an identity provider.";
+
     private static readonly (string Heading, string[] Keys)[] _sections =
     [
         ("Start here", ["start-here"]),
@@ -64,7 +68,7 @@ internal static class LlmsWriter
             listed.ForEach(page => index.Append(Line(page.Title, SiteLinks.Absolute(page.Slug), page.Description)));
             if (heading == "Reference")
             {
-                index.Append(DataApiLine).Append('\n');
+                index.Append(DataApiLine).Append('\n').Append(AccountsApiLine).Append('\n');
             }
 
             index.Append('\n');

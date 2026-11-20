@@ -1,0 +1,83 @@
+### Theo — no longer in Acme — founds a company of his own, and is its dispatcher
+# @name TheoCreatesGarage
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tenants
+Authorization: Bearer {{TheoAccess}}
+Content-Type: application/json
+
+{ "name": "Theo's Garage" }
+
+### A self-made dispatcher is a dispatcher in his tenant, not of the project: `regions.create` names `admin` only
+# @name TheoWritesRegions
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/regions
+Authorization: Bearer {{TheoAccess}}
+X-Alvo-Tenant: {{TheoCreatesGarage.response.body.$.tenantId}}
+Content-Type: application/json
+
+{ "code": "{{RegionCode}}T", "name": "Theo's region" }
+
+### Dana, Acme's founder, is no different (plan D2)
+# @name DanaWritesRegions
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/regions
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{ "code": "{{RegionCode}}D", "name": "Dana's region" }
+
+### Theo invites Dana into his garage — as a technician
+# @name TheoInvitesDana
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/auth/v1/tenants/{{TheoCreatesGarage.response.body.$.tenantId}}/invitations
+Authorization: Bearer {{TheoAccess}}
+Content-Type: application/json
+
+{ "roles": ["technician"] }
+
+###
+# @name DanaAccepts
+## TEST-EXPECT-STATUS: [200]
+POST {{fsBaseUrl}}/auth/v1/invitations/accept
+Authorization: Bearer {{DanaAccess}}
+Content-Type: application/json
+
+{ "code": "{{TheoInvitesDana.response.body.$.code}}" }
+
+### In the garage, Dana is a technician: `customers.create` names dispatcher and admin
+# @name DanaCreatesInGarage
+## TEST-EXPECT-STATUS: [403]
+POST {{fsBaseUrl}}/api/customers
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{TheoCreatesGarage.response.body.$.tenantId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{TheoCreatesGarage.response.body.$.tenantId}}",
+  "name": "A garage customer",
+  "tier": "standard"
+}
+
+### The same person, the same body, in Acme: a dispatcher there. Two tenants, two role sets.
+# @name DanaCreatesInAcme
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/customers
+Authorization: Bearer {{DanaAccess}}
+X-Alvo-Tenant: {{AcmeId}}
+Content-Type: application/json
+
+{
+  "tenant_id": "{{AcmeId}}",
+  "name": "A garage customer",
+  "tier": "standard"
+}
+
+### The control for both region refusals: the one role `regions.create` names may write it
+# @name AdminCreatesRegion2
+## TEST-EXPECT-STATUS: [201]
+POST {{fsBaseUrl}}/api/regions
+X-Alvo-Api-Key: {{keyAdmin}}
+Content-Type: application/json
+
+{ "code": "{{RegionCode}}2", "name": "Self-service region two" }

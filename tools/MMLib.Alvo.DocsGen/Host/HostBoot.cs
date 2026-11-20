@@ -21,15 +21,17 @@ internal static class HostBoot
     internal static TimeSpan RequestTimeout { get; } = TimeSpan.FromSeconds(30);
 
     private const int SecretBytes = 24;
+    private const string AccountsIssuer = "https://alvo.example/auth/v1";
+    private const string AccountsGoogleClientId = "docs.apps.googleusercontent.com";
 
-    internal static async Task<BootedHost> StartAsync(string descriptorPath, IReadOnlyDictionary<string, ExchangeKey> keys, CancellationToken ct)
+    internal static async Task<BootedHost> StartAsync(string descriptorPath, IReadOnlyDictionary<string, ExchangeKey> keys, CancellationToken ct, bool withAccounts = false)
     {
         var work = Directory.CreateTempSubdirectory("alvo-docsgen-");
         var secrets = keys.Keys.ToDictionary(id => id, _ => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(SecretBytes)), StringComparer.Ordinal);
         BootedHost? host = null;
         try
         {
-            var app = await BuildAsync(Settings(descriptorPath, Path.Combine(work.FullName, "alvo.db"), keys, secrets)).ConfigureAwait(false);
+            var app = await BuildAsync(Settings(descriptorPath, work.FullName, keys, secrets, withAccounts)).ConfigureAwait(false);
             host = new BootedHost(app, secrets, work);
             await StartWithinTimeoutAsync(host, ct).ConfigureAwait(false);
             return host;
@@ -87,13 +89,13 @@ internal static class HostBoot
     }
 
     private static Dictionary<string, string?> Settings(
-        string descriptorPath, string database, IReadOnlyDictionary<string, ExchangeKey> keys, Dictionary<string, string> secrets)
+        string descriptorPath, string workDirectory, IReadOnlyDictionary<string, ExchangeKey> keys, Dictionary<string, string> secrets, bool withAccounts)
     {
         var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["Alvo:DescriptorPath"] = descriptorPath,
             ["Alvo:Database:Provider"] = "sqlite",
-            ["Alvo:Database:SqliteConnectionString"] = $"Data Source={database}",
+            ["Alvo:Database:SqliteConnectionString"] = $"Data Source={Path.Combine(workDirectory, "alvo.db")}",
         };
         var ordinal = 0;
         foreach (var (id, key) in keys.OrderBy(pair => pair.Key, StringComparer.Ordinal))
@@ -101,7 +103,21 @@ internal static class HostBoot
             AddKey(settings, $"Alvo:Auth:DevKeys:{ordinal++}", id, key, secrets[id]);
         }
 
+        if (withAccounts)
+        {
+            AddAccounts(settings, workDirectory);
+        }
+
         return settings;
+    }
+
+    private static void AddAccounts(Dictionary<string, string?> settings, string workDirectory)
+    {
+        var keyFile = Path.Combine(workDirectory, "secrets.key");
+        File.WriteAllText(keyFile, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        settings["Alvo:Accounts:Issuer"] = AccountsIssuer;
+        settings["Alvo:Accounts:Providers:Google:ClientIds:0"] = AccountsGoogleClientId;
+        settings["Alvo:Secrets:EncryptionKeyFile"] = keyFile;
     }
 
     private static void AddKey(Dictionary<string, string?> settings, string prefix, string id, ExchangeKey key, string secret)

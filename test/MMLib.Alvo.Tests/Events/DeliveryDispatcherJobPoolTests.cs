@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
@@ -120,6 +121,7 @@ public sealed class DeliveryDispatcherJobPoolTests
             new ServiceCollection().AddSingleton(_runs).AddTransient<RecordingJob>().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             new AlvoSessions(Substitute.For<IAlvoData>()),
             catalogs,
+            new NoTenantMembershipResolution(),
             new DeliveryBackoff(() => 0.5),
             abandoned,
             _clock,

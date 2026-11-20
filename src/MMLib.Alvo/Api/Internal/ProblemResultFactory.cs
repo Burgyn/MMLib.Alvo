@@ -92,6 +92,22 @@ internal static class ProblemResultFactory
         $"{BearerScheme} error=\"{error}\"");
 
     /// <summary>
+    /// The 401 for a route only a person's access token reaches, asked with no Bearer token at all — an API key, another
+    /// scheme, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// The challenge is RFC 6750 §3.1's for a request that "lacks any authentication information": the scheme alone,
+    /// with no <c>error</c> code, because nothing was presented that could have been wrong.
+    /// </remarks>
+    internal static IResult BearerRequired() => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            "This route answers a signed-in person only. Present the access token sign-in issued as "
+            + "'Authorization: Bearer <token>'; an API key does not reach it."),
+        BearerScheme);
+
+    /// <summary>
     /// The 401 for a request that presents both an API key and a Bearer token Alvo owns — refused rather than
     /// resolved by precedence, since either choice would act as a caller the request did not unambiguously name.
     /// </summary>
@@ -139,6 +155,38 @@ internal static class ProblemResultFactory
         AlvoProblemTypes.Forbidden,
         "This caller is not admitted to the project's management surface. The project's access block "
             + "decides who is; ask whoever administers it.");
+
+    /// <summary>
+    /// The 403 for a personal or service token presented to the Management API (S5 plan D9, closing S1 D8).
+    /// </summary>
+    /// <remarks>
+    /// <b>The wording is fixed and names no caller</b> — identical for every token and every project, so it discloses
+    /// nothing a reader of the docs does not have, and it names the fix an agent can act on. The slug is
+    /// <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy refusal already carries.
+    /// </remarks>
+    internal static IResult AppTokenForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are app credentials and never manage a project. "
+            + "Use an operator session or a configured API key.");
+
+    /// <summary>
+    /// The 403 for a personal or service token presented to a host's own endpoint mapped with <c>.WithAlvoCaller()</c>
+    /// (accounts S5, the final review's I1).
+    /// </summary>
+    /// <remarks>
+    /// <b>Why refuse rather than admit unscoped:</b> a token's scopes are the boundary its owner drew around a credential
+    /// handed to a third party, and a custom endpoint names no entity they could be checked against — so admitting it
+    /// would let a <c>jobs:read</c> token act as its whole principal. Until an endpoint can name the scope it needs
+    /// (#536), it does not take app tokens at all. The wording is fixed and names no caller, like
+    /// <see cref="AppTokenForbidden"/>; the slug is <see cref="AlvoProblemTypes.Forbidden"/>.
+    /// </remarks>
+    internal static IResult AppTokenCustomEndpointForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Personal and service tokens are not accepted on custom endpoints yet: a custom endpoint names no entity a "
+            + "token's scopes could be checked against. Use the generated Data API or a command, or call this endpoint "
+            + "with a signed-in session or a configured API key.");
 
     /// <summary>
     /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
@@ -374,6 +422,112 @@ internal static class ProblemResultFactory
         AlvoProblemTypes.Internal,
         "The request could not be completed because of an internal error. It has been logged; retry, and if it "
         + "persists, report it to whoever operates this instance.");
+
+    /// <summary>
+    /// An OAuth 2.0 error from the token endpoint (spec D4): a problem document that also carries RFC 6749 §5.2's
+    /// <c>error</c> and <c>error_description</c> members, so an OAuth client reading <c>error</c> from the body and an agent
+    /// branching on <c>type</c> both find what they look for.
+    /// </summary>
+    /// <remarks>
+    /// The description is the <c>detail</c> as well, and is always a fixed sentence the caller chose nothing of: a token
+    /// endpoint's input is a credential, and echoing any of it would put a secret in a response body and a log.
+    /// </remarks>
+    /// <param name="status">The status code.</param>
+    /// <param name="slug">One of <see cref="AlvoProblemTypes"/>' sign-in slugs.</param>
+    /// <param name="error">The RFC 6749 / RFC 8693 error code.</param>
+    /// <param name="description">The fixed, human-readable description.</param>
+    /// <param name="extensions">Further members, e.g. the sign-up refusal's <c>policy</c>.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult OAuthError(
+        int status, string slug, string error, string description, IReadOnlyDictionary<string, object?>? extensions = null)
+    {
+        var members = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [OAuthErrorMember] = error,
+            [OAuthErrorDescriptionMember] = description,
+        };
+        foreach (var (name, value) in extensions ?? new Dictionary<string, object?>())
+        {
+            members[name] = value;
+        }
+
+        return Problem(status, slug, description, members);
+    }
+
+    /// <summary>The 429 for a caller over a route's rate limit, with the <c>Retry-After</c> the limiter suggests.</summary>
+    /// <param name="retryAfterSeconds">Whole seconds until the window admits the caller again.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult RateLimited(int retryAfterSeconds) => new AdvertisingResult(
+        Problem(
+            StatusCodes.Status429TooManyRequests,
+            AlvoProblemTypes.RateLimited,
+            "Too many requests from this client. Wait for the time Retry-After names, then send the request again."),
+        HeaderNames.RetryAfter,
+        retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// The 404 a self-service route answers while the applied descriptor leaves its feature off (S3 plan D8), naming the
+    /// descriptor key that turns it on in a <c>descriptorKey</c> member.
+    /// </summary>
+    /// <param name="descriptorKey">The key that enables the route, e.g. <c>tenancy.selfService</c>.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey) =>
+        FeatureDisabled(descriptorKey, $"This route answers only when the applied descriptor declares {descriptorKey}.");
+
+    /// <summary>
+    /// The same 404 <c>feature-disabled</c>, naming <paramref name="descriptorKey"/>, for a feature the descriptor declares
+    /// but this host cannot honour; <paramref name="detail"/> is a fixed sentence naming why.
+    /// </summary>
+    /// <param name="descriptorKey">The descriptor key, carried in a <c>descriptorKey</c> member.</param>
+    /// <param name="detail">The fixed sentence.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FeatureDisabled(string descriptorKey, string detail) => Problem(
+        StatusCodes.Status404NotFound,
+        AlvoProblemTypes.FeatureDisabled,
+        detail,
+        new Dictionary<string, object?>(StringComparer.Ordinal) { [DescriptorKeyMember] = descriptorKey });
+
+    /// <summary>The 409 for a person who has created as many shared tenants as the descriptor allows (S3 plan D9).</summary>
+    /// <param name="maxPerAccount">The cap, carried in a <c>maxPerAccount</c> member.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult TenantLimit(int maxPerAccount) => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.TenantLimit,
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"This account has already created {maxPerAccount} shared tenants, the most one account may create; leaving one does not free a place."),
+        new Dictionary<string, object?>(StringComparer.Ordinal) { [MaxPerAccountMember] = maxPerAccount });
+
+    /// <summary>The 409 for a change that would leave a shared tenant without an owner (spec §6.4).</summary>
+    /// <returns>The problem result.</returns>
+    internal static IResult LastOwner() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.LastOwner,
+        "A shared tenant always keeps an owner. Make another member an owner first; then this one can leave, be removed or be demoted.");
+
+    /// <summary>The 403 for a self-service change the caller may not make — not an owner, or not a person at all.</summary>
+    /// <param name="detail">The fixed sentence saying who may.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult PersonForbidden(string detail) =>
+        Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, detail);
+
+    /// <summary>The 409 for a membership change the tenant's own state refuses, e.g. a personal tenant's.</summary>
+    /// <param name="detail">The fixed sentence saying why.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult MembershipConflict(string detail) =>
+        Problem(StatusCodes.Status409Conflict, AlvoProblemTypes.Conflict, detail);
+
+    /// <summary>The <see cref="FeatureDisabled(string, string)"/> member naming the descriptor key.</summary>
+    private const string DescriptorKeyMember = "descriptorKey";
+
+    /// <summary>The <see cref="TenantLimit"/> member carrying the cap.</summary>
+    private const string MaxPerAccountMember = "maxPerAccount";
+
+    /// <summary>RFC 6749 §5.2's error-code member.</summary>
+    private const string OAuthErrorMember = "error";
+
+    /// <summary>RFC 6749 §5.2's human-readable description member.</summary>
+    private const string OAuthErrorDescriptionMember = "error_description";
 
     /// <summary>An inbound webhook delivery that failed verification: 401, with no challenge — Standard Webhooks names none.</summary>
     internal static IResult WebhookRefused(string detail) =>

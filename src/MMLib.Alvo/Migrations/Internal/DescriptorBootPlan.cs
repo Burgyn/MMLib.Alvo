@@ -52,7 +52,7 @@ internal sealed record BootPlan(
 /// <see cref="BootPlan.Desired"/> and therefore not the same check.
 /// </para>
 /// </remarks>
-internal sealed class DescriptorBootPlan
+internal sealed partial class DescriptorBootPlan
 {
     /// <summary>
     /// The refusal a host that attached a driver and forgot the descriptor source reads.
@@ -82,6 +82,7 @@ internal sealed class DescriptorBootPlan
     private readonly ExtensionBinder? _extensions;
     private readonly DescriptorHost _host;
     private readonly GeneratedEntitySource? _generated;
+    private readonly bool _hasPerson;
 
     /// <summary>Initializes a new instance of the <see cref="DescriptorBootPlan"/> class.</summary>
     /// <param name="source">
@@ -100,6 +101,10 @@ internal sealed class DescriptorBootPlan
     /// The host's generated typed classes, or <see langword="null"/> for a composition with none to check — see
     /// <see cref="WarnAboutGeneratedEntities"/>.
     /// </param>
+    /// <param name="hasPerson">
+    /// Whether the host registered an end-user person resolver (<c>CallerResolvers.HasPerson</c>) — without one, a
+    /// descriptor listing <c>google</c> earns <see cref="WarnAboutSignInHost"/>'s line.
+    /// </param>
     public DescriptorBootPlan(
         IDescriptorSource? source,
         IDescriptorValidator validator,
@@ -107,7 +112,8 @@ internal sealed class DescriptorBootPlan
         ILogger<DescriptorBootPlan> logger,
         ExtensionBinder? extensions = null,
         DescriptorHost? host = null,
-        GeneratedEntitySource? generated = null)
+        GeneratedEntitySource? generated = null,
+        bool hasPerson = false)
     {
         ArgumentNullException.ThrowIfNull(validator);
         ArgumentNullException.ThrowIfNull(compiler);
@@ -120,6 +126,7 @@ internal sealed class DescriptorBootPlan
         _extensions = extensions;
         _host = host ?? DescriptorHost.Empty;
         _generated = generated;
+        _hasPerson = hasPerson;
     }
 
     /// <summary>
@@ -198,6 +205,7 @@ internal sealed class DescriptorBootPlan
         var desired = DescriptorToSchemaMapper.Map(descriptor);
 
         WarnAboutUnhonouredBlocks(descriptor);
+        WarnAboutSignInHost(descriptor);
         EnsureServable(desired);
 
         return new BootPlan(descriptor, desired, descriptorJson, PolicyCatalog.Build(descriptor, desired, _compiler, _host));
@@ -312,6 +320,29 @@ internal sealed class DescriptorBootPlan
     /// </remarks>
     private void WarnAboutUnhonouredBlocks(AlvoDescriptor descriptor)
         => UnhonouredSubsystems.Warn(_logger, descriptor);
+
+    /// <summary>
+    /// Warns, on every boot, when the descriptor lists <c>google</c> and this host registered no end-user sign-in.
+    /// </summary>
+    /// <remarks>
+    /// <b>A fact about this host, not about the build</b>, so it is its own line rather than a row of
+    /// <c>UnhonouredSubsystems</c>: the capability report and the dashboard stay descriptor-level, and a host that
+    /// calls <c>AddAlvoAccounts</c> hears nothing. Warned, not refused — a missing sign-in admits nobody.
+    /// </remarks>
+    /// <param name="descriptor">The descriptor being booted.</param>
+    private void WarnAboutSignInHost(AlvoDescriptor descriptor)
+    {
+        if (!_hasPerson && descriptor.Auth?.Providers?.Contains(AuthProvider.Google) == true)
+        {
+            GoogleWithoutSignIn(_logger);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "auth.providers lists google, but this host registered no end-user sign-in (MMLib.Alvo.Accounts: "
+            + "AddAlvoAccounts and MapAlvoAccounts), so nobody can sign in with Google here.")]
+    private static partial void GoogleWithoutSignIn(ILogger logger);
 
     /// <summary>
     /// Refuses a mapped schema the Data API could not serve: a field whose name a query-string key reserves,

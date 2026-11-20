@@ -142,12 +142,17 @@ internal sealed class AlvoContextFilter : IEndpointFilter
 /// <param name="accessor">Publishes the resolved caller for the endpoint delegate.</param>
 /// <param name="scopeGate">Gates an operation against the presented key's scopes.</param>
 /// <param name="authOptions">Carries the header names a credential and a requested tenant are read from.</param>
+/// <param name="cors">The CORS filter every generated endpoint carries first.</param>
 internal sealed class AlvoContextFilterFactory(
     CallerResolvers resolvers,
     IAlvoContextAccessor accessor,
     ScopeGate scopeGate,
-    IOptions<AlvoAuthOptions> authOptions)
+    IOptions<AlvoAuthOptions> authOptions,
+    AlvoCors cors)
 {
+    /// <summary>Gets the CORS policy and filter every generated endpoint carries, ahead of every other filter.</summary>
+    internal AlvoCors Cors => cors;
+
     /// <summary>The filter guarding one entity's one operation.</summary>
     /// <param name="entity">The entity the endpoint targets.</param>
     /// <param name="operation">The operation the endpoint performs.</param>

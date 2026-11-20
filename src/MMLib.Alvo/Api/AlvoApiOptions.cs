@@ -126,4 +126,10 @@ public sealed class AlvoApiOptions
     /// </para>
     /// </remarks>
     public int MaxIdempotencyKeyBytes { get; set; } = Data.AlvoIdempotency.MaxKeyBytes;
+
+    /// <summary>Gets or sets the browser origins Alvo's routes answer CORS for. None by default: no CORS headers.</summary>
+    public AlvoCorsOptions Cors { get; set; } = new();
+
+    /// <summary>Gets or sets the per-client-IP budgets Alvo charges on its abuse-prone routes.</summary>
+    public AlvoRateLimitOptions RateLimits { get; set; } = new();
 }

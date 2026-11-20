@@ -1,9 +1,12 @@
 ﻿using Microsoft.Extensions.Logging;
 
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Tenants.SelfService;
 
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Scheduling;
 
@@ -27,11 +30,13 @@ internal readonly record struct MigrationRound(int Started, int Failed)
 /// </para>
 /// <para>
 /// <b>Per tenant is decided by the revision it starts at</b>, read from the store with that revision — never by this process's
-/// catalog, which a replica that did not make the apply still holds at an older revision.
+/// catalog, which a replica that did not make the apply still holds at an older revision. So is whether the self-service
+/// registry lists the tenants (<see cref="TenantCatalogs"/>): only while that revision declares <c>tenancy.selfService</c>, and
+/// then only the tenants that revision's policy honours.
 /// </para>
 /// <para>
 /// <b>A schema scoped after the boot holds the migration.</b> The boot refuses an unstarted migration on a scoped schema without
-/// an <see cref="IAlvoTenantCatalog"/>; an apply that first scopes the schema is not refused, so the run is skipped instead —
+/// a tenant list; an apply that first scopes the schema is not refused, so the run is skipped instead —
 /// logged once, not marked — and starts on the first round of a process that has a tenant list.
 /// </para>
 /// <para>
@@ -72,13 +77,29 @@ internal sealed class DataMigrationStarter(
         }
 
         var perTenant = ScheduleChecks.IsScoped(current.Schema);
+        var selfService = perTenant && !runs.ListsTenants(SelfServicePolicy.None) ? PolicyOf(current.DescriptorJson) : SelfServicePolicy.None;
         var round = MigrationRound.None;
         foreach (var migration in pending.Where(migration => current.Revision >= migration.Job!.AfterRevision))
         {
-            round = Tally(round, await TryStartAsync(store, migration, current.Revision, perTenant && !migration.Job!.SpansTenants, ct).ConfigureAwait(false));
+            var start = new MigrationStart(current.Revision, perTenant && !migration.Job!.SpansTenants, selfService);
+            round = Tally(round, await TryStartAsync(store, migration, start, ct).ConfigureAwait(false));
         }
 
         return round;
+    }
+
+    /// <summary>The applied descriptor's self-service policy; one that cannot be read has none and lists nothing (fail closed).</summary>
+    private static SelfServicePolicy PolicyOf(string descriptorJson)
+    {
+        try
+        {
+            var descriptor = AlvoDescriptor.Parse(descriptorJson);
+            return SelfServicePolicy.From(descriptor, RoleCatalog.FromDescriptor(descriptor));
+        }
+        catch (Exception unreadable) when (unreadable is JsonException or InvalidOperationException or ArgumentException)
+        {
+            return SelfServicePolicy.None;
+        }
     }
 
     private static MigrationRound Tally(MigrationRound round, bool? outcome) => outcome switch
@@ -107,17 +128,17 @@ internal sealed class DataMigrationStarter(
 
     /// <summary>Starts one migration, holds it for a missing tenant list, or records its failure and its retry.</summary>
     /// <returns><see langword="true"/> when it started, <see langword="false"/> when it was held or another replica started it, <see langword="null"/> when it failed.</returns>
-    private async Task<bool?> TryStartAsync(ITimerStore store, HandlerRegistration migration, int revision, bool perTenant, CancellationToken ct)
+    private async Task<bool?> TryStartAsync(ITimerStore store, HandlerRegistration migration, MigrationStart start, CancellationToken ct)
     {
-        if (perTenant && !runs.HasTenantCatalog)
+        if (start.PerTenant && !runs.ListsTenants(start.SelfService))
         {
-            Hold(migration.Id, revision);
+            Hold(migration.Id, start.Revision);
             return false;
         }
 
         try
         {
-            var started = await StartAsync(store, migration, revision, perTenant, ct).ConfigureAwait(false);
+            var started = await StartAsync(store, migration, start, ct).ConfigureAwait(false);
             _started[migration.Id] = true;
             _retries.TryRemove(migration.Id, out _);
 
@@ -125,18 +146,18 @@ internal sealed class DataMigrationStarter(
         }
         catch (Exception failure) when (!ct.IsCancellationRequested)
         {
-            Failed(migration.Id, revision, failure);
+            Failed(migration.Id, start.Revision, failure);
             return null;
         }
     }
 
-    private async Task<bool> StartAsync(ITimerStore store, HandlerRegistration migration, int revision, bool perTenant, CancellationToken ct)
+    private async Task<bool> StartAsync(ITimerStore store, HandlerRegistration migration, MigrationStart start, CancellationToken ct)
     {
-        var events = await runs.MigrationEventsAsync(migration, revision, perTenant, ct).ConfigureAwait(false);
-        var started = await store.StartMigrationAsync(migration.Id, revision, events, ct).ConfigureAwait(false);
+        var events = await runs.MigrationEventsAsync(migration, start.Revision, start.PerTenant, start.SelfService, ct).ConfigureAwait(false);
+        var started = await store.StartMigrationAsync(migration.Id, start.Revision, events, ct).ConfigureAwait(false);
         if (started && events.Count == 0)
         {
-            SchedulePumpLog.MigrationStartedWithNoTenants(logger, migration.Id, revision);
+            SchedulePumpLog.MigrationStartedWithNoTenants(logger, migration.Id, start.Revision);
         }
 
         return started;
@@ -160,4 +181,7 @@ internal sealed class DataMigrationStarter(
     private static TimeSpan Next(TimeSpan previous) => previous * 2 < RetryCeiling ? previous * 2 : RetryCeiling;
 
     private readonly record struct Retry(DateTimeOffset At, TimeSpan Wait);
+
+    /// <summary>One migration's start: the revision it starts at, whether each tenant gets a run, and that revision's self-service policy.</summary>
+    private readonly record struct MigrationStart(int Revision, bool PerTenant, SelfServicePolicy SelfService);
 }

@@ -1,0 +1,13 @@
+{
+  "apiVersion": "alvo.dev/v1",
+  "name": "self-service-without-tenancy",
+  "auth": { "providers": ["google"], "signUp": { "mode": "open" } },
+  "tenancy": { "selfService": { "personalTenant": { "roles": [] } } },
+  "entities": {
+    "notes": {
+      "fields": {
+        "title": { "type": "string", "required": true }
+      }
+    }
+  }
+}

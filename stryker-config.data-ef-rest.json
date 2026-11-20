@@ -32,7 +32,19 @@
       "!EfCoreOutboxStore.cs",
       "!Internal/OutboxTable.cs",
       "!Internal/EfAlvoData.Hooks.cs",
-      "!Internal/UnitRun.cs"
+      "!Internal/UnitRun.cs",
+      "!EfCoreAccountStore.cs",
+      "!EfCoreAccountStore.Sessions.cs",
+      "!EfCoreAccountStore.Keys.cs",
+      "!Internal/AuthTables.cs",
+      "!EfCoreTenantStore.cs",
+      "!EfCoreTenantStore.Members.cs",
+      "!Internal/TenantTables.cs",
+      "!EfCoreTenantStore.Invitations.cs",
+      "!Internal/InvitationTables.cs",
+      "!Internal/InvitationAcceptance.cs",
+      "!EfCoreAppTokenStore.cs",
+      "!Internal/AppTokenTables.cs"
     ],
     "thresholds": {
       "high": 90,

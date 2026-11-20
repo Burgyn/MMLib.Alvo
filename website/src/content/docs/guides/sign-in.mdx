@@ -1,0 +1,393 @@
+---
+title: "Sign-in and accounts"
+description: "Let people sign in to your app with Google and call the Data API as themselves: who may sign up, the Google client, twenty lines of browser code, sessions, and where to keep the tokens."
+sidebar:
+  order: 17
+---
+
+import { Code, Steps } from '@astrojs/starlight/components';
+import levelOne from '../../../snippets/sign-in/01-level-one.alvo.json?raw';
+import override from '../../../snippets/shell/sign-in.compose.override.yml?raw';
+import signIn from '../../../snippets/sign-in/sign-in.js?raw';
+
+:::tip[What you will build]
+A time tracker that runs in the browser. Each person signs in with their Google account, logs time, and sees only
+their own entries. You write no user table, no password handling and no backend code. About thirty minutes, building
+on the quick start's compose file as [Run your own descriptor](/start-here/run-your-own/) does, with a Google Cloud
+project you can create an OAuth client in.
+:::
+
+## Before you start
+
+- Docker with Compose v2, `curl` and `openssl`. [Run your own descriptor](/start-here/run-your-own/) explains the
+  quick start's compose file, which this page builds on.
+- A Google Cloud project, to create an OAuth client in.
+- A static page served from an origin you control. This page uses `http://localhost:5173`; any static file server
+  will do.
+
+**How sign-in works.** Google vouches for who the person is: the *Sign in with Google* button hands your page an ID
+token. Your page exchanges that ID token for two of Alvo's own tokens, once. The **access token** lasts 15 minutes
+and goes on every request as `Authorization: Bearer`. The **refresh token** gets the next access token. After the
+exchange Google is not involved again until the person signs in again. Sign-out, bans and the descriptor's say over
+providers therefore work the same whichever provider the person used.
+
+## Build it
+
+<Steps>
+
+1. **Decide who may sign up.** Listing `google` in [`auth.providers`](/reference/descriptor/auth/#auth.providers)
+   lets people in. [`auth.signUp`](/reference/descriptor/auth/#auth.signUp) says who may create an account. Save this
+   as `time-tracker.alvo.json`:
+
+   <Code code={levelOne} lang="json" title="time-tracker.alvo.json" ins={[{ range: '5-8' }]} />
+
+   `auth.signUp` has no default. Once `providers` lists `google`, an apply without it is refused, because adding a
+   provider changes what `'authenticated' in @user.roles` means. Before, it meant a caller an operator provisioned. Now
+   it means anyone Google vouches for. You choose one of these:
+
+   | `auth.signUp` | Who gets an account |
+   |---|---|
+   | `{ "mode": "open" }` | Anyone with a Google account. |
+   | `{ "mode": "invitationOnly" }` | Only a person who brings an invitation code (see [Tenants, members and invitations](/guides/tenants-and-invitations/#invitation-only-sign-up)). Codes need `tenancy.selfService.invitations`. Without it nobody new can ever sign up, and the apply warns. |
+   | `{ "mode": "open", "allowedEmailDomains": ["example.com"] }` | Only people whose [trusted](#which-email-addresses-alvo-trusts) address is in one of these domains. Works with either mode. |
+
+   The rules carry the rest. `audit: true` fills `created_by` from the caller, so `created_by == @user.id` limits
+   every read, update and delete to the person who wrote the row. Signing in decides who gets in, never which rows
+   they see. Any `list` or `get` rule that admits `authenticated` now admits every Google account, so narrow it.
+
+2. **Create a Google client, and give the host its settings.** Google's own page,
+   [Get your Google API client ID](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid), is
+   the source for these steps and follows the console when it changes. In the Google Cloud console:
+
+   - Set up the consent screen first (*Google Auth Platform → Branding*): the app name and support email people see
+     when they sign in. While the app's audience is in *Testing*, only the test users you list there can sign in.
+   - Under *Clients* (or *APIs & Services → Credentials*), create an **OAuth client ID** of type **Web application**.
+     Under *Authorised JavaScript origins*, add your page's origin, here `http://localhost:5173`. When you serve from
+     localhost, Google also wants `http://localhost`. The button flow needs no redirect URI.
+   - Copy the client id, which ends in `.apps.googleusercontent.com`.
+
+   Save this next to the quick start's compose file as `docker-compose.override.yml`:
+
+   <Code code={override} lang="yaml" title="docker-compose.override.yml" />
+
+   | Setting | Why |
+   |---|---|
+   | `ASPNETCORE_ENVIRONMENT: Development` | Lets you try sign-in on localhost without `Alvo__Accounts__Issuer`: in Development the tokens Alvo issues name the URL each request reached. **Never set it in production.** Without a configured issuer, a token's `iss` would follow the request's `Host` header, which the caller chooses; that is why the host refuses an unset issuer outside Development. Drop the line and set the issuer ([Running in production](/guides/production/#8-if-people-sign-in)). |
+   | `Alvo__Accounts__Providers__Google__ClientIds__0` | The audience Alvo requires in every Google ID token. A token minted for anyone else's client is refused. Add a second index for an Android or iOS client. |
+   | `Alvo__Accounts__Issuer` | The `iss` of every access token Alvo signs: the public `https` URL of `/auth/v1`. **Required outside Development.** In Development it may stay unset, and then tokens name the URL each request reached. |
+   | `Alvo__Secrets__EncryptionKeyFile` | A mounted file with 32 random bytes in base64. Alvo encrypts its signing keys at rest with it, and sign-in refuses to start without one. |
+   | `Alvo__Api__Cors__Origins__0` | The origin your page is served from. With no origin, Alvo sends no CORS headers and the browser blocks every call. A wildcard `*` is refused at startup. |
+
+   Start it:
+
+   ```sh title="Terminal"
+   mkdir -p alvo-time-tracker && cd alvo-time-tracker
+   curl -fsSLO https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/docker-compose.quickstart.yml
+   curl -fsSL -o docker-compose.override.yml https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/website/src/snippets/shell/sign-in.compose.override.yml
+   curl -fsSL -o time-tracker.alvo.json https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/website/src/snippets/sign-in/01-level-one.alvo.json
+   export COMPOSE_FILE=docker-compose.quickstart.yml:docker-compose.override.yml
+   export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)" ALVO_ADMIN_PASSWORD="$(openssl rand -hex 12)"
+   export ALVO_SECRETS_KEY="$(openssl rand -base64 32)"
+   export GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com   # yours, from the Google console
+   docker compose up --wait --wait-timeout 90
+   curl -sS localhost:8080/auth/v1/.well-known/oauth-authorization-server
+   ```
+
+   The last line prints the sign-in metadata (RFC 8414): the token endpoint and the key set Alvo's access tokens verify
+   against. If the container does not come up, the end of `docker compose logs alvo` names the setting it refused.
+
+   **Embedded in your own ASP.NET Core host**, the same is the `MMLib.Alvo.Accounts` package and two calls beside the
+   Data API. The core reads `Alvo:Secrets:EncryptionKeyFile` from configuration, so set it there:
+
+   ```csharp title="Program.cs"
+   using MMLib.Alvo.Accounts;
+
+   builder.Services.AddAlvo(alvo => alvo
+       .UseSqlite("Data Source=app.db")
+       .FromDescriptor("time-tracker.alvo.json")
+       .AddDataApi(api => api.Cors.Origins.Add("https://app.example.com")));
+   builder.Services.AddAlvoAccounts(accounts =>
+   {
+       accounts.Issuer = "https://api.example.com/auth/v1";
+       accounts.Providers["google"] = new AlvoOidcProviderOptions { ClientIds = { "1234-web.apps.googleusercontent.com" } };
+   });
+
+   var app = builder.Build();
+   app.MapAlvoDataApi();
+   app.MapAlvoAccounts();
+   ```
+
+   Sign-in needs a relational store (`UseSqlite` or `UsePostgreSql`). Without `AddAlvoAccounts`, the host behaves
+   exactly as before: no `/auth` route, and `Authorization` is left to your own authentication.
+
+3. **Sign people in from the page.** Load Google's script, then this one, and give the button a place:
+
+   ```html title="index.html"
+   <div id="sign-in"></div>
+   <script src="https://accounts.google.com/gsi/client"></script>
+   <script src="sign-in.js"></script>
+   ```
+
+   <Code code={signIn} lang="js" title="sign-in.js" />
+
+   When the person picks their account, Google calls `callback` with a `credential`, which is the ID token. `token()`
+   sends it to Alvo as an [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange. On the wire (the form is
+   URL-encoded; it is shown decoded here):
+
+   ```http
+   POST /auth/v1/token
+   Content-Type: application/x-www-form-urlencoded
+
+   grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+   &subject_token=eyJhbGciOiJSUzI1NiIsImtpZCI6…
+   &subject_token_type=urn:ietf:params:oauth:token-type:id_token
+   ```
+
+   ```http
+   HTTP/1.1 200 OK
+   Content-Type: application/json
+
+   {
+     "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9…",
+     "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+     "token_type": "Bearer",
+     "expires_in": 900,
+     "refresh_token": "alvo_rt_…"
+   }
+   ```
+
+   The first exchange creates the person's account. Every later one finds it again. An ID token starts at most one
+   session, and it must reach Alvo within five minutes of Google issuing it, so exchange the `credential` at once and
+   never store it.
+
+   From now on the page calls the Data API as that person:
+
+   ```http
+   POST /api/time_entries
+   Authorization: Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCJ9…
+   Content-Type: application/json
+
+   { "minutes": 30, "note": "Code review" }
+   ```
+
+   ```http
+   HTTP/1.1 201 Created
+
+   { "id": "0f3c…", "minutes": 30, "note": "Code review", "created_by": "5b1f…", … }
+   ```
+
+   `created_by` is the person's id. A second person who signs in lists the entries and gets an empty page.
+   `test/teapie-field-service/170-SelfService/001-sign-in` runs this exchange against the field-service stack for three
+   people, together with a forged and a replayed ID token. That stack runs the fuller field-service descriptor (more
+   fields, a state machine), so its requests carry more than the ones shown here; the answers are the same.
+
+4. **Keep the session alive, and end it.** `api()` refreshes a minute before the access token expires:
+
+   ```http
+   POST /auth/v1/token
+   Content-Type: application/x-www-form-urlencoded
+
+   grant_type=refresh_token&refresh_token=alvo_rt_…
+   ```
+
+   The answer is a new pair, the same shape without `issued_token_type`. **Every refresh rotates the refresh token**:
+   the one you sent is spent, so keep only the newest. Two tabs that refresh with the same token within 10 seconds of
+   each other both get the same new token, so the session survives a race. A spent token presented after those 10
+   seconds is treated as stolen. Alvo ends the whole session before it answers, and every token of that session, the
+   newest included, stops working. In the same step it kills every personal and service token and every invitation
+   the person created since that session started, and a mint or an invitation still in flight on that session writes
+   nothing. A member who already accepted such an invitation stays a member
+   ([When someone leaves](/guides/tokens/#when-someone-leaves)):
+
+   ```http
+   HTTP/1.1 400 Bad Request
+   Content-Type: application/problem+json
+
+   {
+     "type": "https://alvo.dev/errors/token-refused",
+     "status": 400,
+     "error": "invalid_grant",
+     "error_description": "The refresh token is not valid. Sign in again.",
+     …
+   }
+   ```
+
+   That is why `sign-in.js` reads the refresh token from storage right before it refreshes: a tab must never replay a
+   token another tab already rotated. `170-SelfService/011-refresh-rotation` and `012-reuse-ends-the-session` pin both
+   halves.
+
+   The rest of the session's surface:
+
+   - `POST /auth/v1/logout` with the access token ends its session. It answers `204`, and the session's refresh
+     token stops working too.
+   - `GET /auth/v1/user` answers who the person is to Alvo:
+
+     ```json
+     {
+       "id": "5b1f…",
+       "email": "dana@gmail.com",
+       "emailTrusted": true,
+       "name": "Dana Novak",
+       "avatarUrl": "https://lh3.googleusercontent.com/…",
+       "providers": ["google"],
+       "memberships": []
+     }
+     ```
+
+   - `PATCH /auth/v1/user` with `{ "name": "Dana N." }` changes the display name, the only thing a person may change
+     about their account. The name comes from the first sign-in and later sign-ins do not overwrite it.
+
+5. **Try it.** In `sign-in.js`, replace `YOUR-CLIENT-ID.apps.googleusercontent.com` with your client id. `ALVO` is
+   already `http://localhost:8080`, the quick start's port; change it if your host runs elsewhere. Serve the folder
+   that holds `index.html` and `sign-in.js` on the origin you registered:
+
+   ```sh title="Terminal"
+   python3 -m http.server 5173
+   ```
+
+   Open `http://localhost:5173`, click the button and sign in. Then, in the browser's developer console, write an
+   entry and list your entries:
+
+   ```js
+   await api('/api/time_entries', { method: 'POST', body: JSON.stringify({ minutes: 30, note: 'First entry' }) });
+   await (await api('/api/time_entries')).json();
+   ```
+
+   The list holds your entry, with your id in `created_by`. Sign in with another Google account in a private window
+   and run the second line again: the list is empty, because the `list` rule admits only what that person wrote. If
+   the console shows a CORS error instead, the page's origin is not exactly `APP_ORIGIN` from the override.
+
+</Steps>
+
+## Where to keep the tokens, and why
+
+- **The access token in memory**, in a variable, as `sign-in.js` does. It lives 15 minutes, and a reload costs one
+  refresh.
+- **The refresh token** is the one that matters, because it lasts as long as the session (30 days idle, 180 at most).
+  You have two choices:
+  - **`localStorage`**, as `sign-in.js` does. The person stays signed in across reloads and tabs. A script injected
+    into your page (XSS) can read it and use it from elsewhere until the session ends. Rotation limits that: once the
+    thief and the real page have both refreshed with the same token more than 10 seconds apart, the session ends for
+    both, and with it every token and every unaccepted invitation the person created since the session started.
+  - **Memory only.** Nothing outlives the tab. On reload, sign the person in again. Initialize Google's script with
+    `auto_select: true` and call `google.accounts.id.prompt()`, and a person already signed in to Google gets back in
+    without a click.
+
+  Whichever you choose, an XSS on your page can act as the person while the page is open, so the real defence is the
+  page itself. Set a strict Content Security Policy (`script-src 'self' https://accounts.google.com`), load no
+  third-party scripts you do not need, and never put user content into HTML unescaped. The
+  [OWASP HTML5 Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html#local-storage)
+  covers the trade-off.
+
+**Why Alvo does not set a cookie.** An `httpOnly` cookie would hide the refresh token from scripts, but then the
+browser would attach it to every request to the token endpoint, including requests another site makes. That endpoint
+would become a cross-site request forgery target, which is the surface Alvo removed when it stopped reading
+credentials from cookies. So tokens travel in bodies and headers only, and CORS never allows credentials. An opt-in
+refresh cookie is a candidate for a later release.
+
+## How it behaves
+
+**The access token says who you are, never what you may do.** It is an ES256 JWT (RFC 9068) carrying `iss`, `aud`,
+`sub`, `sid`, `iat`, `exp`, `jti`, `client_id` and `idp`, and nothing else: no roles, no tenant, no email. Alvo reads
+those on every request in the same single read that checks the session. Disable an account, remove someone from a
+team, or drop `google` from the descriptor, and it counts on the very next request, not when the token expires.
+
+**A token that cannot be used is a 401.** Expired, signed out, banned or forged, they all get the same answer:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token"
+
+{
+  "type": "https://alvo.dev/errors/unauthenticated",
+  "status": 401,
+  "detail": "The presented bearer token could not be used. Sign in again, or check that it has not expired or been revoked and that you belong to the tenant you requested.",
+  …
+}
+```
+
+Refresh once on a 401. If that fails too, sign the person in again.
+
+**The token endpoint's own refusals** are problem documents that also carry OAuth's `error` and `error_description`:
+
+| Status | Problem type | `error` | When |
+|---|---|---|---|
+| 400 | [`token-refused`](/reference/problem-types/#token-refused) | `invalid_request` | The form is malformed, or the ID token is not a valid, fresh one from a provider the descriptor lists, or it has already started a session. |
+| 400 | [`token-refused`](/reference/problem-types/#token-refused) | `invalid_grant` | The refresh token is unknown, spent after the grace window, or its session has ended. |
+| 403 | [`sign-up-refused`](/reference/problem-types/#sign-up-refused) | `access_denied` | A new person the sign-up policy does not admit. The `policy` member says which: `invitationOnly` or `allowedEmailDomains`. |
+| 403 | [`sign-in-refused`](/reference/problem-types/#sign-in-refused) | `access_denied` | An existing account that may not sign in, because an operator disabled it. No reason is given. |
+| 429 | [`rate-limited`](/reference/problem-types/#rate-limited) | — | More than 30 token requests a minute from one client address (`Alvo:Api:RateLimits:Token`). Wait for `Retry-After`. |
+
+### Which email addresses Alvo trusts
+
+A provider's `email_verified` is not equally reliable everywhere. Alvo trusts a Google address when `email_verified`
+is true **and** the address ends in `@gmail.com` or the token carries `hd`, Google's mark for a Workspace domain it
+manages. Only a trusted address can satisfy `allowedEmailDomains` or an email-bound invitation. An untrusted address
+is stored and shown (`emailTrusted: false`) and used for nothing else.
+
+**Accounts are never linked by email.** An account is found by the provider and the provider's subject id, never by
+address, so a second identity with the same email is a second account. Linking by email is how an attacker who
+controls an unverified address at one provider takes over an account made at another.
+
+### Banning a person
+
+An operator with the Management API's `admin` level disables an account:
+
+```http
+PUT /management/projects/time-tracker/accounts/5b1f…/disabled
+X-Alvo-Api-Key: admin.…
+Content-Type: application/json
+
+{ "disabled": true }
+```
+
+It answers `204`. Every session of the account ends in the same transaction, so the person's next request is `401`,
+their next refresh `invalid_grant`, and their next sign-in `403 sign-in-refused`. Every personal and service token
+they minted dies too. Work already queued as them, a handler that runs as the event's actor, runs with no tenant role
+while they are banned. Their memberships stay, so an owner can still remove them, and if they were a tenant's only
+owner nobody can manage it until they are enabled again
+([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)). `{ "disabled": false }` lets them sign in again. It brings
+back no session and no token. The
+route exists only on a host with sign-in. The Management API never reads `Authorization`, so a person's access token
+there is an anonymous caller.
+
+### API keys keep working
+
+Configured API keys behave exactly as before. A key and a Bearer token on the same request are `401`: Alvo will not
+pick one for you. Both pass the same rules, so a key for a back-office job and a person in the browser are two
+credentials over one policy.
+
+## Choosing a level
+
+This page is level 1: every person has their own rows, and nothing is shared. The next two levels add tenants:
+
+| Level | You want | The descriptor adds | Read |
+|---|---|---|---|
+| 1 | Each person sees only what they wrote. | `auth.providers`, `auth.signUp`; rules on `created_by` | this page |
+| 2 | A private space per person, which can grow into teams later without moving data. | `tenancy.selfService.personalTenant` | [Tenants, members and invitations](/guides/tenants-and-invitations/) |
+| 3 | Teams: companies people create, invite colleagues into, and give roles in. Integrations reach them with tokens. | `createTenants`, `invitations`, `assignableRoles`, and `auth.accessTokens` | [Tenants, members and invitations](/guides/tenants-and-invitations/), [Tokens for integrators](/guides/tokens/) |
+
+## Limits and what is not here yet
+
+- **Google is the only provider that signs people in.** The descriptor also accepts `microsoft`, `github`, `apple`
+  and `oidc`. They are warned about at apply and offer no way in yet.
+- **No email and password for your app's users.** The dashboard's own accounts are separate, for operators only (see
+  [Authentication and API keys](/guides/authentication/#people-sign-in-to-the-dashboard)).
+- **No account deletion.** A person cannot delete their account, and neither can an operator. Disable it instead.
+  App stores and GDPR will need deletion, and it is planned.
+- **No `@user.email` in rules.** A rule sees `@user.id` and `@user.roles` only.
+- **No dashboard view of the people who signed in.** Disabling is a Management API call.
+- **Old sessions are never cleaned up.** Every sign-in and every refresh adds a row that nothing deletes yet
+  ([#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)).
+
+## See also
+
+- [Tenants, members and invitations](/guides/tenants-and-invitations/): let people create teams and invite each other.
+- [Tokens for integrators](/guides/tokens/): give a script or another system its own credential.
+- [The sign-in API reference](/reference/accounts-api/): every route, generated from the OpenAPI document.
+- Descriptor keys: [`auth.providers`](/reference/descriptor/auth/#auth.providers),
+  [`auth.signUp`](/reference/descriptor/auth/#auth.signUp).
+- Configuration: [`Alvo:Accounts`](/reference/configuration/#alvoaccounts), [`Alvo:Api`](/reference/configuration/#alvoapi),
+  [`Alvo:Secrets`](/reference/configuration/#alvosecrets).
+- The contributor's view, with the invariants and the tests that hold them:
+  [`docs/architecture/accounts.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/accounts.md).
