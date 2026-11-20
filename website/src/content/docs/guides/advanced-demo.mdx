@@ -82,7 +82,7 @@ It is typed against the classes the build [generates from the descriptor](/exten
 | Mobile | An inbound Standard Webhook that completes the job and records the minutes | Inbound webhooks — the descriptor declares what Alvo sends | [Commands and inbound webhooks](/extending/commands/) |
 | Scheduling | Before-write hooks: a job's start and a visit's whole slot fall inside the customer's service hours | A time-zone-aware hour in CEL; the hours live on another row | [Write hooks](/extending/write-hooks/) |
 | SLA | A handler of the timer's own event: page on-call, then priority 1 | A subscriber for a timer's event | [Timers, schedules and data migrations](/extending/time/) |
-| Reports | A cron schedule that runs once per tenant | A per-tenant job: a cron automation takes no condition, and the image has no tenant catalog | [Timers, schedules and data migrations](/extending/time/) |
+| Reports | A cron schedule that runs once per tenant | A per-tenant job: a cron automation takes no condition, and the image's default tenant list holds only self-service tenants, not the demo's API-key ones | [Timers, schedules and data migrations](/extending/time/) |
 
 The descriptor still judges every write the host makes: the dispatch command's unit takes the state machine's
 `schedule` transition, hits the technician's exclusion on the calendar and runs the service-hours hooks, and any refusal

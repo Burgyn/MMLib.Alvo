@@ -21,8 +21,9 @@ event handlers.
 - **An entity event**, `entity.<entity>.<created|updated|deleted>`. The condition and the actions read the row as the
   matching after-hook does: `new.` on create and update, `old.` on update and delete.
 - **A five-field cron**, read in UTC: `{"schedule": "0 2 * * *"}`. On a project with tenancy it runs **once per tenant**,
-  each run in that tenant, and the host must register an `IAlvoTenantCatalog`; without tenancy it runs once. A cron
-  rule takes no condition — it has no row to read.
+  each run in that tenant; without tenancy it runs once. The tenants come from the host's `IAlvoTenantCatalog` or,
+  without one, from the self-service registry when the descriptor declares `tenancy.selfService`. A cron rule takes
+  no condition — it has no row to read.
 
 ## Actions
 
@@ -82,7 +83,7 @@ refusing applies — so the secret can be added under *Settings → Secrets*; th
 | A wildcard trigger (`entity.*.created`) | Name the entity: a rule's row images are one entity's. |
 | `auth.*` and `storage.*` triggers | No such event exists in this build. |
 | A `condition` on a cron rule | A schedule has no row to read. |
-| A cron rule on a project with tenancy, in a host that registers no `IAlvoTenantCatalog` — the standalone image registers none | Alvo does not know which tenants to run it for. |
+| A cron rule on a project with tenancy and without `tenancy.selfService`, in a host that registers no `IAlvoTenantCatalog`. The standalone image registers none, so there it needs `selfService` | Alvo does not know which tenants to run it for. |
 
 Editing a rule makes it a new subscriber: the apply cancels the old one's unfinished deliveries (error type
 `superseded`) and records one `cancel-superseded` row in the [operations log](/extending/operate-deliveries/#audit),

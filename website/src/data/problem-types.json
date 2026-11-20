@@ -241,7 +241,7 @@
   },
   "rate-limited": {
     "causes": [
-      "This client address sent more requests to a limited route than it admits in its window — the token endpoint, `Alvo:Api:RateLimits:Token` per minute, or creating a tenant (`POST /auth/v1/tenants`), `Alvo:Api:RateLimits:Create` per minute."
+      "This client address sent more requests to a limited route than it admits in its window — the token endpoint (`POST /auth/v1/token`), `Alvo:Api:RateLimits:Token` per minute; creating a tenant (`POST /auth/v1/tenants`) or minting a token (`POST /auth/v1/tokens`), one shared `Alvo:Api:RateLimits:Create` budget per minute; or any invitation route, `Alvo:Api:RateLimits:Invitations` per minute."
     ],
     "fix": "Wait the seconds `Retry-After` names, then send the same request again.",
     "violationCodes": [],

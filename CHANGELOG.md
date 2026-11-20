@@ -184,6 +184,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
     by policy." and names no field (#538); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
     hint to use `X-Alvo-Api-Key` (#539). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+- **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
+  - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
+    transaction, every personal and service token the person minted and every invitation they created, in any tenant,
+    since that session started. What they created before it started survives.
+  - **A banned person's queued work loses their tenant roles.** A delivery running as the event's actor no longer
+    honours the memberships of a disabled account; enabling it honours them again, and an owner can still remove a
+    banned member.
+  - **Apply warns when nobody could ever sign up:** `auth.signUp.mode: invitationOnly` without
+    `tenancy.selfService.invitations` is a warning at `/auth/signUp/mode` (registration closed is legitimate, so not a
+    refusal). The `examples/complex-crm` showcase had that shape and now declares self-service invitations.
+  - **Corrected:** `AlvoRateLimitOptions.Create`'s doc (it also charges `POST /auth/v1/tokens`) and the `rate-limited`
+    problem type's causes; *Timers, schedules and data migrations* and *Automation*, which still said a per-tenant
+    schedule or cron rule needs a host `IAlvoTenantCatalog` (with `tenancy.selfService` the registry is the default).
+  - **Open before v0.1:** the `/auth/v1` HTTP contract's names, credential errors, rate-limit keys and idempotency
+    (#542); recovering a tenant whose only owner is banned, and the owner-removal × ban lock order (#543); signing-key
+    rotation, an emergency procedure, and checking Google's `azp` (#544).
 - **`AlvoContext.TenantRoles`**: the roles a caller holds inside the tenant a request acts in, kept apart from `Roles`.
   Empty for every existing caller, so nothing changes for API keys or operators. They count only where every entity on a
   decision's path is `tenancy: scoped` (a scoped entity's rules, masks, state-machine transitions and relation terms

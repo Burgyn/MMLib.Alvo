@@ -251,7 +251,8 @@ The S2 plan adds its own recorded deviations:
 - Tenants, memberships and every `selfService` refusal — S3, below.
 - Invitations (S4).
 - Personal and service tokens — S5, [below](#tokens-for-integrators-personal-and-service-tokens-s5).
-- Key rotation (D12): one key per purpose, generation 1.
+- Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation, and checking a Google ID
+  token's `azp`: [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544).
 - Auth events and role-change audit (spec D9).
 - A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
   yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
@@ -479,7 +480,8 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   schema mints one more run per account, a per-tick cost any member of the public grows by signing up (bounded only by the
   token rate limit). It is a cost, not a wall breach: each run is the system in its own tenant. A host that wants it
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
-- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only.
+- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. **Superseded by
+  S5 D15**: minting (`POST /tokens`) draws on the same budget (the S5 decisions, below).
 - **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
 
 And where the implementation answered differently from the plan's first wording:
@@ -730,6 +732,9 @@ And where the implementation answered differently from the plan's first wording,
 - Membership events — spec D9 defers them.
 - Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.
+- Recovering a tenant whose only owner is banned. A ban leaves memberships, and no operator route grants ownership, so
+  nobody can manage it until the account is enabled again; and the lock order of an owner's removal racing their ban:
+  [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543).
 
 ## Tokens for integrators: personal and service tokens (S5)
 
@@ -1083,6 +1088,10 @@ And where the implementation answered differently from the plan's first wording,
   bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
   grows by this table).
 - Events and an audit trail for minting and revoking (spec D9).
+- A settled `/auth/v1` contract before v0.1: one name per thing, one answer for the wrong kind of credential, the
+  rate-limit keys (`RateLimits:Create` also charges `POST /tokens`, `RateLimits:Token` is the OAuth endpoint), the
+  `auth.accessTokens` name, and `Idempotency-Key` on `POST /tenants`, `…/invitations` and `/tokens`:
+  [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542).
 - The field-service demo, its TeaPie suite, the users' guides and the descriptor skill — S6, [below](#the-demo-s6).
 
 ## The demo (S6)
@@ -1333,3 +1342,9 @@ defects that no slice could see, because each sits where two slices meet. Each f
   legitimate "registration closed" state in which existing accounts keep signing in. `examples/complex-crm`, the
   schema showcase, had exactly this shape (S2 added `invitationOnly` before invitations existed), so it now declares
   `tenancy.selfService` with `invitations: true`; its canonical snapshot moved by that block alone.
+
+Still open after these fixes, each filed: the HTTP contract's coherence before v0.1
+([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
+lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
+sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
+race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)).
