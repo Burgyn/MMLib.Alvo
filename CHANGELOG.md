@@ -137,8 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Personal`, `Service`), `ApiKeyRecord.Kind` (default `Configured`, so existing and host-built keys keep their
     meaning) and `ApiKeyRecord.MintedBy`. No new problem type. A dev key whose id starts `alvo_pat_` or `alvo_svc_` is
     refused at startup.
-  - **A host with its own `IApiKeyStore`** keeps owning key resolution entirely; personal and service tokens do not
-    resolve there, so such a host leaves `auth.accessTokens` off.
+  - **A host with its own `IApiKeyStore` should decorate Alvo's, not replace it.** A decorator that delegates keeps
+    personal and service tokens working. A host that replaces the store gets `404 feature-disabled` naming
+    `auth.accessTokens` (and why) from `POST /auth/v1/tokens`, instead of a token nothing would accept.
   - **Storage.** One framework table, `{prefix}_api_keys`, created on every relational host and empty until a token is
     minted. Nothing deletes a revoked or expired row yet (#527).
   - **Tests.** Both kinds end to end, a level-1 token, a ban, the tenant wall, a tenant role on global data and

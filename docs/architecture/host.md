@@ -237,10 +237,15 @@ resolver reads is a routing store, `ApiKeyStores`: a key id starting `alvo_pat_`
 registry, every other id to the dev keys — one lookup, no fallback between them. Both prefixes are **reserved**: a
 dev key whose `KeyId` starts with either is refused at startup, naming `Alvo:Auth:DevKeys:{i}:KeyId`, so a configured key
 can never shadow a minted one. A provider with no registry (a host that is not relational) answers every prefixed id as
-unknown. The routing store is registered with `TryAddSingleton`, so **a host that registers its own `IApiKeyStore`
-owns key resolution entirely**: its store is the only one asked, and the persisted registry's port is
-internal, so that store cannot delegate to it — personal and service tokens never resolve on such a host. Its token
-routes would still mint them, so such a host leaves `auth.accessTokens` out of its descriptor.
+unknown. The routing store is registered with `TryAddSingleton`. **A host that wants a key store of its own decorates
+Alvo's, it does not replace it**: a decorator that wraps the existing `IApiKeyStore` registration (its factory, or
+Scrutor's `Decorate<IApiKeyStore, …>()`) and delegates the ids it does not own keeps personal and service tokens
+working. A host that *replaces* the registration owns key resolution entirely: its store is the only one asked, it never
+reaches the token registry (whose port is internal), and no token can resolve there. Such a host's
+`POST /auth/v1/tokens` therefore refuses rather than mints — 404 `feature-disabled`, `descriptorKey`
+`auth.accessTokens`, with a fixed sentence naming the replaced store — because the route first asks the resolved store
+for a reserved probe id that only Alvo's routing store answers. It is a route refusal, not a boot one: a host that
+replaces the store and never turns `auth.accessTokens` on is legitimate.
 
 ## The bootstrap administrator
 
