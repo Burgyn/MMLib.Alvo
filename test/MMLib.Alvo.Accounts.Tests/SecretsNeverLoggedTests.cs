@@ -11,7 +11,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using TokenResponse = MMLib.Alvo.Accounts.Internal.TokenResponse;
 
 namespace MMLib.Alvo.Accounts.Tests;
 

@@ -11,7 +11,7 @@ namespace MMLib.Alvo.Tests.Tenants;
 /// <c>maxLifetimeDays</c>; a service token's tenant and roles from <c>assignableRoles</c>, a personal token's no roles —
 /// each refused at its pointer, never clamped, and never echoing what was sent.
 /// </summary>
-public sealed class TokenRequestTests
+public sealed class AppTokenRequestTests
 {
     private const string Tenant = "4f0c8d5e-7a2b-4c1d-9e3f-6a5b4c3d2e1f";
 
@@ -160,7 +160,7 @@ public sealed class TokenRequestTests
         }
     }
 
-    private static TokenRequest Valid(string json)
+    private static AppTokenRequest Valid(string json)
     {
         var (value, violations) = Validate(json);
         violations.ShouldBeEmpty(string.Join("; ", violations.Select(violation => $"{violation.Pointer}: {violation.Message}")));
@@ -169,9 +169,9 @@ public sealed class TokenRequestTests
 
     private static string[] Pointers(string json) => [.. Validate(json).Violations.Select(violation => violation.Pointer)];
 
-    private static (TokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(string json)
+    private static (AppTokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(string json)
     {
         using var document = JsonDocument.Parse(json);
-        return TokenRequest.Validate(document.RootElement, _rules);
+        return AppTokenRequest.Validate(document.RootElement, _rules);
     }
 }

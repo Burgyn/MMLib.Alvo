@@ -38,7 +38,7 @@ internal sealed record TokenRules(
 /// <param name="Roles">A service token's tenant roles, in the order sent; empty for a personal one.</param>
 /// <param name="Scopes">What it may read and write.</param>
 /// <param name="ExpiresAt">When it expires.</param>
-internal sealed record TokenRequest(
+internal sealed record AppTokenRequest(
     string Name,
     ApiKeyKind Kind,
     TenantId? Tenant,
@@ -69,14 +69,14 @@ internal sealed record TokenRequest(
     /// <param name="options">The Data API's body bounds.</param>
     /// <param name="rules">What the request is judged against.</param>
     /// <param name="ct">A token to cancel the read.</param>
-    internal static Task<(TokenRequest? Value, IReadOnlyList<AlvoViolation> Violations)> ReadAsync(
+    internal static Task<(AppTokenRequest? Value, IReadOnlyList<AlvoViolation> Violations)> ReadAsync(
         HttpRequest request, AlvoApiOptions options, TokenRules rules, CancellationToken ct) =>
         SelfServiceBody.ReadAsync(request, options, root => Validate(root, rules), ct);
 
     /// <summary>The token <paramref name="root"/> asks for, or every reason it asks for none.</summary>
     /// <param name="root">The body's top-level object.</param>
     /// <param name="rules">What the request is judged against.</param>
-    internal static (TokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(JsonElement root, TokenRules rules)
+    internal static (AppTokenRequest? Value, IReadOnlyList<AlvoViolation> Violations) Validate(JsonElement root, TokenRules rules)
     {
         ArgumentNullException.ThrowIfNull(rules);
         var violations = SelfServiceBody.Unknown(
@@ -88,7 +88,7 @@ internal sealed record TokenRequest(
         var scopes = ReadScopes(root, rules, violations);
         var expiresAt = ReadExpiresAt(root, rules, violations);
         return violations.Count == 0
-            ? (new TokenRequest(name!, kind!.Value, tenant, roles, scopes, expiresAt), [])
+            ? (new AppTokenRequest(name!, kind!.Value, tenant, roles, scopes, expiresAt), [])
             : (null, violations);
     }
 

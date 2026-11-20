@@ -30,7 +30,7 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <param name="Scopes">What it may read and write.</param>
 /// <param name="ExpiresAt">When it expires.</param>
 /// <param name="CreatedAt">When it was minted.</param>
-internal sealed record TokenResponse(
+internal sealed record AppTokenResponse(
     [property: JsonPropertyName("keyId")] string KeyId,
     [property: JsonPropertyName("token")] string Token,
     [property: JsonPropertyName("header")] string Header,
@@ -52,7 +52,7 @@ internal sealed record TokenResponse(
     /// <param name="token">The token as stored.</param>
     /// <param name="presented">The whole credential, <c>keyId.secret</c>.</param>
     /// <param name="header">The configured credential header.</param>
-    internal static TokenResponse From(AppTokenView token, string presented, string header)
+    internal static AppTokenResponse From(AppTokenView token, string presented, string header)
     {
         ArgumentNullException.ThrowIfNull(token);
         return new(
@@ -76,11 +76,13 @@ internal sealed record TokenResponse(
         builder.Append("KeyId = ").Append(KeyId)
             .Append(", Token = ").Append(prefix).Append("***")
             .Append(", Kind = ").Append(Kind)
+            .Append(", Header = ").Append(Header)
             .Append(", Name = ").Append(Name)
             .Append(", TenantId = ").Append(TenantId)
             .Append(", Roles = [").AppendJoin(", ", Roles).Append(']')
             .Append(", Scopes = [").AppendJoin(", ", Scopes).Append(']')
-            .Append(", ExpiresAt = ").Append(ExpiresAt);
+            .Append(", ExpiresAt = ").Append(ExpiresAt)
+            .Append(", CreatedAt = ").Append(CreatedAt);
         return true;
     }
 }

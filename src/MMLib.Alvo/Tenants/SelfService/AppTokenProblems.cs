@@ -12,7 +12,7 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <b>Every detail is a fixed sentence</b>; none echoes a tenant, a role or a scope the caller sent. A tenant the person is
 /// no member of is the self-service routes' one <c>not-found</c>, byte for byte.
 /// </remarks>
-internal static class TokenProblems
+internal static class AppTokenProblems
 {
     /// <summary>The descriptor key that enables every token route.</summary>
     internal const string AccessTokensKey = "auth.accessTokens";

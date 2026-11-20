@@ -477,11 +477,11 @@ name: Mutation
 # `mutants:` is ~374 code lines x 0.16 -> 59 (upper end x 0.48 -> 179, what the budget is sized
 # on), `suite:` MTP's own Accounts.Tests count after S3.
 #
-# S5 (accounts, tokens) adds three route files to this leg — TokenRoutes, TokenResponse, TokenProblems
+# S5 (accounts, tokens) adds three route files to this leg — TokenRoutes, AppTokenResponse, AppTokenProblems
 # (~129 code lines; `POST {prefix}/tokens` and its answers), judged by TokenRoutesTests in the same
 # suite and excluded from the core leg for the same reason; `mutants:` is now ~503 code lines x 0.16
-# -> 80 (upper end x 0.48 -> 241), still an estimate. TokenRequest stays on the core leg, whose
-# suite (TokenRequestTests) tests it directly.
+# -> 80 (upper end x 0.48 -> 241), still an estimate. AppTokenRequest stays on the core leg, whose
+# suite (AppTokenRequestTests) tests it directly.
 #
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with

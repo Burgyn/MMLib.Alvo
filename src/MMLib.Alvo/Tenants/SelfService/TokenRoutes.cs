@@ -34,7 +34,7 @@ internal static class TokenRoutes
         ArgumentNullException.ThrowIfNull(http);
         var catalog = http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current;
         var tokens = catalog?.AppTokens ?? AppTokenPolicy.None;
-        var (call, refusal) = await SelfServiceCall.EnterAsync(http, _ => TokenProblems.Off(tokens)).ConfigureAwait(false);
+        var (call, refusal) = await SelfServiceCall.EnterAsync(http, _ => AppTokenProblems.Off(tokens)).ConfigureAwait(false);
         if (call is null)
         {
             return refusal!;
@@ -42,13 +42,13 @@ internal static class TokenRoutes
 
         var rules = new TokenRules(tokens, call.Policy, EntitiesOf(catalog), call.Now);
         var (request, invalid) = await call.ReadAsync(
-            (body, options, ct) => TokenRequest.ReadAsync(body, options, rules, ct)).ConfigureAwait(false);
+            (body, options, ct) => AppTokenRequest.ReadAsync(body, options, rules, ct)).ConfigureAwait(false);
         if (request is null)
         {
             return invalid!;
         }
 
-        if (TokenProblems.KindOff(tokens, request.Kind) is { } disabled)
+        if (AppTokenProblems.KindOff(tokens, request.Kind) is { } disabled)
         {
             return disabled;
         }
@@ -61,7 +61,7 @@ internal static class TokenRoutes
     private static HashSet<string> EntitiesOf(PolicyCatalog? catalog) =>
         new(catalog?.Entities.Select(entity => entity.Key) ?? [], StringComparer.Ordinal);
 
-    private static async Task<IResult> MintedAsync(SelfServiceCall call, TokenRequest request)
+    private static async Task<IResult> MintedAsync(SelfServiceCall call, AppTokenRequest request)
     {
         var secret = AppTokenSecret.New(request.Kind);
         var mint = new MintTokenRequest(
@@ -75,15 +75,15 @@ internal static class TokenRoutes
             request.Roles,
             request.ScopeTexts,
             request.ExpiresAt,
-            TokenProblems.MaxLive,
+            AppTokenProblems.MaxLive,
             call.Now);
         var outcome = await call.Http.RequestServices.GetRequiredService<IAppTokenStore>().MintAsync(mint, call.Ct).ConfigureAwait(false);
         if (outcome.Status != MintTokenStatus.Minted)
         {
-            return TokenProblems.Refused(outcome.Status);
+            return AppTokenProblems.Refused(outcome.Status);
         }
 
         var header = call.Http.RequestServices.GetRequiredService<IOptions<AlvoAuthOptions>>().Value.HeaderName;
-        return SelfServiceCall.Json(TokenResponse.From(outcome.Token!, secret.Presented, header), StatusCodes.Status201Created);
+        return SelfServiceCall.Json(AppTokenResponse.From(outcome.Token!, secret.Presented, header), StatusCodes.Status201Created);
     }
 }

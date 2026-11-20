@@ -35,8 +35,8 @@ internal static partial class AccountsSchemas
             }),
             ("kind", Enumerated(
                 "`personal`: acts as the person. `service`: acts as a tenant the person owns.",
-                Tenants.SelfService.TokenResponse.PersonalKind,
-                Tenants.SelfService.TokenResponse.ServiceKind)),
+                AppTokenResponse.PersonalKind,
+                AppTokenResponse.ServiceKind)),
             ("tenantId", new OpenApiSchema
             {
                 Type = JsonSchemaType.String,
@@ -79,7 +79,7 @@ internal static partial class AccountsSchemas
         ("keyId", Text("The token's key id (`alvo_pat_…` or `alvo_svc_…`): not secret.")),
         ("token", Text("The credential, `keyId.secret`. Shown this once, never again; present it in the header `header` names.")),
         ("header", Text("The request header the credential goes in.")),
-        ("kind", Enumerated("`personal` or `service`.", Tenants.SelfService.TokenResponse.PersonalKind, Tenants.SelfService.TokenResponse.ServiceKind)),
+        ("kind", Enumerated("`personal` or `service`.", AppTokenResponse.PersonalKind, AppTokenResponse.ServiceKind)),
         ("name", Text("The token's name.")),
         ("tenantId", new OpenApiSchema
         {

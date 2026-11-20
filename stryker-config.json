@@ -37,8 +37,8 @@
       "!**/Tenants/SelfService/MembershipResponse.cs",
       "!**/Tenants/SelfService/TenantName.cs",
       "!**/Tenants/SelfService/TokenRoutes.cs",
-      "!**/Tenants/SelfService/TokenResponse.cs",
-      "!**/Tenants/SelfService/TokenProblems.cs"
+      "!**/Tenants/SelfService/AppTokenResponse.cs",
+      "!**/Tenants/SelfService/AppTokenProblems.cs"
     ],
     "thresholds": {
       "high": 80,
