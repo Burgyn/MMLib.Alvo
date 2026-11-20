@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Tests;
+using MMLib.Alvo.Data;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -20,8 +21,9 @@ namespace MMLib.Alvo.Tests.Accounts;
 /// <para>
 /// <b>A second member is seeded</b> (<see cref="AccountsWorld.AddMemberAsync"/>): these facts are S3's, written before
 /// invitations existed (S3 plan D15) — a member who joins by invitation is <see cref="InvitationEngineFacts"/>' subject.
-/// A scoped create echoes its <c>tenant_id</c> (the Data API's contract), so every
-/// write here names the tenant it is sent in.
+/// Most writes here still name the tenant they are sent in as <c>tenant_id</c> — the shape these facts were written
+/// in, and still accepted; a scoped create may leave it out since #538, which
+/// <see cref="A_scoped_create_without_tenant_id_lands_in_the_tenant_the_call_acts_in"/> pins.
 /// </para>
 /// </remarks>
 public abstract class TenancyEngineFacts
@@ -298,6 +300,35 @@ public abstract class TenancyEngineFacts
         {
             Array.ForEach(answers, answer => answer.Dispose());
         }
+    }
+
+    /// <summary>
+    /// #538 over HTTP: a person acting in a shared tenant creates a job without <c>tenant_id</c> and it lands in that
+    /// tenant; a job naming another tenant — even one the person also belongs to — is 403 with a detail that says to
+    /// remove the field, and never repeats the tenant it named.
+    /// </summary>
+    [Fact]
+    public async Task A_scoped_create_without_tenant_id_lands_in_the_tenant_the_call_acts_in()
+    {
+        await using var world = await TeamAsync();
+        var (ada, _) = await world.SignInAsync("ada");
+        var acme = await CreatedTenantAsync(world, ada, "Acme");
+        var globex = await CreatedTenantAsync(world, ada, "Globex");
+
+        using var placed = await world.AsPersonAsync(
+            HttpMethod.Post, Jobs, ada, new JsonObject { ["title"] = "Placed" }, tenant: Header(acme));
+        using var foreign = await world.AsPersonAsync(
+            HttpMethod.Post, Jobs, ada, new JsonObject { ["title"] = "Smuggled", ["tenant_id"] = Header(globex) }, tenant: Header(acme));
+
+        placed.StatusCode.ShouldBe(HttpStatusCode.Created, await placed.ReadTextAsync());
+        (await placed.ReadJsonObjectAsync())["tenant_id"]!.GetValue<Guid>().ShouldBe(acme);
+        foreign.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await foreign.ReadTextAsync());
+        (await foreign.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+        var detail = await foreign.ReadProblemDetailAsync();
+        detail.ShouldBe(AlvoAuthorizationException.ForeignTenant);
+        detail.ShouldNotContain(Header(globex));
+        (await ItemsAsync(world, Jobs, ada, acme)).Select(job => job!["title"]!.GetValue<string>()).ShouldBe(["Placed"]);
+        (await ItemsAsync(world, Jobs, ada, globex)).ShouldBeEmpty();
     }
 
     /// <summary>Spec §14 AC7: self-service changes nothing for an API key — its tenant, its rows, its refusals.</summary>
