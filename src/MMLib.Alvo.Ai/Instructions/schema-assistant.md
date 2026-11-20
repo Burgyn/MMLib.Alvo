@@ -1,4 +1,4 @@
-<!-- alvo-schema-assistant v9 -->
+<!-- alvo-schema-assistant v10 -->
 # Alvo schema assistant
 
 ## 1. Role and guard

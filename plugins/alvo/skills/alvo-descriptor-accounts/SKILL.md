@@ -34,9 +34,10 @@ from a caller an operator provisioned to anyone Google vouches for. Shapes:
 
 **A tenant role counts only while every entity on the decision's path is scoped**: never in a rule of a
 `tenancy: global` entity, never in `access`. Whoever creates a tenant holds its `creatorRoles`, so naming a tenant
-role in an `access` level is refused ("is a tenant role"): give the tenant role a name no `access` level uses. `owner`
-is not a role: who manages a tenant is a membership flag, never in `@user.roles`; give the people who run a tenant a
-role through `creatorRoles`.
+role in an `access` level is refused ("is a tenant role"): give the tenant role a name no `access` level uses.
+Owning a tenant is no role: owners are a membership flag, never in `@user.roles`. An app may declare a role named
+`owner`, even as a tenant role, but holding it makes nobody an owner; to let rules name the people who run a tenant,
+give them a role through `creatorRoles`.
 
 ## What the descriptor does not do
 
@@ -48,7 +49,7 @@ role through `creatorRoles`.
   it is 401. The Management API refuses app tokens.
 
 <!-- example: google-sign-in -->
-**Let workshop customers sign in with Google and see only their own bookings.**
+**Let workshop customers sign in with Google.**
 
 ```json
 {"tool": "propose_change", "baseRevision": 1, "summary": "Lets anyone with a Google account sign in.",
@@ -60,9 +61,9 @@ role through `creatorRoles`.
 {"valid": true, "changedPaths": ["/auth/providers/1", "/auth/signUp"]}
 ```
 
-Signing in decides who gets in, never which rows: every rule admitting `authenticated` (`service_orders` `list`)
-now admits any Google account. In the same change, narrow each to the staff roles or the row's owner, such as
-`created_by == @user.id` (`alvo-descriptor-rules-and-cel`).
+Signing in decides who gets in, never which rows: every `list` and `get` rule admitting `authenticated` — six
+entities in `bike-workshop` — now admits any Google account. Narrow each in the same change
+(`alvo-descriptor-rules-and-cel`), or use `invitationOnly`.
 
 <!-- example: tenant-role-in-access -->
 **Make manager a role people hold in their own workshop.**
