@@ -524,7 +524,10 @@ name: Mutation
 # gate, the gate witness — the security-relevant HTTP glue — run on their own leg against
 # `MMLib.Alvo.Api.Tests` (`stryker-config.commands-http.json`); the rest of `Api/**` stays
 # on #143. Six files: CommandEndpointFilter, CommandGateCheck, WebhookReceiver, CallerGate,
-# AlvoCallerFilter, AlvoGateWitness. stryker-config.json excludes the first three — its
+# AlvoCallerFilter, AlvoGateWitness. Accounts S5 adds a seventh, ManagementCallerFilter (the
+# app-token refusal in front of the Management API), judged by AppTokenManagementTests in the
+# same suite: ~25 code lines x 0.16 -> 4 more mutants (145 -> 149), still an estimate, not a probe.
+# stryker-config.json excludes the first three — its
 # suite cannot reach them — together with CommandInputs and LedgerSweeper.
 #
 # THE LEG IS NARROWER THAN ITS DESIGN, AND THAT IS A MEASUREMENT (HX-08 Ruling 42). The
@@ -950,7 +953,7 @@ jobs:
           - name: commands and webhooks over HTTP
             config: stryker-config.commands-http.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 145    # probed 2026-10-30, run to completion
+            mutants: 149    # 145 probed 2026-10-30 + ~4 ESTIMATED for ManagementCallerFilter (25 lines x 0.16)
             suite: 1034
             timeout: 280    # measured 102.7 min run to completion (10-core, --concurrency 4, 0
                             # timeouts, 24 runtime errors); ~139 min scaled to a 4-vCPU runner the
