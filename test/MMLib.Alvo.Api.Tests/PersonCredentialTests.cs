@@ -210,6 +210,29 @@ public sealed class PersonCredentialTests
         people.Calls.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// #539: the fix an app token sent as a Bearer is given names the header this host actually reads, not the default.
+    /// </summary>
+    [Fact]
+    public async Task An_app_token_as_a_bearer_is_told_the_configured_api_key_header()
+    {
+        var people = People();
+        await using var world = await WorldAsync(people, services => services.Configure<AlvoAuthOptions>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection([new("HeaderName", "X-Workshop-Key")])
+                .Build()));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/bookings", headers: Bearer("alvo_svc_k.s"));
+
+        world.CredentialHeaderName.ShouldBe("X-Workshop-Key", "or this world never moved the API-key header");
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer error=\"invalid_token\"");
+        (await response.ReadProblemDetailAsync()).ShouldBe(
+            "Personal and service tokens are not bearer tokens. Present the token in the X-Workshop-Key header, "
+            + "not as 'Authorization: Bearer'.");
+        people.Calls.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task A_non_bearer_scheme_is_ignored_even_with_a_person_resolver()
     {
