@@ -151,7 +151,7 @@ public sealed class SelfServiceCheckTests
                 "providers": ["google"],
                 "roles": ["dispatcher", "technician"],
                 "signUp": { "mode": "open" },
-                "accessTokens": { "personal": true, "service": true }
+                "apiTokens": { "personal": true, "service": true }
               },
               "tenancy": {
                 "enabled": true,

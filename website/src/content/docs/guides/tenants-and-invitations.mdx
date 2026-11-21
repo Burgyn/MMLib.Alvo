@@ -400,9 +400,16 @@ new can ever sign up. The apply still succeeds, because closed registration is a
   invitations, take a person's access token and nothing else. An API key, a personal token or a service token there is
   `401` with `WWW-Authenticate: Bearer`, the same answer as no credential at all. Previewing a code is the exception: it
   needs only a valid code, and no sign-in.
+- **Retrying a create is safe with `Idempotency-Key`.** A tenant cannot be deleted, so a create retried after a lost
+  answer would spend one of `maxPerAccount` for good. Send `Idempotency-Key: <a unique value>` with `POST
+  /auth/v1/tenants`. A retry with the same key and name answers the tenant the first create made, the same `201` and
+  `Location`, and creates nothing. The same key with another name is `409 idempotency-conflict`.
+- **Creating an invitation refuses a key** (`422 malformed-query`). Its answer carries the code, which Alvo keeps only
+  as a hash, so a retry could not show it again. If an answer is lost, list the tenant's invitations, revoke the one you
+  cannot account for and create a new one.
 - **Rate limits per client address.** The five invitation routes share 20 requests a minute
-  (`Alvo:Api:RateLimits:Invitations`). Creating a tenant and minting a token share 10
-  (`Alvo:Api:RateLimits:Create`). Past either, the answer is `429` with `Retry-After`.
+  (`Alvo:Api:RateLimits:Invitations`). Creating a tenant has 10 (`Alvo:Api:RateLimits:Tenants`), and minting a token
+  10 of its own (`Alvo:Api:RateLimits:ApiTokens`). Past any of them, the answer is `429` with `Retry-After`.
 - **People's tenants are the tenant list.** With `selfService` on, work that runs once per tenant (a cron
   [automation](/extending/automation/#triggers), a per-tenant [schedule](/extending/time/#schedules), a
   [data migration](/extending/time/#data-migrations)) runs for every shared tenant people created, and every personal

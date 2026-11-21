@@ -34,6 +34,7 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
     private readonly AuthTables _authTables;
     private readonly InvitationTables _invitations;
     private readonly AppTokenTables _appTokens;
+    private readonly string _idempotency;
     private readonly OnceDdl _ddl;
 
     /// <summary>Creates the store.</summary>
@@ -48,6 +49,7 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
         _authTables = new AuthTables(options.SchemaPrefix);
         _invitations = new InvitationTables(options.SchemaPrefix);
         _appTokens = new AppTokenTables(options.SchemaPrefix);
+        _idempotency = IdempotencyTable.NameFor(options.SchemaPrefix);
         _ddl = new OnceDdl(EnsureTablesAsync);
     }
 
@@ -105,6 +107,11 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
             return new CreateTenantOutcome(CreateTenantStatus.NoAccount, null);
         }
 
+        if (await RecordedAsync(connection, transaction, request, ct).ConfigureAwait(false) is { } recorded)
+        {
+            return recorded;
+        }
+
         if (await CountAsync(connection, transaction, _tables.CreatedSharedCountSql, creator, ct).ConfigureAwait(false)
             >= request.MaxPerAccount)
         {
@@ -117,11 +124,44 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
             connection, transaction, _tables.InsertMemberSql,
             command => BindMember(command, request.Id, request.Creator, request.CreatorRoles, isOwner: true, request.Now),
             ct).ConfigureAwait(false);
+        await RecordAsync(connection, transaction, request, ct).ConfigureAwait(false);
 
         return new CreateTenantOutcome(
             CreateTenantStatus.Created,
             new StoredMembership(request.Id, TenantKind.Shared, request.Name, [.. request.CreatorRoles], true, request.Now.ToUniversalTime()));
     }
+
+    /// <summary>
+    /// What an earlier create with this request's key answers, read under the account lock the create already holds, so
+    /// one person's concurrent creates with one key are serialised and the second reads the first's record (#542 item 5);
+    /// <see langword="null"/> when the request carries no key or the key is new.
+    /// </summary>
+    private async Task<CreateTenantOutcome?> RecordedAsync(
+        DbConnection connection, DbTransaction transaction, CreateTenantRequest request, CancellationToken ct)
+    {
+        if (request.Idempotency is not { } token)
+        {
+            return null;
+        }
+
+        var recorded = await IdempotencyTable.FindRecordedAsync(
+            connection, transaction, _idempotency, token.Key, CreateTenantRequest.IdempotencyScopeOf(request.Creator), ct)
+            .ConfigureAwait(false);
+        return recorded switch
+        {
+            null => null,
+            var (fingerprint, _) when !token.Matches(fingerprint) => new CreateTenantOutcome(CreateTenantStatus.IdempotencyConflict, null),
+            var (_, tenant) => new CreateTenantOutcome(CreateTenantStatus.Replayed, null, new TenantId(GuidOf(tenant))),
+        };
+    }
+
+    /// <summary>Records this request's key beside the tenant it just created, in the creation's transaction.</summary>
+    private Task RecordAsync(DbConnection connection, DbTransaction transaction, CreateTenantRequest request, CancellationToken ct) =>
+        request.Idempotency is { } token
+            ? IdempotencyTable.InsertRecordedAsync(
+                connection, transaction, _idempotency, token.Key, CreateTenantRequest.IdempotencyScopeOf(request.Creator),
+                token.Fingerprint, Id(request.Id), request.Now, ct)
+            : Task.CompletedTask;
 
     private static void BindSharedTenant(DbCommand command, CreateTenantRequest request) => Bind(
         command,
@@ -237,6 +277,7 @@ internal sealed partial class EfCoreTenantStore : ITenantStore
                 await _tables.EnsureAsync(connection, ct).ConfigureAwait(false);
                 await _invitations.EnsureAsync(connection, ct).ConfigureAwait(false);
                 await _appTokens.EnsureAsync(connection, ct).ConfigureAwait(false);
+                await IdempotencyTable.EnsureAsync(connection, _idempotency, ct).ConfigureAwait(false);
             }
         }
     }

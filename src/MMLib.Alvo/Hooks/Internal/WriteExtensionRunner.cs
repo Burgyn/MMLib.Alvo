@@ -27,6 +27,8 @@ internal sealed class WriteExtensionRunner(
 {
     private static readonly IReadOnlyDictionary<string, object?> _none = new Dictionary<string, object?>(StringComparer.Ordinal);
 
+    private readonly HookColdStart _coldStart = new();
+
     public bool Validates(string entity, AlvoWriteOperation operation) => Registered(entity, operation, inTransaction: false);
 
     public bool RunsInTransaction(string entity, AlvoWriteOperation operation) => Registered(entity, operation, inTransaction: true);
@@ -213,11 +215,10 @@ internal sealed class WriteExtensionRunner(
     private async Task<HookRun> RunAsync(
         BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, CancellationToken cancellationToken)
     {
-        using var deadline = new CancellationTokenSource(hook.Registration.Settings.Timeout, time);
+        using var deadline = new HookDeadline(_coldStart.Budget(hook.Id, hook.Registration.Settings.Timeout), time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-        var run = NewRun(hook, invocation, stage, catalog, linked.Token);
+        var run = NewRun(hook, invocation, stage, catalog, () => ColdAtFirstCall(hook, deadline), linked.Token);
         using var activity = HookTelemetry.Start(hook.Id, invocation, stage);
-        var started = time.GetTimestamp();
         try
         {
             using (HeldRows.Hold(invocation.Entity, HeldRows.RowOf(invocation)))
@@ -227,11 +228,51 @@ internal sealed class WriteExtensionRunner(
         }
         catch (Exception escaped)
         {
-            HookTelemetry.Finish(activity, hook.Id, HookTelemetry.Failed, time.GetElapsedTime(started), run.Operations);
-            throw Escaped(run, escaped, deadline.IsCancellationRequested, cancellationToken);
+            HookTelemetry.Finish(activity, hook.Id, HookTelemetry.Failed, deadline.Elapsed, run.Operations);
+            throw Escaped(run, escaped, deadline.Passed, cancellationToken);
+        }
+        finally
+        {
+            EndColdStart(hook, run, cancellationToken);
         }
 
-        return await ConcludedAsync(run, hook, catalog, activity, time.GetElapsedTime(started), deadline.IsCancellationRequested).ConfigureAwait(false);
+        var elapsed = deadline.Elapsed;
+        var overran = Overran(elapsed, deadline);
+        if (!overran)
+        {
+            LogIfAdmittedCold(hook, elapsed);
+        }
+
+        return await ConcludedAsync(run, hook, catalog, activity, elapsed, overran).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A run ends the hook's cold start however it ends — a throw or a timeout included — unless the caller cancelled the
+    /// write: a client that disconnects mid-run must not spend the allowance the next caller's cold run needs.
+    /// </summary>
+    private void EndColdStart(BoundWriteHook hook, HookRun run, CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            _coldStart.Ended(hook.Id, called: run.Operations > 0);
+        }
+    }
+
+    /// <summary>A run's first call through the transaction: the hook's first such run gets the cold-start allowance from its start.</summary>
+    private void ColdAtFirstCall(BoundWriteHook hook, HookDeadline deadline) =>
+        deadline.ExtendTo(_coldStart.AtFirstCall(hook.Id, hook.Registration.Settings.Timeout));
+
+    /// <summary>Whether a run that returned overran the time it was given — its deadline fired, or it returned past it having ignored its token.</summary>
+    private static bool Overran(TimeSpan elapsed, HookDeadline deadline) => deadline.Passed || elapsed > deadline.Budget;
+
+    /// <summary>Logs a run admitted past the hook's own timeout under the cold-start allowance, so a slow cold path stays visible.</summary>
+    private void LogIfAdmittedCold(BoundWriteHook hook, TimeSpan elapsed)
+    {
+        var timeout = hook.Registration.Settings.Timeout;
+        if (elapsed > timeout)
+        {
+            HookLog.ColdRunAdmitted(logger, hook.Id, elapsed.TotalMilliseconds, timeout.TotalMilliseconds);
+        }
     }
 
     /// <summary>What an exception escaping a hook becomes (Ruling 12): its run's own failure, depth or a nested hook's failure unchanged, a timeout, or <c>exception</c>.</summary>
@@ -243,11 +284,11 @@ internal sealed class WriteExtensionRunner(
         : Fail(run.Id, HookFailedException.Exception, escaped);
 
     private async Task<HookRun> ConcludedAsync(
-        HookRun run, BoundWriteHook hook, PolicyCatalog? catalog, Activity? activity, TimeSpan elapsed, bool deadlinePassed)
+        HookRun run, BoundWriteHook hook, PolicyCatalog? catalog, Activity? activity, TimeSpan elapsed, bool overran)
     {
         var rejection = run.Rejections.Winner();
         var failure = run.Failure
-            ?? (deadlinePassed || elapsed > hook.Registration.Settings.Timeout ? TimedOut(run) : null)
+            ?? (overran ? TimedOut(run) : null)
             ?? (rejection is null ? InvalidSet(run, catalog) : null);
         if (failure is not null)
         {
@@ -266,11 +307,16 @@ internal sealed class WriteExtensionRunner(
         return run;
     }
 
-    private HookRun NewRun(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, CancellationToken token)
+    private HookRun NewRun(
+        BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, Action firstCall, CancellationToken token)
     {
         var data = stage == WriteHookStage.Validate ? services.GetRequiredService<IAlvoSessions>().For(OneHopDeeper(invocation.Caller)) : null;
         var entity = Entity(catalog, invocation.Entity);
-        var run = new HookRun(hook.Id, invocation, Pointable(catalog, entity), transaction: null, data, token) { Derived = Derived(entity) };
+        var run = new HookRun(hook.Id, invocation, Pointable(catalog, entity), transaction: null, data, token)
+        {
+            Derived = Derived(entity),
+            FirstCall = firstCall,
+        };
         if (invocation.Transaction is { } inner)
         {
             run.Attach(new HookTransaction(inner, run, hook, logger));

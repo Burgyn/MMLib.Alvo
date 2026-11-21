@@ -5,6 +5,7 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Extensions;
 using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Hooks;
 using MMLib.Alvo.Hooks.Internal;
@@ -24,6 +25,9 @@ namespace MMLib.Alvo.Tests.Hooks;
 /// </summary>
 public sealed class WriteExtensionRunnerTests
 {
+    /// <summary>Past even a first run's cold-start allowance, so a fact's one run overruns whether or not the hook is warm.</summary>
+    private static readonly TimeSpan _pastTheColdStartAllowance = HookColdStart.Allowance(AlvoHookOptions.DefaultTimeout) + TimeSpan.FromMilliseconds(1);
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
@@ -156,7 +160,7 @@ public sealed class WriteExtensionRunnerTests
         var unit = new FakeFlowUnit();
         await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("slow", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
         {
-            clock.Advance(TimeSpan.FromMilliseconds(300));
+            clock.Advance(_pastTheColdStartAllowance);
             try
             {
                 await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
@@ -172,6 +176,126 @@ public sealed class WriteExtensionRunnerTests
         failure.Reason.ShouldBe(HookFailedException.Timeout);
         unit.Blamed.ShouldHaveSingleItem().ShouldBeSameAs(failure);
     }
+
+    [Fact]
+    public async Task A_first_run_past_the_timeout_but_inside_the_cold_start_allowance_succeeds_and_an_equally_slow_second_run_times_out()
+    {
+        var clock = new FakeTimeProvider();
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("cold", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(2));
+            await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+        })), clock);
+
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        var failure = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        failure.Reason.ShouldBe(HookFailedException.Timeout);
+    }
+
+    [Fact]
+    public async Task A_first_run_past_the_cold_start_allowance_times_out_and_leaves_the_hook_on_its_own_timeout()
+    {
+        var clock = new FakeTimeProvider();
+        var advance = TimeSpan.FromMilliseconds(2501);
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("cold", (BeforeWrite<AlvoRecord> _) =>
+        {
+            clock.Advance(advance);
+            return ValueTask.CompletedTask;
+        })), clock);
+
+        var first = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+        advance = TimeSpan.FromMilliseconds(251);
+        var second = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        (first.Reason, second.Reason).ShouldBe((HookFailedException.Timeout, HookFailedException.Timeout));
+    }
+
+    [Fact]
+    public async Task The_first_run_that_calls_through_the_transaction_after_an_early_return_gets_the_allowance_once()
+    {
+        var clock = new FakeTimeProvider();
+        var runs = 0;
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("deferred", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
+        {
+            if (Interlocked.Increment(ref runs) == 1)
+            {
+                return;
+            }
+
+            await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+            clock.Advance(TimeSpan.FromSeconds(1));
+        })), clock);
+
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        var third = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        third.Reason.ShouldBe(HookFailedException.Timeout);
+    }
+
+    [Fact]
+    public async Task A_first_run_the_caller_cancelled_leaves_the_hook_cold()
+    {
+        var clock = new FakeTimeProvider();
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var runs = 0;
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("cold", (BeforeWrite<AlvoRecord> _, CancellationToken ct) =>
+        {
+            if (Interlocked.Increment(ref runs) == 1)
+            {
+                caller.Cancel();
+                ct.ThrowIfCancellationRequested();
+            }
+
+            clock.Advance(TimeSpan.FromSeconds(2));
+            return ValueTask.CompletedTask;
+        })), clock);
+
+        await Should.ThrowAsync<OperationCanceledException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), caller.Token));
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        var third = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        third.Reason.ShouldBe(HookFailedException.Timeout);
+    }
+
+    [Fact]
+    public async Task A_run_that_starts_before_the_first_run_ends_shares_its_cold_start_allowance()
+    {
+        var clock = new FakeTimeProvider();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runs = 0;
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("cold", async (BeforeWrite<AlvoRecord> _) =>
+        {
+            if (Interlocked.Increment(ref runs) == 1)
+            {
+                firstStarted.SetResult();
+                await releaseFirst.Task;
+                return;
+            }
+
+            clock.Advance(TimeSpan.FromSeconds(1));
+        })), clock);
+
+        var first = world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        await firstStarted.Task;
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        releaseFirst.SetResult();
+        await first;
+        var third = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        third.Reason.ShouldBe(HookFailedException.Timeout);
+    }
+
+    [Theory]
+    [InlineData(250, 2500)]
+    [InlineData(400, 4000)]
+    [InlineData(1000, 5000)]
+    [InlineData(5000, 5000)]
+    [InlineData(30000, 30000)]
+    public void The_cold_start_allowance_is_ten_times_the_timeout_capped_at_five_seconds_and_never_below_the_timeout(int timeoutMs, int allowanceMs) =>
+        HookColdStart.Allowance(TimeSpan.FromMilliseconds(timeoutMs)).ShouldBe(TimeSpan.FromMilliseconds(allowanceMs));
 
     [Fact]
     public async Task A_nested_write_to_the_row_in_its_own_hook_stage_is_a_self_write_even_when_caught()
@@ -669,7 +793,7 @@ public sealed class WriteExtensionRunnerTests
                     await write.Transaction.UpdateAsync("tickets", RunnerWorld.TicketId, new Dictionary<string, object?> { ["title"] = "again" }, cancellationToken: ct);
                     break;
                 default:
-                    clock.Advance(TimeSpan.FromMilliseconds(300));
+                    clock.Advance(_pastTheColdStartAllowance);
                     break;
             }
         }

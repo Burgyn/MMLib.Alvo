@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Tenants;
 using Shouldly;
@@ -151,6 +152,83 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         }
 
         (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(2 * Iterations);
+    }
+
+    /// <summary>
+    /// #542 item 5: a create carrying an idempotency key is recorded with the tenant, in one transaction, and a retry with the
+    /// same key and fingerprint answers that tenant — creating nothing and spending no <c>maxPerAccount</c> slot, also when
+    /// the creator has reached the cap since.
+    /// </summary>
+    [Fact]
+    public async Task A_replayed_create_answers_the_same_tenant_and_spends_no_slot()
+    {
+        var (store, services) = await StoreAsync();
+        var person = await SignedUpAsync(services);
+        var key = new AlvoIdempotency("retry-1", "fingerprint-a");
+
+        var first = await store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 1) with { Idempotency = key }, Ct);
+        var replay = await store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 1) with { Idempotency = key }, Ct);
+
+        first.Status.ShouldBe(CreateTenantStatus.Created);
+        replay.Status.ShouldBe(CreateTenantStatus.Replayed);
+        replay.Tenant.ShouldBe(first.Membership!.Tenant);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1, "a replay creates nothing");
+        (await store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 1), Ct)).Status
+            .ShouldBe(CreateTenantStatus.LimitReached, "the cap of one was spent by the first create alone");
+    }
+
+    /// <summary>The same key for a different request is a conflict, never a replay of the first and never a second tenant.</summary>
+    [Fact]
+    public async Task The_same_key_for_a_different_create_is_a_conflict_and_writes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var person = await SignedUpAsync(services);
+        await store.CreateSharedAsync(Create(TenantId.New(), person, []) with { Idempotency = new("k", "fingerprint-a") }, Ct);
+
+        var other = await store.CreateSharedAsync(Create(TenantId.New(), person, []) with { Idempotency = new("k", "fingerprint-b") }, Ct);
+
+        other.ShouldBe(new CreateTenantOutcome(CreateTenantStatus.IdempotencyConflict, null));
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1);
+    }
+
+    /// <summary>A key is the person's own: another person's identical key and fingerprint is a create of their own.</summary>
+    [Fact]
+    public async Task Two_people_s_keys_never_meet()
+    {
+        var (store, services) = await StoreAsync();
+        var ada = await SignedUpAsync(services);
+        var bob = await SignedUpAsync(services);
+        var key = new AlvoIdempotency("1", "same");
+
+        var adas = await store.CreateSharedAsync(Create(TenantId.New(), ada, []) with { Idempotency = key }, Ct);
+        var bobs = await store.CreateSharedAsync(Create(TenantId.New(), bob, []) with { Idempotency = key }, Ct);
+
+        (adas.Status, bobs.Status).ShouldBe((CreateTenantStatus.Created, CreateTenantStatus.Created));
+        bobs.Membership!.Tenant.ShouldNotBe(adas.Membership!.Tenant);
+    }
+
+    /// <summary>
+    /// The double-click: five concurrent creates with one key make one tenant, and every other answer replays it — the
+    /// account lock serialises them, and the record is read after it.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_creates_with_one_key_make_one_tenant_and_replay_it()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var person = await SignedUpAsync(services);
+            var key = new AlvoIdempotency($"click-{iteration}", "fingerprint");
+
+            var outcomes = await Task.WhenAll(Enumerable.Range(0, 5)
+                .Select(_ => store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 2) with { Idempotency = key }, Ct)));
+
+            var tenant = outcomes.Where(outcome => outcome.Status == CreateTenantStatus.Created).ShouldHaveSingleItem().Tenant;
+            outcomes.Where(outcome => outcome.Status != CreateTenantStatus.Created)
+                .ShouldAllBe(outcome => outcome.Status == CreateTenantStatus.Replayed && outcome.Tenant == tenant);
+            (await store.ListMembershipsAsync(person, Ct)).Count.ShouldBe(1, $"iteration {iteration}");
+        }
     }
 
     [Fact]
@@ -306,6 +384,183 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         (await store.FindMembershipAsync(member, tenant, Ct)).ShouldNotBeNull("the row survived the ban");
         (await accounts.SetDisabledAsync(member, disabled: true, _now.AddHours(3), Ct)).ShouldBeTrue();
         (await store.RemoveMemberAsync(Remove(tenant, owner, member), Ct)).ShouldBe(MemberChangeStatus.Changed, "an owner removes a banned member");
+    }
+
+    /// <summary>
+    /// #543: the last owner is the last <i>enabled</i> owner. A banned owner keeps the flag — enabling them restores it —
+    /// but stands in for nobody, so a co-owner cannot leave them alone in a tenant nobody could manage, nor be demoted or
+    /// removed beside them. Red before the count left banned owners out.
+    /// </summary>
+    [Fact]
+    public async Task A_co_owner_cannot_leave_a_banned_owner_alone()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TwoOwnersAsync(store, services);
+        var accounts = services.GetRequiredService<IAccountStore>();
+        (await accounts.SetDisabledAsync(ada, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+
+        (await store.RemoveMemberAsync(Remove(tenant, bob, bob), Ct)).ShouldBe(MemberChangeStatus.LastOwner, "Bob is the last enabled owner");
+
+        (await store.FindMembershipAsync(bob, tenant, Ct)).ShouldNotBeNull().IsOwner.ShouldBeTrue();
+        (await OwnersAsync(services, tenant)).ShouldBe(2, "the banned owner keeps the flag");
+        (await accounts.SetDisabledAsync(ada, disabled: false, _now.AddMinutes(40), Ct)).ShouldBeTrue();
+        (await store.RemoveMemberAsync(Remove(tenant, bob, bob), Ct))
+            .ShouldBe(MemberChangeStatus.Changed, "once Ada is enabled again she is an owner who outlasts Bob");
+    }
+
+    /// <summary>
+    /// The other side of the enabled-owner count (#543): a banned owner is no obstacle to the owner who remains — they
+    /// may be demoted or removed, since the enabled owner outlasts them.
+    /// </summary>
+    [Fact]
+    public async Task An_enabled_owner_demotes_and_removes_a_banned_co_owner()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TwoOwnersAsync(store, services);
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(ada, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+
+        (await store.UpdateMemberAsync(Update(tenant, bob, ada, roles: null, isOwner: false), Ct)).ShouldBe(MemberChangeStatus.Changed);
+        (await store.RemoveMemberAsync(Remove(tenant, bob, ada), Ct)).ShouldBe(MemberChangeStatus.Changed);
+
+        (await OwnersAsync(services, tenant)).ShouldBe(1);
+        (await store.FindMembershipAsync(bob, tenant, Ct)).ShouldNotBeNull().IsOwner.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// #543, design §2.5: an owner's removal and her ban, at once, in either order, leave one consistent state — she is
+    /// banned and gone, none of her invitations is live, and the other owner still owns. On PostgreSQL the two really
+    /// overlap; the staged deadlock itself is <c>PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks</c>.
+    /// </summary>
+    [Fact]
+    public async Task An_owner_s_removal_and_her_ban_at_once_leave_one_consistent_state()
+    {
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (store, services) = await StoreAsync();
+            var (tenant, ada, bob) = await TwoOwnersAsync(store, services);
+            await InvitedByAsync(store, tenant, ada, _now.AddMinutes(5));
+            await InvitedByAsync(store, tenant, ada, _now.AddMinutes(6));
+            var accounts = services.GetRequiredService<IAccountStore>();
+            using var start = new Barrier(2);
+
+            var outcomes = await Task.WhenAll(
+                Task.Run(
+                    async () =>
+                    {
+                        start.SignalAndWait(Ct);
+                        return await store.RemoveMemberAsync(Remove(tenant, bob, ada), Ct) == MemberChangeStatus.Changed;
+                    },
+                    Ct),
+                Task.Run(
+                    async () =>
+                    {
+                        start.SignalAndWait(Ct);
+                        return await accounts.SetDisabledAsync(ada, disabled: true, _now.AddHours(1), Ct);
+                    },
+                    Ct));
+
+            outcomes.ShouldAllBe(done => done, $"iteration {iteration}");
+            (await LiveInvitationsOfAsync(services, ada)).ShouldBe(0, $"iteration {iteration}");
+            (await store.ListMembersAsync(tenant, bob, Ct))!.Select(member => member.User).ShouldBe([bob], $"iteration {iteration}");
+        }
+    }
+
+    /// <summary>
+    /// #543's recovery: a ban leaves its sole owner's tenant with nobody who can manage it, the ban says which tenants, and
+    /// an operator makes a member — or a stranger — an owner without enabling the banned person. The new owner then manages
+    /// the tenant, the banned owner included.
+    /// </summary>
+    [Fact]
+    public async Task An_operator_makes_an_account_owner_of_a_tenant_whose_only_owner_is_banned()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TeamAsync(store, services);
+        var carol = await SignedUpAsync(services, "Carol");
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(ada, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBe([new OrphanedTenant(tenant, "Acme")]);
+
+        var promoted = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, bob, Roles: null, _now.AddHours(1)), Ct);
+        var joined = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, carol, ["dispatcher"], _now.AddHours(2)), Ct);
+
+        promoted.Status.ShouldBe(OwnershipGrantStatus.Granted);
+        Same(promoted.Membership.ShouldNotBeNull(), Membership(tenant, ["viewer"], isOwner: true, _now.AddMinutes(1)));
+        Same(joined.Membership.ShouldNotBeNull(), Membership(tenant, ["dispatcher"], isOwner: true, _now.AddHours(2)));
+        (await TenantSeed.InvitationIdOfAsync(services, tenant, carol)).ShouldBeNull("an operator's grant came through no invitation");
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBeEmpty("Bob and Carol can manage it now");
+        (await store.RemoveMemberAsync(Remove(tenant, bob, ada), Ct)).ShouldBe(MemberChangeStatus.Changed, "the new owner removes the banned one");
+    }
+
+    /// <summary>
+    /// A grant is idempotent: an owner granted again stays an owner with the roles they had, unless the grant names roles —
+    /// and it revokes nothing, so their invitations and tokens live on.
+    /// </summary>
+    [Fact]
+    public async Task Granting_an_owner_again_changes_only_the_roles_it_names()
+    {
+        var (store, services) = await StoreAsync();
+        var owner = await SignedUpAsync(services);
+        var tenant = TenantId.New();
+        (await store.CreateSharedAsync(Create(tenant, owner, ["dispatcher"]), Ct)).Status.ShouldBe(CreateTenantStatus.Created);
+        var invitation = await InvitedByAsync(store, tenant, owner, _now.AddMinutes(5));
+
+        var again = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, owner, Roles: null, _now.AddHours(1)), Ct);
+        var renamed = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, owner, ["planner"], _now.AddHours(2)), Ct);
+
+        Same(again.Membership.ShouldNotBeNull(), Membership(tenant, ["dispatcher"], isOwner: true, _now));
+        Same(renamed.Membership.ShouldNotBeNull(), Membership(tenant, ["planner"], isOwner: true, _now));
+        (await LiveInvitationsOfAsync(services, owner)).ShouldBe(1, "a grant revokes nothing");
+        invitation.ShouldNotBe(Guid.Empty);
+    }
+
+    /// <summary>
+    /// What a grant refuses, writing nothing: an unknown tenant or account, a disabled account — a banned person is never
+    /// made an owner — and a personal tenant, which has exactly one member forever.
+    /// </summary>
+    [Fact]
+    public async Task An_ownership_grant_refuses_what_it_cannot_do_and_writes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TeamAsync(store, services);
+        var banned = await SignedUpAsync(services, "Mallory");
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(banned, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+        var personal = TenantId.New();
+        await TenantSeed.AddPersonalTenantAsync(services, personal, ada, "Ada", _now);
+
+        (await GrantAsync(store, TenantId.New(), bob)).ShouldBe(OwnershipGrantStatus.NoSuchTenant);
+        (await GrantAsync(store, tenant, UserId.New())).ShouldBe(OwnershipGrantStatus.NoSuchAccount);
+        (await GrantAsync(store, tenant, banned)).ShouldBe(OwnershipGrantStatus.AccountDisabled);
+        (await GrantAsync(store, personal, bob)).ShouldBe(OwnershipGrantStatus.PersonalTenant);
+
+        (await OwnersAsync(services, tenant)).ShouldBe(1);
+        (await store.FindMembershipAsync(bob, personal, Ct)).ShouldBeNull();
+        (await VersionAsync(services, tenant)).ShouldBe(0, "every refusal rolled its bump back");
+    }
+
+    /// <summary>
+    /// The tenants a ban orphaned (#543): shared tenants the account owns where no owner's account is enabled — a co-owner
+    /// who is banned too counts for nothing — and never a tenant it only belongs to or its personal tenant. By name.
+    /// </summary>
+    [Fact]
+    public async Task The_orphaned_tenants_are_those_no_enabled_owner_can_manage()
+    {
+        var (store, services) = await StoreAsync();
+        var accounts = services.GetRequiredService<IAccountStore>();
+        var (ada, bob, carol) = (await SignedUpAsync(services), await SignedUpAsync(services), await SignedUpAsync(services));
+        var (sole, shared, bothBanned, joined) = (TenantId.New(), TenantId.New(), TenantId.New(), TenantId.New());
+        await CreateNamedAsync(store, sole, ada, "Zeta");
+        await CreateNamedAsync(store, shared, ada, "Beta");
+        await TenantSeed.AddMemberAsync(services, shared, bob, [], isOwner: true, _now);
+        await CreateNamedAsync(store, bothBanned, ada, "Alpha");
+        await TenantSeed.AddMemberAsync(services, bothBanned, carol, [], isOwner: true, _now);
+        await CreateNamedAsync(store, joined, bob, "Gamma");
+        await TenantSeed.AddMemberAsync(services, joined, ada, [], isOwner: false, _now);
+        await TenantSeed.AddPersonalTenantAsync(services, TenantId.New(), ada, "Ada", _now);
+
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBeEmpty("before any ban every tenant has an enabled owner");
+        (await accounts.SetDisabledAsync(carol, disabled: true, _now.AddMinutes(10), Ct)).ShouldBeTrue();
+        (await accounts.SetDisabledAsync(ada, disabled: true, _now.AddMinutes(20), Ct)).ShouldBeTrue();
+
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBe([new OrphanedTenant(bothBanned, "Alpha"), new OrphanedTenant(sole, "Zeta")]);
     }
 
     [Fact]
@@ -527,6 +782,32 @@ public abstract class TenantStoreFacts : IAsyncDisposable
     /// <summary>The two accounts in the order their stored ids sort.</summary>
     private protected static UserId[] Order(UserId first, UserId second) =>
         [.. new[] { first, second }.OrderBy(user => user.Value.ToString("D", CultureInfo.InvariantCulture), StringComparer.Ordinal)];
+
+    /// <summary>A live single-use invitation of <paramref name="owner"/>'s into <paramref name="tenant"/>, created at <paramref name="now"/>.</summary>
+    private protected static async Task<Guid> InvitedByAsync(ITenantStore store, TenantId tenant, UserId owner, DateTimeOffset now)
+    {
+        var request = new CreateInvitationRequest(
+            Guid.NewGuid(), tenant, owner, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"), [], GrantsOwner: false,
+            null, 1, now.AddDays(7), now);
+        (await store.CreateInvitationAsync(request, Ct)).Status.ShouldBe(MemberChangeStatus.Changed);
+        return request.Id;
+    }
+
+    /// <summary>A grant of ownership of <paramref name="tenant"/> to <paramref name="account"/>, keeping roles; its status.</summary>
+    private protected static async Task<OwnershipGrantStatus> GrantAsync(ITenantStore store, TenantId tenant, UserId account) =>
+        (await store.GrantOwnershipAsync(new OwnershipGrant(tenant, account, Roles: null, _now.AddHours(1)), Ct)).Status;
+
+    /// <summary>Creates a shared tenant named <paramref name="name"/> owned by <paramref name="creator"/>.</summary>
+    private protected static async Task CreateNamedAsync(ITenantStore store, TenantId tenant, UserId creator, string name) =>
+        (await store.CreateSharedAsync(new CreateTenantRequest(tenant, name, creator, [], 5, _now), Ct)).Status
+            .ShouldBe(CreateTenantStatus.Created);
+
+    /// <summary>How many live invitations <paramref name="creator"/> created.</summary>
+    protected static async Task<long> LiveInvitationsOfAsync(IServiceProvider services, UserId creator) => Convert.ToInt64(
+        await ScalarAsync(
+            services,
+            $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} WHERE created_by = '{creator.Value:D}' AND revoked_at IS NULL"),
+        CultureInfo.InvariantCulture);
 
     /// <summary>How many owners <paramref name="tenant"/> has.</summary>
     protected static async Task<long> OwnersAsync(IServiceProvider services, TenantId tenant) => Convert.ToInt64(

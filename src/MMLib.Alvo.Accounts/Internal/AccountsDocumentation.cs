@@ -87,6 +87,10 @@ internal static partial class AccountsDocumentation
             ? [new() { [new OpenApiSecuritySchemeReference(AlvoDocumentTransformer.BearerScheme, document)] = [] }]
             : null;
         DescribeParameters(operation);
+        if (spec.IdempotencyKey)
+        {
+            operation.Parameters = [.. operation.Parameters ?? [], IdempotencyKeyParameter()];
+        }
     }
 
     private static OpenApiResponses TokenResponses(OpenApiDocument document) => Answers(
@@ -143,7 +147,7 @@ internal static partial class AccountsDocumentation
     {
         var (status, response) = Refusal(
             "429",
-            "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:Token` allows. "
+            "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:TokenEndpoint` allows. "
             + "Wait for `Retry-After`, then send the request again.",
             document);
         response.Headers!["Retry-After"] = Header("Whole seconds until the window admits this client again.", "60");
@@ -192,11 +196,28 @@ internal static partial class AccountsDocumentation
         Example = example is null ? null : System.Text.Json.Nodes.JsonValue.Create(example),
     };
 
+    /// <summary>
+    /// The optional <c>Idempotency-Key</c> header of the one <c>/auth/v1</c> write that honours it, <c>POST /tenants</c>
+    /// (#542 item 5); minting a token and creating an invitation do not, because their answer carries a secret shown once.
+    /// </summary>
+    private static OpenApiParameter IdempotencyKeyParameter() => new()
+    {
+        Name = DataApiEndpoints.IdempotencyKeyHeader,
+        In = ParameterLocation.Header,
+        Required = false,
+        Description =
+            "Makes the creation retry-safe: recorded with the tenant under the person's own scope, so a retry with the same "
+            + "key and name answers the tenant the first create made and creates nothing. At most one header line, not "
+            + "blank, and within the API's byte bound, or 422.",
+        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+    };
+
     private sealed record Operation(
         string Summary,
         string Description,
         bool Bearer,
         Func<OpenApiDocument, OpenApiRequestBody?> Body,
         Func<OpenApiDocument, OpenApiResponses> Responses,
-        string Tag = AccountsEndpoints.Tag);
+        string Tag = AccountsEndpoints.Tag,
+        bool IdempotencyKey = false);
 }

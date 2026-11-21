@@ -37,6 +37,9 @@ internal sealed class HookRun(
     /// </summary>
     internal IReadOnlySet<string> Derived { get; init; } = new HashSet<string>(StringComparer.Ordinal);
 
+    /// <summary>What the run's first call through the transaction does before it runs — the cold-start check (#519).</summary>
+    internal Action? FirstCall { get; init; }
+
     internal HookRejections Rejections { get; } = new(id, pointable);
 
     internal IReadOnlyDictionary<string, object?> Sets
@@ -82,7 +85,16 @@ internal sealed class HookRun(
         }
     }
 
-    internal int Count() => Interlocked.Increment(ref _operations);
+    internal int Count()
+    {
+        var count = Interlocked.Increment(ref _operations);
+        if (count == 1)
+        {
+            FirstCall?.Invoke();
+        }
+
+        return count;
+    }
 
     /// <summary>Hands the hook <paramref name="view"/> — the counted, token-bound view of the write's transaction — in place of the raw one.</summary>
     internal void Attach(IAlvoTransaction view) => Transaction = view;

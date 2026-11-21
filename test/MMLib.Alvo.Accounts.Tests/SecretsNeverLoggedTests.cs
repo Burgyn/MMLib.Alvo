@@ -101,7 +101,7 @@ public sealed class SecretsNeverLoggedTests
     [Fact]
     public async Task No_app_token_secret_appears_in_any_log()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Create = 6);
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.ApiTokens = 6);
         var secrets = new Secrets();
         var (ada, _) = await SignedInAsync(world, secrets, "ada");
         var acme = await AcmeAsync(world, ada);
@@ -483,7 +483,7 @@ public sealed class SecretsNeverLoggedTests
                 $"/management/projects/time-tracker/accounts/{new JsonWebToken(live).Subject}/disabled",
                 AccountsWorld.Operator,
                 body: new JsonObject { ["disabled"] = true }),
-            HttpStatusCode.NoContent);
+            HttpStatusCode.OK);
         await ExpectAsync(world.AsPersonAsync(HttpMethod.Get, Entries, live), HttpStatusCode.Unauthorized);
         await ExpectAsync(world.ExchangeAsync(secrets.Jwt(world.IdToken("bob"))), HttpStatusCode.Forbidden);
     }
