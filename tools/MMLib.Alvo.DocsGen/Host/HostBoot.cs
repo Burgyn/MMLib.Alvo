@@ -56,15 +56,62 @@ internal static class HostBoot
 
     internal static Guid UserOf(string keyId) => new(SHA256.HashData(Encoding.UTF8.GetBytes(keyId)).AsSpan(0, 16));
 
-    internal static void DeleteWorkDirectory(DirectoryInfo work)
+    internal const int DeleteAttempts = 10;
+
+    private static readonly TimeSpan _deleteRetryDelay = TimeSpan.FromMilliseconds(200);
+
+    internal static void DeleteWorkDirectory(DirectoryInfo work) =>
+        DeleteWorkDirectory(work, static directory => directory.Delete(recursive: true), _deleteRetryDelay);
+
+    /// <summary>Deletes a booted host's work directory, which holds its SQLite file.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only this host's pool, never <see cref="SqliteConnection.ClearAllPools"/></b> (#547). The DocsGen suites boot
+    /// several hosts in parallel, and clearing every pool in the process disposes the SQLite handle of a connection
+    /// another host is <em>opening</em> — popped from its pool, not yet bound to its owner — under the thread about to use
+    /// it (the reasoning <c>AlvoHostWorld.TryDeleteDatabase</c> records). The pools that hold this file are keyed by the
+    /// exact string <see cref="ConnectionStringFor"/> gave the host, so clearing that one releases every pooled handle to it.
+    /// </para>
+    /// <para>
+    /// <b>A bounded retry, because Windows refuses to delete an open file and POSIX does not.</b> A handle can outlive the
+    /// call that released it there, and a virus scanner or the search indexer can open a file the moment it was written;
+    /// <c>AccountsReferenceTests</c> met exactly that on the Windows leg, intermittently, before and after #547. A holder
+    /// that never lets go still fails the run, with the last refusal.
+    /// </para>
+    /// </remarks>
+    /// <param name="work">The work directory.</param>
+    /// <param name="delete">One delete attempt; a test's own stands in for the file system's.</param>
+    /// <param name="retryDelay">The pause between attempts.</param>
+    internal static void DeleteWorkDirectory(DirectoryInfo work, Action<DirectoryInfo> delete, TimeSpan retryDelay)
     {
-        SqliteConnection.ClearAllPools();
-        work.Refresh();
-        if (work.Exists)
+        ClearThisHostsPool(work);
+        for (var attempt = 1; ; attempt++)
         {
-            work.Delete(recursive: true);
+            work.Refresh();
+            if (!work.Exists)
+            {
+                return;
+            }
+
+            try
+            {
+                delete(work);
+                return;
+            }
+            catch (IOException) when (attempt < DeleteAttempts)
+            {
+                Thread.Sleep(retryDelay);
+            }
         }
     }
+
+    private static void ClearThisHostsPool(DirectoryInfo work)
+    {
+        using var connection = new SqliteConnection(ConnectionStringFor(work.FullName));
+        SqliteConnection.ClearPool(connection);
+    }
+
+    private static string ConnectionStringFor(string workDirectory) => $"Data Source={Path.Combine(workDirectory, "alvo.db")}";
 
     private static async Task<WebApplication> BuildAsync(Dictionary<string, string?> settings)
     {
@@ -95,7 +142,7 @@ internal static class HostBoot
         {
             ["Alvo:DescriptorPath"] = descriptorPath,
             ["Alvo:Database:Provider"] = "sqlite",
-            ["Alvo:Database:SqliteConnectionString"] = $"Data Source={Path.Combine(workDirectory, "alvo.db")}",
+            ["Alvo:Database:SqliteConnectionString"] = ConnectionStringFor(workDirectory),
         };
         var ordinal = 0;
         foreach (var (id, key) in keys.OrderBy(pair => pair.Key, StringComparer.Ordinal))
