@@ -768,7 +768,7 @@ only an audited entity has, so `jobs` gains `"audit": true` — leave it out and
   "providers": ["google"],
   "roles": ["dispatcher", "technician", "owner"],
   "signUp": { "mode": "open" },
-  "accessTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }
+  "apiTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }
 },
 …
 "jobs": { "tenancy": "scoped", "audit": true, … }
@@ -776,8 +776,8 @@ only an audited entity has, so `jobs` gains `"audit": true` — leave it out and
 
 Every token expires, and `maxLifetimeDays` (1–365, default 90) is the furthest ahead its `expiresAt` may be. A service
 token needs a shared tenant to act as, so **apply refuses `"service": true` without `tenancy.selfService.createTenants`**,
-at `/auth/accessTokens/service` (D8). `personal` needs nothing else. At level 1 (`time-tracker` with
-`"accessTokens": { "personal": true }`) a personal token minted without a tenant acts as its person in no tenant, and
+at `/auth/apiTokens/service` (D8). `personal` needs nothing else. At level 1 (`time-tracker` with
+`"apiTokens": { "personal": true }`) a personal token minted without a tenant acts as its person in no tenant, and
 `created_by == @user.id` keeps it to that person's rows, as it keeps their session.
 
 Ada mints with her session. `$ADA` is her access token, and `3c…` is Acme's id from `GET /auth/v1/tenants`.
@@ -865,7 +865,7 @@ section as tests, on SQLite and on PostgreSQL.
   route — those take a person's Bearer token alone, so a token there is 401 with the bare `Bearer` challenge (#542) — and
   the Management API, whose scheme it does use, refuses it with 403 even when its roles would pass an `access` level
   (D9, which closes S1 D8).
-- **The descriptor decides on every request** (D11). Remove `accessTokens` or switch one kind off, and the next request
+- **The descriptor decides on every request** (D11). Remove `apiTokens` or switch one kind off, and the next request
   of every token of that kind is 401. Remove `selfService` — apply then needs `service` off too (D8) — and so is every
   service token's and every personal token's in a tenant, since no membership counts any more, while a tenantless
   personal token keeps working. Switch it back on and
@@ -946,10 +946,10 @@ deliveries keep the tenant roles recorded at the event, bounded by `assignableRo
 
 All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
 other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (none, or any `X-Alvo-Api-Key`, a
-token included → 401 `Bearer`; a key beside a Bearer → 401 `invalid_request`); `auth.accessTokens`
+token included → 401 `Bearer`; a key beside a Bearer → 401 `invalid_request`); `auth.apiTokens`
 (404 `feature-disabled`); then, for `POST`, whether this host would ever resolve a token (the same 404, with a sentence
 naming a replaced `IApiKeyStore`), the JSON body (415, then 422), the kind's own switch (404
-`feature-disabled` naming `auth.accessTokens.personal` or `.service`), the person's membership of the named tenant, and
+`feature-disabled` naming `auth.apiTokens.personal` or `.service`), the person's membership of the named tenant, and
 the registry.
 
 | Route | Who | Answers |
@@ -1002,9 +1002,9 @@ Three behaviours, recorded so they read as decisions:
 | An unusable token is any key's 401 — a wrong secret (constant time, dummy hash), expired, revoked — decided before any membership read | `AppTokenResolutionTests.A_wrong_secret_is_refused_like_an_unknown_id`, `…An_expired_or_revoked_token_is_refused_before_any_membership_read`; `AppTokenManagementTests.An_unusable_app_token_is_401_like_any_key`; `TokenRoutesTests.Revoking_kills_the_token_on_its_next_request` |
 | The prefix means a persisted app token: dev keys may not use it; a prefixed id never reaches the dev keys, nor an unprefixed one the registry | `AlvoAuthOptionsValidatorTests.A_dev_key_with_a_reserved_prefix_is_refused`; `ApiKeyStoresTests.A_prefixed_id_never_reaches_the_dev_keys_and_an_unprefixed_one_never_the_registry`, `…Without_a_registry_an_app_token_is_unknown`; `AppTokenSecretTests.Kind_of_a_key_id` |
 | The secret is 256 bits, stored as its hash, answered once, and never in a URL, a list, a refusal, a `ToString` or a log (spec §14 AC6) | `AppTokenSecretTests`; `AppTokenResponseTests`; `TokenRoutesTests.The_list_shows_my_tokens_and_my_tenants_service_tokens_never_a_secret`; `AccountsOpenApiTests.The_token_route_is_in_the_document_once_and_only_its_201_carries_the_credential`, `…The_token_list_and_revoke_are_in_the_document_once_and_take_no_secret`; `AppTokenRequestTests.No_violation_echoes_what_was_sent`; `SecretsNeverLoggedTests.No_app_token_secret_appears_in_any_log` (the credential whole, its secret and its hash, at Trace; red when the resolver logs the presented key), `…No_error_body_echoes_a_presented_token` |
-| Default-deny: without `accessTokens` every token route is 404 naming its key, and a kind switched off is 404 naming its own; apply refuses `service` without `createTenants` | `TokenRoutesTests.Without_access_tokens_every_route_is_404_naming_its_key`, `…A_kind_switched_off_is_404_naming_its_key`, `…Without_access_tokens_list_and_revoke_are_404_naming_its_key`; `AccessTokensCheckTests.Service_tokens_without_self_service_are_refused`, `…Service_tokens_without_create_tenants_are_refused`; `AppTokenPolicyTests` |
+| Default-deny: without `apiTokens` every token route is 404 naming its key, and a kind switched off is 404 naming its own; apply refuses `service` without `createTenants` | `TokenRoutesTests.Without_api_tokens_every_route_is_404_naming_its_key`, `…A_kind_switched_off_is_404_naming_its_key`, `…Without_api_tokens_list_and_revoke_are_404_naming_its_key`; `ApiTokensCheckTests.Service_tokens_without_self_service_are_refused`, `…Service_tokens_without_create_tenants_are_refused`; `AppTokenPolicyTests` |
 | Every bound of the body is refused at its pointer: scopes without a wildcard and only declared entities, listed in the refusal; expiry at most `maxLifetimeDays` ahead | `AppTokenRequestTests.Each_bound_is_refused_at_its_pointer`, `…An_unknown_entity_is_refused_with_the_descriptor_s_entities`, `…Exactly_max_lifetime_is_accepted`; `TokenRoutesTests.An_invalid_body_is_422_and_stores_nothing` |
-| A token is minted only where it would resolve: a host that replaced the `IApiKeyStore` gets the `feature-disabled` 404 naming `auth.accessTokens` and stores nothing; a host that decorates it keeps minting, and the token works | `AppTokenReachTests.A_host_that_replaced_the_api_key_store_is_refused_the_mint`, `…A_host_that_decorates_the_api_key_store_keeps_minting_and_its_tokens_resolve`; `ApiKeyStoresTests.The_reach_probe_is_answered_only_with_a_registry_and_is_never_a_key` |
+| A token is minted only where it would resolve: a host that replaced the `IApiKeyStore` gets the `feature-disabled` 404 naming `auth.apiTokens` and stores nothing; a host that decorates it keeps minting, and the token works | `AppTokenReachTests.A_host_that_replaced_the_api_key_store_is_refused_the_mint`, `…A_host_that_decorates_the_api_key_store_keeps_minting_and_its_tokens_resolve`; `ApiKeyStoresTests.The_reach_probe_is_answered_only_with_a_registry_and_is_never_a_key` |
 | Minting shares the `Create` budget with tenant creation | `TokenRoutesTests.Minting_answers_429_after_the_create_budget_and_shares_it_with_tenant_creation` |
 | `lastUsedAt` is minute-grained, and its write never fails a request | `ApiKeyStoresTests.App_token_touches_are_throttled_to_one_a_minute`; `TokenRoutesTests.Last_used_is_recorded_within_a_minute`; `AppTokenResolutionTests.A_failed_last_used_write_never_fails_a_request_whose_token_is_valid` |
 | One person shape and one key for a creator (#542 item 1): an invitation and a token name theirs as `createdBy: { id, name }` — the name as it reads now, `null` when there is none — the mint's 201 is its list item plus the credential, and the anonymous preview names the creator by name alone | `InvitationStoreFacts.An_invitation_names_its_creator_by_their_current_display_name` (both engines); `AppTokenResponseTests.A_minted_token_answers_its_list_item_with_the_credential_and_its_header`, `…A_person_without_a_display_name_is_named_null_and_the_preview_never_names_an_id`; `InvitationRoutesTests.An_owner_invites_and_the_code_is_answered_once`; `InvitationAcceptTests.Anyone_holding_the_code_previews_it_without_signing_in` |
@@ -1018,7 +1018,9 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
   `/api/tokens` would collide with an entity named `tokens`, and minting needs a person's session, which exists only
   where sign-in is mapped. No TeaPie path pin moves.
 - **D2** — "app token" is the code's word for a personal or service token; no type is named `AccessToken*`
-  (`AccessTokens` is already the JWT issuer); only the descriptor key keeps the spec's `auth.accessTokens`.
+  (`AccessTokens` is already the JWT issuer). The descriptor key was the spec's `auth.accessTokens` until #542 renamed it
+  `auth.apiTokens` — the OAuth access token had the name first, and the credential travels as an API key; the code keeps
+  "app token" (a rename of the internal vocabulary was not asked for).
   **Deviation from the plan's names:** the route types are `AppTokenRequest`, `AppTokenResponse`, `AppTokenProblems`
   and `AppTokenListItem`, not `TokenRequest`/`TokenResponse`/`TokenProblems`/`TokenListItem`.
   `MMLib.Alvo.Accounts.Internal` already has the OAuth token endpoint's `TokenResponse` and `TokenProblems`, and a file
@@ -1028,7 +1030,7 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
 - **D4** — one `IApiKeyStore`, two homes: `ApiKeyStores` routes a prefixed id to the registry and every other id to the
   dev keys, registered with `TryAddSingleton`. A host that wants its own key store **decorates** Alvo's registration
   rather than replacing it, and tokens keep resolving; a host that replaces it owns key resolution entirely, and its
-  `POST /tokens` answers 404 `feature-disabled` naming `auth.accessTokens` and the cause instead of minting a token
+  `POST /tokens` answers 404 `feature-disabled` naming `auth.apiTokens` and the cause instead of minting a token
   nothing would accept (`host.md`). `last_used_at` is written at most once a minute per token per replica.
 - **D5** — the resolution order above; a personal token in a tenant costs two reads. **Corrected from the plan's
   listing**, which judged the kind before `TenantResolver`: the code resolves the tenant first and judges the kind
@@ -1057,11 +1059,11 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
 - **D15** — minting is charged `Alvo:Api:RateLimits:Create`, the budget `POST /tenants` already draws on (spec §7.3).
   One budget for both, recorded; listing and revoking are not charged.
 - **D16** — public growth is exactly `ApiKeyKind`, `ApiKeyRecord.Kind`, `ApiKeyRecord.MintedBy`, `Auth.AccessTokens` and
-  `AuthAccessTokens`. No new problem type.
+  `AuthApiTokens`. No new problem type.
 
 And where the implementation answered differently from the plan's first wording, or a test had to look further:
 
-- **Minting first asks whether the token would ever resolve** (Task 9 review): right after the `auth.accessTokens` gate,
+- **Minting first asks whether the token would ever resolve** (Task 9 review): right after the `auth.apiTokens` gate,
   `AppTokenReach` asks the resolved `IApiKeyStore` for a reserved probe id (`alvo_pat_~reach`, outside base64url, so no
   minted id equals it), which `ApiKeyStores` answers itself with a dead record while it has a registry. A decorator
   passes it through; a replacement does not, and the mint is the `feature-disabled` 404. Not a boot refusal: the
@@ -1103,7 +1105,7 @@ And where the implementation answered differently from the plan's first wording,
 - A settled `/auth/v1` contract before v0.1: ~~one name per thing, one answer for the wrong kind of credential~~ (both
   done in #542: `createdBy: { id, name }` everywhere, and a 401 Bearer challenge for any API key on a person-only route),
   the rate-limit keys (`RateLimits:Create` also charges `POST /tokens`, `RateLimits:Token` is the OAuth endpoint), the
-  `auth.accessTokens` name, and `Idempotency-Key` on `POST /tenants`, `…/invitations` and `/tokens`:
+  `auth.apiTokens` name, and `Idempotency-Key` on `POST /tenants`, `…/invitations` and `/tokens`:
   [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542).
 - The field-service demo, its TeaPie suite, the users' guides and the descriptor skill — S6, [below](#the-demo-s6).
 

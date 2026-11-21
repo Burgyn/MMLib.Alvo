@@ -280,13 +280,13 @@ Scrutor's `Decorate<IApiKeyStore, …>()`) and delegates the ids it does not own
 working. A host that *replaces* the registration owns key resolution entirely: its store is the only one asked, it never
 reaches the token registry (whose port is internal), and no token can resolve there. Such a host's
 `POST /auth/v1/tokens` therefore refuses rather than mints — 404 `feature-disabled`, `descriptorKey`
-`auth.accessTokens`, with a fixed sentence naming the replaced store — because the route first asks the resolved store
+`auth.apiTokens`, with a fixed sentence naming the replaced store — because the route first asks the resolved store
 for a reserved probe id, **`alvo_pat_~reach`**, that only Alvo's routing store answers (with a dead record: revoked,
 expired, and a hash no secret matches — never a usable key). **A decorator owes that lookup one thing: pass it through
 to the inner store unchanged and return the inner store's answer as it came** — do not answer unknown `alvo_pat_…` ids
 itself, filter ids by shape, or rebuild the record. A decorator that returns a changed copy, or nothing, is judged a
 replacement, and the mint fails closed with the same `feature-disabled` refusal. It is a route refusal, not a boot one:
-a host that replaces the store and never turns `auth.accessTokens` on is legitimate. A store that issues its own ids under
+a host that replaces the store and never turns `auth.apiTokens` on is legitimate. A store that issues its own ids under
 the reserved `alvo_pat_`/`alvo_svc_` prefixes is refused the same way by the Management API and by `.WithAlvoCaller()`
 endpoints, which judge any principal whose key id carries a prefix an app token: the prefixes are Alvo's.
 

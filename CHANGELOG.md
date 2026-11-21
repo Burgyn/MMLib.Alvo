@@ -669,6 +669,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **`auth.accessTokens` is now `auth.apiTokens`** (#542 item 4, decided by the maintainer). The block that switches on
+  personal and service tokens kept OAuth's name for a different thing: Alvo issues real OAuth access tokens at
+  `POST /auth/v1/token`, while these tokens are API keys sent in `X-Alvo-Api-Key`. The keys inside (`personal`,
+  `service`, `maxLifetimeDays`) are unchanged. A descriptor still using `auth.accessTokens` is refused by the schema;
+  rename the key. `feature-disabled`'s `descriptorKey` is now `auth.apiTokens`, `auth.apiTokens.personal` or
+  `auth.apiTokens.service`, and the apply refusal points at `/auth/apiTokens/service`. **Public API:**
+  `Auth.AccessTokens` → `Auth.ApiTokens`, `AuthAccessTokens` → `AuthApiTokens`. `AlvoAccountsOptions.AccessTokenMinutes`
+  and the token response's `access_token` keep their names: they are the OAuth access token.
 - **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
   as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
   the person has none:
