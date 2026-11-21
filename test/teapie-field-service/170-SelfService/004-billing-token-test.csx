@@ -28,6 +28,10 @@ await tp.Test("A service token answers its secret once, the header it goes in, a
     Equal(Constant("AcmeId"), billing.GetProperty("tenantId").GetString());
     Equal(new[] { "dispatcher" }, Texts(billing.GetProperty("roles")));
     Equal(new[] { "work_orders:read" }, Texts(billing.GetProperty("scopes")));
+    // The mint answers what the list will show, plus the credential (#542): Dana as its creator, active, never used.
+    Equal(Constant("DanaId"), billing.GetProperty("createdBy").GetProperty("id").GetString());
+    Equal("active", billing.GetProperty("status").GetString());
+    Equal(JsonValueKind.Null, billing.GetProperty("lastUsedAt").ValueKind);
     True(response.Headers.CacheControl?.NoStore ?? false, "a minted secret must answer Cache-Control: no-store");
 });
 
@@ -72,8 +76,8 @@ await tp.Test("Dana's token list names billing, minted by her and active — and
     Equal("billing", billing.GetProperty("name").GetString());
     Equal("service", billing.GetProperty("kind").GetString());
     Equal("active", billing.GetProperty("status").GetString());
-    Equal(Constant("DanaId"), billing.GetProperty("mintedBy").GetProperty("id").GetString());
-    Equal(tp.GetVariable<string>("DanaName"), billing.GetProperty("mintedBy").GetProperty("displayName").GetString());
+    Equal(Constant("DanaId"), billing.GetProperty("createdBy").GetProperty("id").GetString());
+    Equal(tp.GetVariable<string>("DanaName"), billing.GetProperty("createdBy").GetProperty("name").GetString());
 
     foreach (var token in tokens)
     {
