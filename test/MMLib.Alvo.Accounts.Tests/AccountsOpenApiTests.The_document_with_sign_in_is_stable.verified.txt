@@ -682,7 +682,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`; or, on a creation, `Idempotency-Key` is sent twice, blank or too long.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`. `malformed-query`: `Idempotency-Key` is sent twice, blank or too long — the Data API's answer for the same header.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -868,7 +868,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`; or, on a creation, `Idempotency-Key` is sent twice, blank or too long.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -1335,7 +1335,7 @@
           "tenants"
         ],
         "summary": "Invite someone into a tenant",
-        "description": "An owner of a shared tenant creates an invitation: the tenant roles it grants (each from `tenancy.selfService.assignableRoles`), whether it makes an owner, an optional email it is bound to, how many people may accept it and when it expires. The answer carries its `code` — shown this once, never again.",
+        "description": "An owner of a shared tenant creates an invitation: the tenant roles it grants (each from `tenancy.selfService.assignableRoles`), whether it makes an owner, an optional email it is bound to, how many people may accept it and when it expires. The answer carries its `code` — shown this once, never again.\n\n**`Idempotency-Key` is refused here (422 `malformed-query`):** the code is kept only as a hash, so no retry could return it. If an answer is lost, list the tenant's invitations, revoke the one you cannot account for and create a new one.",
         "operationId": "tenants.createInvitation",
         "parameters": [
           {
@@ -1482,7 +1482,7 @@
             }
           },
           "422": {
-            "description": "`validation`: `roles` is missing or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` or is named twice; `maxUses` is not 1–100; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most 30 days away; `email` is not one address; an owner-making invitation admits more than one person or lives longer than 7 days; or the body carries another property.",
+            "description": "`validation`: `roles` is missing or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` or is named twice; `maxUses` is not 1–100; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most 30 days away; `email` is not one address; an owner-making invitation admits more than one person or lives longer than 7 days; or the body carries another property. `malformed-query`: `Idempotency-Key` was sent, which creating an invitation does not honour.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2137,7 +2137,7 @@
           "tokens"
         ],
         "summary": "Mint a personal or service token",
-        "description": "A signed-in person mints a token for an integration. A `personal` token acts as the person — with the tenant roles they hold, read on every request — in one tenant or none; a `service` token acts as a tenant the person owns, with roles the person holds there, and only in shared tenants. On the generated Data API and on a command bound to an entity, a token reaches only the `scopes` named (`<entity>:read` or `<entity>:write`, never `*`); a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or mints a token.",
+        "description": "A signed-in person mints a token for an integration. A `personal` token acts as the person — with the tenant roles they hold, read on every request — in one tenant or none; a `service` token acts as a tenant the person owns, with roles the person holds there, and only in shared tenants. On the generated Data API and on a command bound to an entity, a token reaches only the `scopes` named (`<entity>:read` or `<entity>:write`, never `*`); a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or mints a token.\n\n**`Idempotency-Key` is refused here (422 `malformed-query`):** the secret is kept only as a hash, so no retry could return it. If an answer is lost, list your tokens (`GET /tokens`), revoke the one you never received (`DELETE /tokens/{keyId}`) and mint again.",
         "operationId": "tokens.create",
         "requestBody": {
           "description": "The token to mint.",
@@ -2272,7 +2272,7 @@
             }
           },
           "422": {
-            "description": "`validation`: `name`, `kind`, `scopes` or `expiresAt` is missing or out of bounds; `tenantId` is missing for a service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body carries another property.",
+            "description": "`validation`: `name`, `kind`, `scopes` or `expiresAt` is missing or out of bounds; `tenantId` is missing for a service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body carries another property. `malformed-query`: `Idempotency-Key` was sent, which minting does not honour.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",

@@ -177,7 +177,7 @@ internal static partial class AccountsDocumentation
                 + "`idempotency-conflict`: the person already spent this `Idempotency-Key` on a creation with another name.",
                 document),
             Unsupported(document),
-            Invalid(document),
+            Invalid(document, keyed: true),
             CreateRateLimited(document));
     }
 
@@ -220,9 +220,13 @@ internal static partial class AccountsDocumentation
     private static (string, OpenApiResponse) Unsupported(OpenApiDocument document)
         => TenantRefusal("415", "`unsupported-media-type`: the body is not `application/json`.", document);
 
-    private static (string, OpenApiResponse) Invalid(OpenApiDocument document) => TenantRefusal(
-        "422", "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`; "
-        + "or, on a creation, `Idempotency-Key` is sent twice, blank or too long.", document);
+    private static (string, OpenApiResponse) Invalid(OpenApiDocument document, bool keyed = false) => TenantRefusal(
+        "422",
+        "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`."
+        + (keyed
+            ? " `malformed-query`: `Idempotency-Key` is sent twice, blank or too long — the Data API's answer for the same header."
+            : string.Empty),
+        document);
 
     private static (string, OpenApiResponse) CreateRateLimited(OpenApiDocument document)
     {

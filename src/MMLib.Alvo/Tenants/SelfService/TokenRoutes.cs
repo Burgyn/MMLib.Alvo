@@ -41,6 +41,11 @@ internal static class TokenRoutes
             return refusal!;
         }
 
+        if (ShownOnceKey.Refusal(http.Request, ShownOnceKey.TokensDetail) is { } keyed)
+        {
+            return keyed;
+        }
+
         if (await AppTokenReach.RefusalAsync(http, call.Ct).ConfigureAwait(false) is { } unreachable)
         {
             return unreachable;

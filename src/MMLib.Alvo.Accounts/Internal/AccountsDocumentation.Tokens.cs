@@ -21,7 +21,10 @@ internal static partial class AccountsDocumentation
             + "a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom "
             + "endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential "
             + "in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or "
-            + "mints a token.",
+            + "mints a token.\n\n"
+            + "**`Idempotency-Key` is refused here (422 `malformed-query`):** the secret is kept only as a hash, so no retry "
+            + "could return it. If an answer is lost, list your tokens (`GET /tokens`), revoke the one you never received "
+            + "(`DELETE /tokens/{keyId}`) and mint again.",
             Bearer: true,
             document => Body("application/json", AccountsSchemas.AppTokenRequestId, "The token to mint.", document),
             CreateTokenResponses,
@@ -100,7 +103,7 @@ internal static partial class AccountsDocumentation
             + "names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a "
             + "scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 "
             + "instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body "
-            + "carries another property.",
+            + "carries another property. `malformed-query`: `Idempotency-Key` was sent, which minting does not honour.",
             document),
         TokenRateLimited(document));
 

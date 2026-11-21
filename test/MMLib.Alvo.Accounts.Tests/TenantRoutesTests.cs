@@ -184,6 +184,7 @@ public sealed class TenantRoutesTests
             HttpMethod.Post, Tenants, body: new JsonObject { ["name"] = "Acme" }, headers: [new("Authorization", $"Bearer {access}"), .. keys]);
 
         refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery, "the Data API's answer for the same header");
         (await world.MembershipsAsync(access)).ShouldNotContain(membership => membership!["kind"]!.GetValue<string>() == "shared");
     }
 

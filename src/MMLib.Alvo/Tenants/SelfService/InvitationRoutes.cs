@@ -42,6 +42,11 @@ internal static class InvitationRoutes
             return refusal!;
         }
 
+        if (ShownOnceKey.Refusal(http.Request, ShownOnceKey.InvitationsDetail) is { } keyed)
+        {
+            return keyed;
+        }
+
         var (request, invalid) = await call.ReadAsync(
             (body, options, ct) => InvitationRequest.ReadAsync(body, options, call.Policy, call.Now, ct)).ConfigureAwait(false);
         if (request is null)

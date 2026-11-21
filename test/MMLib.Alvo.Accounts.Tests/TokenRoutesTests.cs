@@ -109,6 +109,28 @@ public sealed class TokenRoutesTests
         (await team.World.Store.GetAccountAsync(new UserId(author), Ct)).ShouldBeNull("a service token is no account");
     }
 
+    /// <summary>
+    /// #542 item 5: minting does not honour <c>Idempotency-Key</c> — the secret is shown once — and a key sent anyway is
+    /// refused at 422 <c>malformed-query</c> with the fix, never silently ignored: a retried mint must not quietly leave a
+    /// second live secret behind.
+    /// </summary>
+    [Fact]
+    public async Task An_idempotency_key_is_refused_and_mints_nothing()
+    {
+        await using var team = await TeamAsync();
+
+        using var refused = await team.World.Api.SendAsync(
+            HttpMethod.Post,
+            Tokens,
+            body: Personal(team, team.Tenant),
+            headers: [new("Authorization", $"Bearer {team.Ada}"), new("Idempotency-Key", "mint-1")]);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery);
+        (await refused.ReadProblemDetailAsync()).ShouldContain("revoke");
+        (await team.World.CountAsync("_api_keys")).ShouldBe(0);
+    }
+
     [Fact]
     public async Task A_token_cannot_mint_a_token()
     {
