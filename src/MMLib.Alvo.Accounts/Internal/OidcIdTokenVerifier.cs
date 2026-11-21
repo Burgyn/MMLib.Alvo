@@ -26,20 +26,41 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// <c>aud: [another-app, ours]</c> for another relying party, and that token must not sign anyone in here.
 /// </para>
 /// <para>
-/// <b>Deviation: <c>azp</c> is not checked.</b> OIDC Core errata set 2 reworded §3.1.3.7 items 4–5 so that <c>azp</c> is
-/// validated only as the extension that introduced it says. Google's documented server-side check is
-/// <c>aud</c> alone, and an Android or iOS sign-in carries the mobile client's id in <c>azp</c> while <c>aud</c> names the
-/// web client the backend configured; requiring it would refuse Google's own mobile flow.
+/// <b>An <c>azp</c>, when present, must be a configured client id too</b> (#544; §3.1.3.7 item 5, "the Client SHOULD
+/// verify that its client_id is the Claim Value", read as the set of client ids this deployment configures — web, iOS,
+/// Android — since Alvo is one relying party fronting several OAuth clients). <c>aud</c> alone is not enough for Google: a
+/// Google Cloud service account can mint an ID token whose <c>aud</c> it chooses freely, ours included, signed by Google;
+/// its <c>azp</c> is the service account's own numeric id, so under <c>signUp: open</c> any GCP project could create
+/// accounts by script. A person's token carries the OAuth client they signed in through in <c>azp</c>, which a mobile app's
+/// configuration lists beside the web client. <b>An absent <c>azp</c> requires a single <c>aud</c></b> (§3.1.3.7 item 4,
+/// "If the ID Token contains multiple audiences, the Client SHOULD verify that an azp Claim is present"); otherwise it
+/// changes nothing, and a single-audience token with no <c>azp</c> still passes on <c>aud</c> alone — what closes the
+/// service-account hole is that Google puts an <c>azp</c> in every such token. An empty string or JSON <c>null</c> is
+/// refused, never read as absent; a number or an array never gets here — IdentityModel reads <c>azp</c> as a string and
+/// refuses the token as malformed. This withdraws the S2 plan's recorded deviation ("<c>azp</c> is not checked") and
+/// implements option A of the hardening design's §4.6 (ruling Q8).
 /// </para>
 /// <para>
-/// <b>Nothing about the token is logged</b>: a refusal is a value, the one log line (an unreachable provider) names the
-/// provider and its authority, and IdentityModel's PII switch stays off.
+/// <b>An <c>azp</c> refusal reuses <see cref="IdTokenRefusal.Audience"/></b>, the answer another app's <c>aud</c> gets.
+/// The design's separate <c>IdTokenRefusal.AuthorizedParty</c> was deliberately not added: one value keeps the two
+/// indistinguishable to a caller (no oracle on which claim failed), and the operator's log line tells them apart.
+/// </para>
+/// <para>
+/// <b>Nothing about the token is logged</b>: a refusal is a value, and IdentityModel's PII switch stays off. Two lines
+/// reach the operator only: an unreachable provider (its name and authority), and an audience refusal at Information
+/// naming the provider and <em>which</em> claim — <c>aud</c> or <c>azp</c> — failed to name a client it is configured with,
+/// never the claim's value. The caller's answer is the same either way; the line is how an operator tells a mobile client id
+/// missing from <c>ClientIds</c> from a stranger's token.
 /// </para>
 /// </remarks>
-internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
+internal sealed partial class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
 {
     /// <summary>The named <see cref="HttpClient"/> discovery documents and keys are fetched with.</summary>
     internal const string HttpClientName = "alvo-accounts-oidc";
+
+    private const string AudienceClaim = "aud";
+
+    private const string AuthorizedPartyClaim = "azp";
 
     private static readonly TimeSpan _skew = TimeSpan.FromMinutes(2);
 
@@ -53,17 +74,20 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
 
     private readonly JsonWebTokenHandler _handler = new();
 
+    private readonly ILogger _logger;
+
     /// <summary>Creates the verifier.</summary>
     /// <param name="providers">The configured providers.</param>
     /// <param name="clients">Where the <see cref="HttpClientName"/> client comes from.</param>
     /// <param name="clock">The clock every lifetime is judged on.</param>
-    /// <param name="logger">Where an unreachable provider is reported.</param>
+    /// <param name="logger">Where an unreachable provider and an audience refusal are reported, to the operator only.</param>
     public OidcIdTokenVerifier(
         OidcProviders providers, IHttpClientFactory clients, TimeProvider clock, ILogger<OidcIdTokenVerifier> logger)
     {
         ArgumentNullException.ThrowIfNull(providers);
         _providers = providers;
         _clock = clock;
+        _logger = logger;
         _metadata = providers.All.ToDictionary(
             provider => provider.Name, provider => new OidcMetadata(provider, clients, clock, logger), StringComparer.Ordinal);
     }
@@ -119,12 +143,13 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
         var result = await _handler.ValidateTokenAsync(token, Parameters(provider, configuration, algorithms)).ConfigureAwait(false);
         if (!result.IsValid)
         {
-            return IdentityVerification.Refused(RefusalOf(result.Exception));
+            var refusal = RefusalOf(result.Exception);
+            return refusal == IdTokenRefusal.Audience ? RefusedForAClient(provider, AudienceClaim) : IdentityVerification.Refused(refusal);
         }
 
-        if (!OnlyOurAudiences(provider, token))
+        if (ForeignClientClaim(provider, token) is { } claim)
         {
-            return IdentityVerification.Refused(IdTokenRefusal.Audience);
+            return RefusedForAClient(provider, claim);
         }
 
         return TimeRefusal(token) is { } late ? IdentityVerification.Refused(late) : Verified(provider, token, subjectToken);
@@ -163,8 +188,34 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
     private static bool Publishes(OpenIdConnectConfiguration configuration, string kid)
         => configuration.SigningKeys.Any(key => string.Equals(key.KeyId, kid, StringComparison.Ordinal));
 
+    /// <summary>The claim — <c>aud</c> or <c>azp</c> — that fails to name a client the provider is configured with, if either does.</summary>
+    private static string? ForeignClientClaim(OidcProvider provider, JsonWebToken token)
+    {
+        if (!OnlyOurAudiences(provider, token))
+        {
+            return AudienceClaim;
+        }
+
+        return OurAuthorizedParty(provider, token) ? null : AuthorizedPartyClaim;
+    }
+
+    private IdentityVerification RefusedForAClient(OidcProvider provider, string claim)
+    {
+        ClientRefused(_logger, provider.Name, claim);
+        return IdentityVerification.Refused(IdTokenRefusal.Audience);
+    }
+
     private static bool OnlyOurAudiences(OidcProvider provider, JsonWebToken token)
         => token.Audiences.All(audience => provider.ClientIds.Contains(audience, StringComparer.Ordinal));
+
+    /// <summary>
+    /// Whether the token's <c>azp</c> is a string naming a configured client id, or absent beside a single <c>aud</c> —
+    /// an empty one or JSON <c>null</c> never is.
+    /// </summary>
+    private static bool OurAuthorizedParty(OidcProvider provider, JsonWebToken token)
+        => token.TryGetPayloadValue<object>(AuthorizedPartyClaim, out var azp)
+            ? azp is string party && provider.ClientIds.Contains(party, StringComparer.Ordinal)
+            : token.Audiences.Count() == 1;
 
     private static TokenValidationParameters Parameters(
         OidcProvider provider, OpenIdConnectConfiguration configuration, string[] algorithms) => new()
@@ -237,4 +288,13 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
     }
 
     private static string Hash(string text) => Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    [LoggerMessage(
+        EventId = 6403,
+        Level = LogLevel.Information,
+        Message = "Identity provider {Provider} refused an ID token on its {Claim} claim, which must name a client id the "
+            + "provider is configured with (a token without azp must have a single aud). The caller was told only that the "
+            + "token was refused. If the token came from your own app signing in through another OAuth client (Android, "
+            + "iOS), add that client id to the provider's ClientIds.")]
+    private static partial void ClientRefused(ILogger logger, string provider, string claim);
 }

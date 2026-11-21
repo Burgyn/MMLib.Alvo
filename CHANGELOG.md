@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An operator can give a tenant whose only owner is banned a new owner** (#543). `PUT
+  {management}/projects/{project}/tenants/{tenant}/owners/{account}` (`ManageAccounts`, `admin`) makes an end user's
+  account an owner of a shared tenant — joining it if needed, with optional `roles` from
+  `tenancy.selfService.assignableRoles` — without enabling the banned person. It answers `200` with the membership,
+  `404` for an unknown tenant or account, `409` for a disabled account or a personal tenant and `422` for a role a
+  membership cannot carry, and revokes nothing.
+
 - **`Idempotency-Key` on `POST /auth/v1/tenants`** (#542 item 5, decided by the maintainer). A tenant cannot be deleted,
   so a create retried after a lost answer used to spend a `maxPerAccount` slot for good. With a key, a retry with the same
   name answers the tenant the first create made (the same 201 and `Location`, the membership as it reads now, or the id
@@ -679,6 +686,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **Google sign-in refuses an ID token whose `azp` is not a configured client id** (#544). When a token carries `azp`
+  — the OAuth client the person signed in through — it must be one of `Alvo:Accounts:Providers:Google:ClientIds`, as
+  every `aud` already had to be. A Google Cloud service account can mint a Google-signed ID token for any `aud`, ours
+  included, so under `signUp: open` it could create accounts by script; Google service-account ID tokens, which carry
+  `azp` (the account's own numeric id), are now refused. A token without `azp` must carry a single `aud` (OIDC Core
+  §3.1.3.7 item 4); with one, it still passes on `aud` alone — what
+  closes the hole is Google's own behaviour of putting `azp` in every service-account token, not anything Alvo can
+  require of a token that omits it. **An app that signs in from Android or iOS must list those client ids beside the
+  web one**, or its people are refused. An `azp` that is empty or JSON `null` is refused, never read as absent; a
+  mismatch answers the same `invalid_request` as another app's `aud`, and the operator's log (event 6403, Information)
+  says which claim it was and for which provider, never its value.
+
+- **Disabling or enabling an end user's account answers `200`, not `204`** (#543). The body is
+  `{"orphanedTenants": [{"id", "name"}]}`: the shared tenants the account owns that no owner with an enabled account can
+  manage after the change — what a ban of a sole owner orphaned.
+- **The last owner of a tenant is the last *enabled* owner** (#543). A co-owner can no longer leave, nor be demoted or
+  removed, while the only other owner is banned: the banned owner keeps the flag, so enabling them restores it, but no
+  longer counts toward the last-owner check.
 
 - **Each rate budget is named after what it limits, and none is shared** (#542 item 3, decided by the maintainer).
   `Alvo:Api:RateLimits:Token` is now `:TokenEndpoint` (RFC 6749 §3.2's name for `POST /auth/v1/token`; default 30).
@@ -1499,6 +1525,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment-style rules).
 
 ### Fixed
+
+- **An owner's removal racing her ban no longer deadlocks on PostgreSQL** (#543). Both revoked her invitations with an
+  unordered multi-row `UPDATE`, one walking the `tenant_id` index and one the heap; after a HOT update they met her rows
+  in opposite orders, and one of the two failed with `40P01` (a 500 that rolled back) — 9 of 10 staged runs. Every
+  transaction that sweeps or hands out a person's credentials now takes that person's account row first: a removal,
+  leaving, a demotion, a refresh-token reuse, an invitation's creation, a ban and a mint.
 
 - **A write hook's cold runs no longer fail a write by timing out** (#519). A hook's timeout (250 ms inside the
   transaction by default) is wall-clock, and its first run after the host starts also pays for JIT compilation, type
