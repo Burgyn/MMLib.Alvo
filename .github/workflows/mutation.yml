@@ -413,11 +413,16 @@ name: Mutation
 # (SqliteAccountsEngineTests) live in MMLib.Alvo.Accounts.Tests. So every store mutant
 # would have been a survivor by construction — the data-ef-rest blind spot this header
 # already describes, on purpose this time. data-ef-rest now excludes the four files and
-# `accounts-store` mutates them against the two suites that do run them. Both reference the
-# EF project only transitively (through Data.Sqlite), which Stryker resolves the way it
-# already does for Data.Sqlite.Tests on data-ef-core. No test filter: under MTP a filtered
-# run executes the whole assembly anyway (stryker-net#3750, under WHY coverage-analysis
-# above), so a filter would only make the cost look smaller than it is.
+# `accounts-store` mutates them against the two suites that do run them. Both used to reach the
+# EF project only transitively (through Data.Sqlite), on the theory that Stryker resolves that
+# the way it does for Data.Sqlite.Tests on data-ef-core. It does not: data-ef-core resolves
+# through its OTHER suite, EntityFrameworkCore.Tests, which references the project directly.
+# Stryker 4.16 looks only among a test project's direct references, so run 44849353407 (the
+# first that got past `log-to-file`) stopped at "No project found" in 12 s. Both suites now
+# carry a direct ProjectReference to the EF adapter, commented as being for this leg.
+# No test filter: under MTP a filtered run executes the whole assembly anyway
+# (stryker-net#3750, under WHY coverage-analysis above), so a filter would only make the
+# cost look smaller than it is.
 #
 # The tenant registry (accounts S3) joins the store leg for the same reason: its contract
 # facts (test/_shared/ef/TenantStoreFacts.cs) compile into the same two engine suites and
