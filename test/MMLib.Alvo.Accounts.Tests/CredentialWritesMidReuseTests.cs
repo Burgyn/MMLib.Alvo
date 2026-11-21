@@ -145,5 +145,11 @@ public sealed class CredentialWritesMidReuseTests
 
         public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
             inner.AcceptInvitationAsync(request, ct);
+
+        public Task<OwnershipGrantOutcome> GrantOwnershipAsync(OwnershipGrant grant, CancellationToken ct) =>
+            inner.GrantOwnershipAsync(grant, ct);
+
+        public Task<IReadOnlyList<OrphanedTenant>> ListOrphanedTenantsAsync(UserId account, CancellationToken ct) =>
+            inner.ListOrphanedTenantsAsync(account, ct);
     }
 }

@@ -371,6 +371,10 @@ A new Management operation, `DisableAccount` / `EnableAccount`, at the `admin` l
 next refresh are refused. Analysis §2.2 asks for ban and force-logout; this is both, and the minimum an
 operator of an open-sign-up app needs on day one.
 
+**Revised by #543** (`2026-11-21-accounts-security-hardening-design.md` §2.4): the ban answers the shared tenants it left
+without an enabled owner, and a third operation, `GrantOwnershipAsync` (`PUT {m}/projects/{project}/tenants/{tenant}/owners/{account}`,
+`admin`), makes another account an owner of one — so a banned sole owner's tenant is recovered without enabling them.
+
 ### 5.7 How a request becomes a caller
 
 **One reading of credentials, shared by all three sites** that read one today — the Data API filter
@@ -521,7 +525,8 @@ Codes travel in bodies, never in a URL, so they cannot land in an access log.
 
 ### 6.4 Invariants (each an adversarial test)
 
-- The **last owner** of a shared tenant cannot leave, be removed, or lose `isOwner`.
+- The **last owner** of a shared tenant cannot leave, be removed, or lose `isOwner`. **Since #543, the last *enabled*
+  owner:** a banned owner keeps the flag but never stands in for the last one.
 - An invitation grants only `assignableRoles`. One that grants ownership is **single-use** and lives at
   most 7 days.
 - **An owner's invitations die with their ownership**: removing or demoting an owner revokes the

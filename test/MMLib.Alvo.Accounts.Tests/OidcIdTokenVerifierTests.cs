@@ -20,6 +20,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
 {
     private const string ClientId = "client-1";
 
+    private const string MobileClientId = "client-1-ios";
+
     private static readonly DateTimeOffset _now = new(2026, 11, 13, 9, 0, 0, TimeSpan.Zero);
 
     private readonly FakeTimeProvider _clock = new(_now);
@@ -63,6 +65,28 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         verification.ToString().ShouldNotContain(verification.SubjectTokenId!);
     }
 
+    /// <summary>
+    /// #544: an <c>azp</c> names the OAuth client the person signed in through, so when present it must be one of the
+    /// configured client ids — a mobile client's beside the web one the backend verifies against — and its absence changes
+    /// nothing. A Google service account can mint an ID token for any <c>aud</c>, ours included, but its <c>azp</c> is its
+    /// own numeric id, so it signs nobody in (the refusal cases above).
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(ClientId)]
+    [InlineData(MobileClientId)]
+    public async Task An_azp_naming_a_configured_client_or_none_is_accepted(string? azp)
+    {
+        var options = Options(TestOidcIssuer.Authority);
+        options.ClientIds.Add(MobileClientId);
+        using var verifier = Verifier(GooglePreset.From(options) with { Issuers = new HashSet<string> { TestOidcIssuer.Authority } });
+
+        var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", azp: azp), AnyProvider, Ct);
+
+        verification.Refusal.ShouldBeNull();
+        verification.Identity!.Subject.ShouldBe("sub-1");
+    }
+
     [Fact]
     public async Task Without_a_jti_the_subject_token_id_is_the_issuer_and_the_token_s_hash()
     {
@@ -79,6 +103,11 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     [InlineData("another app's client id", nameof(IdTokenRefusal.Audience))]
     [InlineData("ours beside another app's", nameof(IdTokenRefusal.Audience))]
     [InlineData("ours with a trailing slash", nameof(IdTokenRefusal.Audience))]
+    [InlineData("azp a service account's numeric id", nameof(IdTokenRefusal.Audience))]
+    [InlineData("azp another app's client id", nameof(IdTokenRefusal.Audience))]
+    [InlineData("azp empty", nameof(IdTokenRefusal.Audience))]
+    [InlineData("azp a number, unreadable to IdentityModel", nameof(IdTokenRefusal.Malformed))]
+    [InlineData("azp an array naming ours, unreadable to IdentityModel", nameof(IdTokenRefusal.Malformed))]
     [InlineData("signed by another key", nameof(IdTokenRefusal.Signature))]
     [InlineData("alg none", nameof(IdTokenRefusal.Algorithm))]
     [InlineData("HS256", nameof(IdTokenRefusal.Algorithm))]
@@ -102,6 +131,12 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
             "another app's client id" => _issuer.Mint("sub-1", audience: "another-app"),
             "ours beside another app's" => _issuer.Mint("sub-1", audiences: [ClientId, "another-app"]),
             "ours with a trailing slash" => _issuer.Mint("sub-1", audience: ClientId + "/"),
+            "azp a service account's numeric id" => _issuer.Mint(
+                "112233445566778899000", email: "ci@project.iam.gserviceaccount.com", azp: "112233445566778899000"),
+            "azp another app's client id" => _issuer.Mint("sub-1", azp: "another-app"),
+            "azp empty" => MintWithAzp(string.Empty),
+            "azp a number, unreadable to IdentityModel" => MintWithAzp(112233445566778899L),
+            "azp an array naming ours, unreadable to IdentityModel" => MintWithAzp(new[] { ClientId }),
             "signed by another key" => stranger.Mint("sub-1"),
             "alg none" => _issuer.Mint("sub-1", alg: "none"),
             "HS256" => _issuer.Mint("sub-1", alg: "HS256"),
@@ -118,6 +153,71 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         };
 
         (await verifier.VerifyAsync(token, AnyProvider, Ct)).ShouldBe(IdentityVerification.Refused(Enum.Parse<IdTokenRefusal>(expected)));
+    }
+
+    /// <summary>
+    /// OIDC Core §3.1.3.7 item 4: a token for several audiences must say which one it was issued to. Both audiences here
+    /// are configured, so only the missing <c>azp</c> refuses it — and the operator's line names <c>azp</c>.
+    /// </summary>
+    [Fact]
+    public async Task A_token_without_azp_and_several_audiences_is_refused()
+    {
+        var log = new CapturingLogger();
+        var options = Options(TestOidcIssuer.Authority);
+        options.ClientIds.Add(MobileClientId);
+        using var verifier = Verifier(GooglePreset.From(options) with { Issuers = new HashSet<string> { TestOidcIssuer.Authority } }, log);
+
+        var withoutAzp = await verifier.VerifyAsync(_issuer.Mint("sub-1", audiences: [ClientId, MobileClientId]), AnyProvider, Ct);
+        var withAzp = await verifier.VerifyAsync(
+            _issuer.Mint("sub-1", audiences: [ClientId, MobileClientId], azp: MobileClientId), AnyProvider, Ct);
+
+        withoutAzp.ShouldBe(IdentityVerification.Refused(IdTokenRefusal.Audience));
+        log.Entries.ShouldHaveSingleItem().Properties.ShouldContainKeyAndValue("Claim", "azp");
+        withAzp.Refusal.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_json_null_azp_is_refused_never_read_as_absent()
+    {
+        using var verifier = Verifier(Google());
+        var token = MintWithAzp(null);
+
+        var verification = await verifier.VerifyAsync(token, AnyProvider, Ct);
+
+        Encoding.UTF8.GetString(Base64Url.DecodeFromChars(token.Split('.')[1])).ShouldContain("\"azp\":null");
+        verification.ShouldBe(IdentityVerification.Refused(IdTokenRefusal.Audience));
+    }
+
+    /// <summary>
+    /// The caller hears one <see cref="IdTokenRefusal.Audience"/> for a foreign <c>aud</c> and a foreign <c>azp</c> alike;
+    /// the operator's log says which claim it was and for which provider, so a mobile client id missing from
+    /// <c>ClientIds</c> can be told from a stranger's token — and never what the claim or the token said.
+    /// </summary>
+    [Theory]
+    [InlineData("another app's client id", "aud")]
+    [InlineData("ours beside another app's", "aud")]
+    [InlineData("azp another app's client id", "azp")]
+    public async Task An_audience_refusal_tells_the_operator_which_claim_failed_and_nothing_it_said(string defect, string claim)
+    {
+        var log = new CapturingLogger();
+        using var verifier = Verifier(Google(), log);
+        var token = defect switch
+        {
+            "another app's client id" => _issuer.Mint("sub-1", audience: "another-app"),
+            "ours beside another app's" => _issuer.Mint("sub-1", audiences: [ClientId, "another-app"]),
+            _ => _issuer.Mint("sub-1", azp: "another-app"),
+        };
+
+        var verification = await verifier.VerifyAsync(token, AnyProvider, Ct);
+
+        verification.ShouldBe(IdentityVerification.Refused(IdTokenRefusal.Audience));
+        var entry = log.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Information);
+        entry.Properties.ShouldContainKeyAndValue("Provider", "google");
+        entry.Properties.ShouldContainKeyAndValue("Claim", claim);
+        entry.Line.ShouldNotContain("another-app");
+        entry.Line.ShouldNotContain("sub-1");
+        token.Split('.').ShouldAllBe(part => !entry.Line.Contains(part));
     }
 
     [Fact]
@@ -341,12 +441,19 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
 
     private static string Hash(string text) => Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
-    /// <summary>Every line logged, formatted.</summary>
+    private string MintWithAzp(object? azp) => _issuer.Mint("sub-1", rawClaims: new Dictionary<string, object?> { ["azp"] = azp });
+
+    /// <summary>One logged entry: its level, its formatted line, and its structured properties.</summary>
+    private sealed record LogEntry(LogLevel Level, string Line, IReadOnlyDictionary<string, object?> Properties);
+
+    /// <summary>Every entry logged.</summary>
     private sealed class CapturingLogger : ILogger<OidcIdTokenVerifier>
     {
-        private readonly List<string> _lines = [];
+        private readonly List<LogEntry> _entries = [];
 
-        public IReadOnlyList<string> Lines => _lines;
+        public IReadOnlyList<LogEntry> Entries => _entries;
+
+        public IReadOnlyList<string> Lines => [.. _entries.Select(entry => entry.Line)];
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -355,6 +462,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
 
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => _lines.Add($"{eventId.Id} {formatter(state, exception)} {exception}");
+            => _entries.Add(new LogEntry(
+                logLevel,
+                $"{eventId.Id} {formatter(state, exception)} {exception}",
+                (state as IEnumerable<KeyValuePair<string, object?>> ?? []).ToDictionary(pair => pair.Key, pair => pair.Value)));
     }
 }

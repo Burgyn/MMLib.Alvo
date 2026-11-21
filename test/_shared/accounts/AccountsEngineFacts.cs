@@ -142,7 +142,7 @@ public abstract class AccountsEngineFacts
             AccountsWorld.Operator,
             body: new JsonObject { ["disabled"] = true });
 
-        disabled.StatusCode.ShouldBe(HttpStatusCode.NoContent, await disabled.ReadTextAsync());
+        disabled.StatusCode.ShouldBe(HttpStatusCode.OK, await disabled.ReadTextAsync());
         await InvalidTokenAsync(await world.AsPersonAsync(HttpMethod.Get, Entries, access));
         await InvalidGrantAsync(await world.RefreshAsync(refresh));
         using var again = await world.ExchangeAsync(world.IdToken("ada"));

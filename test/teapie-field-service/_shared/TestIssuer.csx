@@ -111,8 +111,14 @@ string TestIssuerKeySetImport() => JsonSerializer.Serialize(new
     importOptions = new { duplicatePolicy = "OVERWRITE", deleteAllNotInImport = false },
 });
 
-/// An ID token as Google would sign it for this suite's client id, signed by the issuer's key.
+/// An ID token as Google would sign it for this suite's client id, signed by the issuer's key. Its `azp` names that
+/// client too, as Google's names the OAuth client a person signed in through: Alvo refuses an `azp` it does not list.
 string IdToken(string subject, string email, string name) => SignedIdToken(TestIssuerKey(), subject, email, name);
+
+/// A properly signed ID token whose `aud` or `azp` names a client this suite's Alvo does not list; `null` keeps
+/// the suite's own client id for that claim.
+string IdTokenForAnotherClient(string subject, string email, string name, string audience = null, string azp = null)
+    => SignedIdToken(TestIssuerKey(), subject, email, name, audience, azp);
 
 /// The same claims and `kid`, signed by a key the issuer never published — a forgery the signature must refuse.
 string IdTokenSignedByAnotherKey(string subject, string email, string name)
@@ -121,14 +127,16 @@ string IdTokenSignedByAnotherKey(string subject, string email, string name)
     return SignedIdToken(another, subject, email, name);
 }
 
-string SignedIdToken(RSA key, string subject, string email, string name)
+string SignedIdToken(RSA key, string subject, string email, string name, string audience = null, string azp = null)
 {
     var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+    var clientId = tp.GetVariable<string>("fsGoogleClientId");
     var header = JsonSerializer.Serialize(new { alg = "RS256", kid = TestIssuerKid(), typ = "JWT" });
     var payload = JsonSerializer.Serialize(new
     {
         iss = GoogleIssuer,
-        aud = tp.GetVariable<string>("fsGoogleClientId"),
+        aud = audience ?? clientId,
+        azp = azp ?? clientId,
         sub = subject,
         email,
         email_verified = true,
