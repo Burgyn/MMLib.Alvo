@@ -683,6 +683,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed, while the only other owner is banned: the banned owner keeps the flag, so enabling them restores it, but no
   longer counts toward the last-owner check.
 
+- **The operator's user routes check `{project}`, and `…/users/{id}/disabled` refuses `{}`** (#526). All seven
+  `{management}/projects/{project}/users…` routes answered for any project name, served or not; an unknown one is now
+  the named `404` (*"This instance serves no project '…'"*), as on every other project route. `PUT …/users/{id}/disabled`
+  read a body without `disabled` — `{}` or none — as **enable**; it is now `422` with the sentence naming both values,
+  exactly as `…/accounts/{id}/disabled` answers. A caller that sent the deployment's real project name and an explicit
+  `{"disabled": true|false}` sees no change. The dashboard calls the port in-process and is unaffected.
+
 - **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
   as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
   the person has none:
@@ -1032,6 +1039,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Minting a token in a stranger's tenant is always `404`.** `POST /auth/v1/tokens` answered a person at the 100-token
+  cap `409` for a service token in a tenant they are not in, and `404` for a personal one; both are now the self-service
+  routes' one `404`, byte for byte an unknown tenant's. A service token naming a personal tenant the descriptor does not
+  honour (`personalTenant` off) is that `404` too, as on every other tenant-scoped route, rather than `409`. **Docs:**
+  `docs/architecture/accounts.md`.
 - **An app token sent as `Authorization: Bearer` is told where it belongs** (#539). A personal or service token
   (`alvo_pat_…`/`alvo_svc_…`) presented as a Bearer is still `401` `unauthenticated` with `Bearer
   error="invalid_token"`, and is still never authenticated, but its detail is now one fixed sentence naming the API-key

@@ -59,7 +59,7 @@ internal static partial class ManagementEndpoints
         Gate(
             group.MapPut(
                 "/projects/{project}/accounts/{account:guid}/disabled",
-                (string project, Guid account, ManagementAccountDisabledFlag? body,
+                (string project, Guid account, ManagementDisabledFlag? body,
                     ManagementGate gate, IAlvoAccountAdministration accounts, ILoggerFactory loggers, CancellationToken ct) =>
                         Rendered(() => SetAccountDisabledAsync(
                             project, account, body, gate, accounts, loggers.CreateLogger(AccountsLogCategory), ct))),
@@ -76,7 +76,7 @@ internal static partial class ManagementEndpoints
     private static async Task<IResult> SetAccountDisabledAsync(
         string project,
         Guid account,
-        ManagementAccountDisabledFlag? body,
+        ManagementDisabledFlag? body,
         ManagementGate gate,
         IAlvoAccountAdministration accounts,
         ILogger logger,

@@ -15,17 +15,13 @@ internal sealed record ManagementRoleAssignment(IReadOnlyList<string> RoleNames)
 /// <param name="Tenant">The tenant, or <see langword="null"/> to remove the grant.</param>
 internal sealed record ManagementTenantGrant(Guid? Tenant);
 
-/// <summary>Whether a person is barred from signing in.</summary>
-/// <param name="Disabled">Whether they are barred.</param>
-internal sealed record ManagementDisabledFlag(bool Disabled);
-
-/// <summary>Whether an end user's account is disabled (accounts spec §5.6).</summary>
+/// <summary>Whether a person, or an end user's account, is barred from signing in.</summary>
 /// <remarks>
-/// Nullable, unlike <see cref="ManagementDisabledFlag"/>, so a body without the member is refused rather than read as
-/// "enable": on a ban, the absent answer must not be the permissive one.
+/// Nullable, so a body without the member is refused rather than read as "enable": on a ban, the absent answer must not
+/// be the permissive one. One record for both disable routes (#526), so the two cannot drift apart again.
 /// </remarks>
-/// <param name="Disabled">Whether the account is to be disabled, or <see langword="null"/> when the body did not say.</param>
-internal sealed record ManagementAccountDisabledFlag(bool? Disabled);
+/// <param name="Disabled">Whether they are to be barred, or <see langword="null"/> when the body did not say.</param>
+internal sealed record ManagementDisabledFlag(bool? Disabled);
 
 /// <summary>An operator's grant of a tenant's ownership to an end user's account (#543).</summary>
 /// <param name="Roles">The tenant roles the owner holds, each in <c>tenancy.selfService.assignableRoles</c>, or <see langword="null"/> to keep a member's roles.</param>

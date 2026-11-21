@@ -571,6 +571,13 @@ guard, which could only read before a concurrent disable commits; the contract s
 (`UserAdministrationContractTests`) holds every implementation to it. `AlvoUser.LockedOutUntil` is how a caller
 sees the lockout in the first place.
 
+**Every one names a project, and every one checks it** (#526). The membership store is the deployment's, not a
+project's, so nothing past the gate would notice a project this build does not serve: each delegate admits through
+`ManagementGate` — the accounts route's shape — and an unknown `{project}` is the surface's named `404` before the store
+is touched. **`…/users/{user}/disabled` refuses a body that does not say which way**: `{}`, or no body, is `422` with
+the sentence naming both values, never read as "enable" — the accounts route's rule, and the two routes bind one
+`ManagementDisabledFlag` (`bool?`) so they cannot drift apart again. `UserRouteRefusalTests` pins both, per route.
+
 **They are management routes rather than a surface of their own**, because `ManageUsers` was already a
 `ManagementOperation` in the level table and a second surface would need a second gate. They are mapped only
 when a deployment registered a membership store: `MapUsers` asks `IServiceProviderIsKeyedService` whether the
