@@ -45,6 +45,11 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// (<see cref="ReleasedReferenceDrops"/>), and the residual diff re-creates it under the new names — otherwise PostgreSQL
 /// refused the renaming apply (the index already existed) or, after a field rename, a later drop (no such constraint).
 /// </para>
+/// <para>
+/// <b>Every other index, and a renamed table's primary key, is renamed instead</b> (#523): its definition reads no field
+/// name, so nothing needs re-creating — only its name, which both engines carry through <c>RENAME</c>, is stale
+/// (<see cref="RenamedConstraints"/>).
+/// </para>
 /// </remarks>
 internal static class RenamePrePass
 {
@@ -67,6 +72,12 @@ internal static class RenamePrePass
         /// (<see cref="ReleasedReferenceDrops"/>) — set by the migrator, which alone can build the models that name them.
         /// </summary>
         internal IReadOnlyList<RenameEntry> ReleasedReferences { get; init; } = [];
+
+        /// <summary>
+        /// The renames of the indexes and primary keys the declared renames leave under an old name
+        /// (<see cref="RenamedConstraints"/>) — set by the migrator, for <see cref="ReleasedReferences"/>' reason.
+        /// </summary>
+        internal IReadOnlyList<RenameEntry> RenamedConstraints { get; init; } = [];
     }
 
     /// <summary>

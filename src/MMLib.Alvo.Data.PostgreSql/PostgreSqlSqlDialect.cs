@@ -327,6 +327,13 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
         return $"LOCK TABLE {RenderTable(child, lockedPreImageFor: null)} IN SHARE MODE";
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>RENAME CONSTRAINT</c> renames the key's backing index with it, so the old name is free for the next relation.
+    /// </remarks>
+    string? IAlvoSqlDialect.RenamePrimaryKeyStatement(string table, string name, string newName) =>
+        $"ALTER TABLE {AlvoSqlIdentifier.Quote(table)} RENAME CONSTRAINT {AlvoSqlIdentifier.Quote(name)} TO {AlvoSqlIdentifier.Quote(newName)}";
+
     /// <summary>
     /// <see langword="null"/> for an absent name, because <c>PostgresException</c> answers
     /// <see cref="string.Empty"/> rather than <see langword="null"/> when the server sent no constraint
