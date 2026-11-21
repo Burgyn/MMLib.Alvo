@@ -1380,6 +1380,26 @@ existed), and after a field rename a later drop named a constraint the database 
 on `main` too, not only for guards. `After_a_rename_the_guard_holds_only_the_names_the_model_gives_it` reads the
 catalog after each kind of rename.
 
+**Every other index, and a renamed table's primary key, is renamed instead (#523).** An unfiltered index reads no field
+name, so nothing needs re-creating — only its name is stale, and it mattered: a later plan dropping a renamed field's
+`unique` or `indexed` index named one the database did not have, and an entity or field that later took an old name
+collided with it (and on PostgreSQL with the renamed table's primary key, which is an index too). `RenamedConstraints`
+pairs each index of the current model with the aligned model's index over the same columns (renames mapped) and the same
+uniqueness — the comparison `ReleasedReferenceDrops` makes for keys — and emits EF's `RenameIndexOperation` when the two
+names differ: PostgreSQL's generator spells `ALTER INDEX … RENAME`, SQLite's a drop and a create from the desired model,
+so no engine branch reaches the core. That create needs the index in the desired model, so an index the same plan drops
+is not renamed; the residual's drop is readdressed to the name the database holds. A primary key has no EF rename, so it
+is renamed through the dialect port's internal `RenamePrimaryKeyStatement` — `ALTER TABLE … RENAME CONSTRAINT` on
+PostgreSQL, nothing on SQLite, which keeps a key's name only in the table's stored definition. The released references'
+indexes and alternate keys are still dropped and re-created rather than renamed, which on a large table costs an index
+build; that is a cost, not a defect, and is left as is. `RenamedConstraintNameFacts` pins it on both engines and judges
+each fact by the engine's own catalog: a rename plans non-destructively and leaves exactly the model's names, a later plan
+drops each index by its model name, a rename that drops an index or flips a unique one in the same plan succeeds, an
+entity-level composite unique index takes its new name, and the old names are free for a new entity or field. One fact
+adds a validation, because on SQLite the table rebuild a released CHECK constraint triggers re-creates every index under
+its model name and would hide the defect from the rest. A database renamed before #523 keeps its stale names; there is
+no repair step.
+
 **What it does not cover.** A `storage: dynamic` entity has no driver yet (F7, #41), and the shared `entity_records` store
 will have no foreign key at all; see the F7 section for the obligation that leaves.
 
