@@ -824,6 +824,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.TenantLimit(5),
         ProblemResultFactory.LastOwner(),
         ProblemResultFactory.PersonForbidden("Only an owner makes this change."),
+        ProblemResultFactory.NotAPerson(),
         ProblemResultFactory.MembershipConflict("A personal tenant has exactly one member."),
         Guarded(new AlvoAuthorizationException("refused")),
         Guarded(new AlvoRecordNotFoundException()),

@@ -189,7 +189,7 @@ public sealed class InvitationRoutesTests
     }
 
     [Fact]
-    public async Task An_api_key_is_403_and_no_credential_is_a_bearer_challenge()
+    public async Task An_api_key_is_the_same_bearer_challenge_as_no_credential()
     {
         var integration = new TestApiKey("integration", ["authenticated"], ["*:read", "*:write"]);
         await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, keys: [integration]);
@@ -199,11 +199,9 @@ public sealed class InvitationRoutesTests
             using var keyed = await world.Api.SendAsync(request.Method, request.Path, integration, body: request.Body);
             using var anonymous = await world.Api.SendAsync(request.Method, request.Path, body: request.Body);
 
-            keyed.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await keyed.ReadTextAsync());
-            (await keyed.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
-            anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await anonymous.ReadTextAsync());
-            anonymous.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
-            anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
+            await TenantRoutesTests.BearerChallengeAsync(keyed);
+            await TenantRoutesTests.BearerChallengeAsync(anonymous);
+            (await keyed.ReadProblemDetailAsync()).ShouldBe(await anonymous.ReadProblemDetailAsync());
         }
     }
 

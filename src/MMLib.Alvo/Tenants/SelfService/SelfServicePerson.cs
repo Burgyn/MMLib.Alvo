@@ -8,36 +8,36 @@ using MMLib.Alvo.Auth.Internal;
 namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>
-/// The person gate of the self-service routes (S3 plan D7): only a signed-in person, from a session, manages tenants.
+/// The person gate of the self-service routes (S3 plan D7) — tenants, members, invitations and tokens: only a signed-in
+/// person, from a session, reaches them.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The credential is read as the Data API reads it</b>, by <see cref="CallerResolution.Read"/>, and a Bearer token is
-/// resolved by the registered person resolver with no requested tenant — the route's path names the tenant, so the tenant
-/// header is ignored here.
+/// <b>The credential is read by <see cref="CallerResolution.PersonBearer"/></b>, the one reading every person-only route
+/// shares, and a Bearer token is resolved by the registered person resolver with no requested tenant — the route's path
+/// names the tenant, so the tenant header is ignored here.
 /// </para>
 /// <list type="table">
 ///   <listheader><term>Presented</term><description>Answer</description></listheader>
-///   <item><term>nothing usable</term><description>401 with the plain Bearer challenge (RFC 6750 §3.1)</description></item>
-///   <item><term>a malformed or ambiguous Bearer</term><description>401 <c>invalid_request</c>, resolving nothing</description></item>
+///   <item>
+///   <term>nothing usable, or an API key of any kind</term>
+///   <description>401 with the plain Bearer challenge (RFC 6750 §3.1): Bearer is this route's only scheme (#542 item 2)</description>
+///   </item>
+///   <item><term>a malformed Bearer, or an API key beside one</term><description>401 <c>invalid_request</c>, resolving nothing</description></item>
 ///   <item>
 ///   <term>a personal or service token as a Bearer</term>
 ///   <description>401 <c>invalid_token</c> naming the API-key header, resolving nothing (#539)</description>
 ///   </item>
 ///   <item><term>a Bearer token that does not hold</term><description>401 <c>invalid_token</c></description></item>
 ///   <item>
-///   <term>an API key, or a Bearer resolving to anything but a person</term>
-///   <description>403 <c>forbidden</c>: managing who is in a tenant is a person's act, not an integration's (spec §6.3)</description>
+///   <term>a Bearer a host's own person resolver resolves to anything but a person</term>
+///   <description>403 <c>forbidden</c>: authenticated, and insufficient (RFC 9110 §15.5.4)</description>
 ///   </item>
 /// </list>
 /// </remarks>
 internal static class SelfServicePerson
 {
     private const string InvalidToken = "invalid_token";
-
-    private const string NotAPerson =
-        "Only a signed-in person manages tenants. Present the access token sign-in issued as 'Authorization: Bearer "
-        + "<token>'; an API key or a token minted for an integration does not reach this route.";
 
     /// <summary>
     /// The person the request's Bearer token names, with the session it was resolved from (<see cref="PersonSessionKey"/>;
@@ -51,13 +51,10 @@ internal static class SelfServicePerson
         var services = http.RequestServices;
         var resolvers = services.GetRequiredService<CallerResolvers>();
         var auth = services.GetRequiredService<IOptions<AlvoAuthOptions>>().Value;
-        var credential = CallerResolution.Read(http.Request, auth, CredentialSurface.Data, personRegistered: resolvers.HasPerson);
-        return credential.Channel switch
-        {
-            CredentialChannel.Bearer => await ResolveAsync(resolvers.Person(http), credential.Value!, http).ConfigureAwait(false),
-            CredentialChannel.ApiKey => (null, ProblemResultFactory.PersonForbidden(NotAPerson)),
-            var refused => (null, CallerResolution.PersonOnlyRefusal(refused, auth)),
-        };
+        var (token, refusal) = CallerResolution.PersonBearer(http.Request, auth, resolvers.HasPerson);
+        return token is null
+            ? (null, refusal)
+            : await ResolveAsync(resolvers.Person(http), token, http).ConfigureAwait(false);
     }
 
     private static async ValueTask<(SessionPerson? Person, IResult? Refusal)> ResolveAsync(
@@ -68,7 +65,7 @@ internal static class SelfServicePerson
         {
             null => (null, ProblemResultFactory.BearerUnauthenticated(InvalidToken)),
             { ActorKind: AlvoActorKind.User } person => (new SessionPerson(person.User, PersonSessionKey.SessionOf(principal.KeyId)), null),
-            _ => (null, ProblemResultFactory.PersonForbidden(NotAPerson)),
+            _ => (null, ProblemResultFactory.NotAPerson()),
         };
     }
 }

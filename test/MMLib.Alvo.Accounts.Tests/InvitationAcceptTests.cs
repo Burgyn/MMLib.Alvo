@@ -198,10 +198,8 @@ public sealed class InvitationAcceptTests
         using var anonymous = await team.World.Api.SendAsync(HttpMethod.Post, AcceptPath, body: Code(code));
         using var keyed = await team.World.Api.SendAsync(HttpMethod.Post, AcceptPath, integration, body: Code(code));
 
-        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await anonymous.ReadTextAsync());
-        anonymous.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
-        keyed.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await keyed.ReadTextAsync());
-        (await keyed.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+        await TenantRoutesTests.BearerChallengeAsync(anonymous);
+        await TenantRoutesTests.BearerChallengeAsync(keyed);
         using var preview = await PreviewAsync(team.World, code);
         preview.StatusCode.ShouldBe(HttpStatusCode.OK, "nothing was consumed");
     }
