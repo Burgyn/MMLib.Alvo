@@ -316,7 +316,7 @@ Refresh once on a 401. If that fails too, sign the person in again.
 | 400 | [`token-refused`](/reference/problem-types/#token-refused) | `invalid_grant` | The refresh token is unknown, spent after the grace window, or its session has ended. |
 | 403 | [`sign-up-refused`](/reference/problem-types/#sign-up-refused) | `access_denied` | A new person the sign-up policy does not admit. The `policy` member says which: `invitationOnly` or `allowedEmailDomains`. |
 | 403 | [`sign-in-refused`](/reference/problem-types/#sign-in-refused) | `access_denied` | An existing account that may not sign in, because an operator disabled it. No reason is given. |
-| 429 | [`rate-limited`](/reference/problem-types/#rate-limited) | — | More than 30 token requests a minute from one client address (`Alvo:Api:RateLimits:Token`). Wait for `Retry-After`. |
+| 429 | [`rate-limited`](/reference/problem-types/#rate-limited) | — | More than 30 token requests a minute from one client address (`Alvo:Api:RateLimits:TokenEndpoint`). Wait for `Retry-After`. |
 
 ### Which email addresses Alvo trusts
 

@@ -669,6 +669,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **Each rate budget is named after what it limits, and none is shared** (#542 item 3, decided by the maintainer).
+  `Alvo:Api:RateLimits:Token` is now `:TokenEndpoint` (RFC 6749 §3.2's name for `POST /auth/v1/token`; default 30).
+  `:Create`, which tenant creation and token minting shared, is split into `:Tenants` (`POST /auth/v1/tenants`) and
+  `:ApiTokens` (`POST /auth/v1/tokens`), 10 each, so minting at its limit no longer blocks creating a tenant from the
+  same address. `:Invitations` is unchanged. The configuration binder ignores a key it does not know, so a host still
+  setting `:Token` or `:Create` silently gets the defaults: rename the keys. **Public API:**
+  `AlvoRateLimitOptions.Token`/`.Create` → `.TokenEndpoint`, `.Tenants` and `.ApiTokens`.
 - **`auth.accessTokens` is now `auth.apiTokens`** (#542 item 4, decided by the maintainer). The block that switches on
   personal and service tokens kept OAuth's name for a different thing: Alvo issues real OAuth access tokens at
   `POST /auth/v1/token`, while these tokens are API keys sent in `X-Alvo-Api-Key`. The keys inside (`personal`,

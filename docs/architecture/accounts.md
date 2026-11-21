@@ -411,7 +411,7 @@ registry.
 | Route | Who | Answers |
 |---|---|---|
 | `GET /tenants` | any person | 200 the memberships the descriptor honours, personal first |
-| `POST /tenants` `{name}` | any person, with `createTenants` | 201 + `Location`; 409 `tenant-limit` (`maxPerAccount`); 429 past `Alvo:Api:RateLimits:Create` |
+| `POST /tenants` `{name}` | any person, with `createTenants` | 201 + `Location`; 409 `tenant-limit` (`maxPerAccount`); 429 past `Alvo:Api:RateLimits:Tenants` |
 | `PATCH /tenants/{id}` `{name}` | an owner | 200; 403 for a member; 404 for anyone else |
 | `GET /tenants/{id}/members` | any member | 200 `[{userId, name, avatarUrl, roles, isOwner}]` — never an email |
 | `PATCH /tenants/{id}/members/{userId}` `{roles?, isOwner?}` | an owner, on someone else | 200; 403 on yourself; 422 for a role outside `assignableRoles`; 409 `conflict` on a personal tenant |
@@ -483,8 +483,8 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   schema mints one more run per account, a per-tick cost any member of the public grows by signing up (bounded only by the
   token rate limit). It is a cost, not a wall breach: each run is the system in its own tenant. A host that wants it
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
-- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. **Superseded by
-  S5 D15**: minting (`POST /tokens`) draws on the same budget (the S5 decisions, below).
+- **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. S5 D15 made
+  minting draw on it too; **#542 item 3 split it again**: `POST /tenants` is charged `Alvo:Api:RateLimits:Tenants`.
 - **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
 
 And where the implementation answered differently from the plan's first wording:
@@ -713,7 +713,7 @@ From the plan (`2026-11-13-accounts-s4-invitations.md`, D1–D15), one line each
   tenant, as the token list names a minter.
 - **D12** — `created_at` is a column the spec's model does not list. It orders the list.
 - **D13** — `Alvo:Api:RateLimits:Invitations`, 20 per client per minute, on all five routes. The exchange with a code
-  stays on the `Token` budget.
+  stays on the token endpoint's budget (`TokenEndpoint` since #542).
 - **D14** — `tenancy.selfService.invitations` is honoured. It left the unhonoured list, the dashboard's warned-slot
   mirror and the `alvo-descriptor-capabilities-and-limits` skill's generated region.
 - **D15** — an accepted membership records `invitation_id`. No membership event is emitted (spec D9 defers them).
@@ -945,7 +945,7 @@ deliveries keep the tenant roles recorded at the event, bounded by `assignableRo
 ### The routes
 
 All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
-other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (none, or any `X-Alvo-Api-Key`, a
+other auth routes. The gates run in this order: the `ApiTokens` budget (`POST` only); the person (none, or any `X-Alvo-Api-Key`, a
 token included → 401 `Bearer`; a key beside a Bearer → 401 `invalid_request`); `auth.apiTokens`
 (404 `feature-disabled`); then, for `POST`, whether this host would ever resolve a token (the same 404, with a sentence
 naming a replaced `IApiKeyStore`), the JSON body (415, then 422), the kind's own switch (404
@@ -954,7 +954,7 @@ the registry.
 
 | Route | Who | Answers |
 |---|---|---|
-| `POST /tokens` `{name, kind, tenantId?, roles?, scopes, expiresAt}` | personal: any person; service: an owner of a shared tenant | 201 with `token`, the only answer that carries it, and no `Location`; 404 `feature-disabled` on a host that replaced the `IApiKeyStore`; 403 for a member who is not an owner; 404 for a tenant the person is not in, byte for byte an unknown tenant's; 409 `conflict` for a personal tenant or past 100 live tokens; 422 at the offending pointer; 429 past `Alvo:Api:RateLimits:Create` |
+| `POST /tokens` `{name, kind, tenantId?, roles?, scopes, expiresAt}` | personal: any person; service: an owner of a shared tenant | 201 with `token`, the only answer that carries it, and no `Location`; 404 `feature-disabled` on a host that replaced the `IApiKeyStore`; 403 for a member who is not an owner; 404 for a tenant the person is not in, byte for byte an unknown tenant's; 409 `conflict` for a personal tenant or past 100 live tokens; 422 at the offending pointer; 429 past `Alvo:Api:RateLimits:ApiTokens` |
 | `GET /tokens` | any person | 200, newest first: their personal tokens and the service tokens of the shared tenants they own; `status` is `revoked` > `expired` > `active`; never `token`, never a hash |
 | `DELETE /tokens/{keyId}` | a personal token: its minter; a service token: its minter or any owner of its tenant | 204, also the second time (the first `revokedAt` is kept); one identical 404 for an unknown id, another person's personal token and a service token of a tenant the caller does not own |
 
@@ -966,8 +966,8 @@ tenant", at `/roles`). `scopes` are one or more unique `entity:read` / `entity:w
 refusal lists the descriptor's entities and repeats nothing that was sent. `expiresAt` is RFC 3339 with an offset,
 later than now and at most `maxLifetimeDays` ahead. An unknown member is refused at its own pointer.
 
-**Minting is charged the `Create` budget** (`Alvo:Api:RateLimits:Create`, default 10 per client per minute) — the one
-`POST /tenants` draws on, so the two share it (D15). Listing and revoking are not charged.
+**Minting is charged its own budget** (`Alvo:Api:RateLimits:ApiTokens`, default 10 per client per minute) — not the one
+`POST /tenants` draws on (#542 item 3 split D15's shared budget). Listing and revoking are not charged.
 
 Three behaviours, recorded so they read as decisions:
 
@@ -1005,7 +1005,7 @@ Three behaviours, recorded so they read as decisions:
 | Default-deny: without `apiTokens` every token route is 404 naming its key, and a kind switched off is 404 naming its own; apply refuses `service` without `createTenants` | `TokenRoutesTests.Without_api_tokens_every_route_is_404_naming_its_key`, `…A_kind_switched_off_is_404_naming_its_key`, `…Without_api_tokens_list_and_revoke_are_404_naming_its_key`; `ApiTokensCheckTests.Service_tokens_without_self_service_are_refused`, `…Service_tokens_without_create_tenants_are_refused`; `AppTokenPolicyTests` |
 | Every bound of the body is refused at its pointer: scopes without a wildcard and only declared entities, listed in the refusal; expiry at most `maxLifetimeDays` ahead | `AppTokenRequestTests.Each_bound_is_refused_at_its_pointer`, `…An_unknown_entity_is_refused_with_the_descriptor_s_entities`, `…Exactly_max_lifetime_is_accepted`; `TokenRoutesTests.An_invalid_body_is_422_and_stores_nothing` |
 | A token is minted only where it would resolve: a host that replaced the `IApiKeyStore` gets the `feature-disabled` 404 naming `auth.apiTokens` and stores nothing; a host that decorates it keeps minting, and the token works | `AppTokenReachTests.A_host_that_replaced_the_api_key_store_is_refused_the_mint`, `…A_host_that_decorates_the_api_key_store_keeps_minting_and_its_tokens_resolve`; `ApiKeyStoresTests.The_reach_probe_is_answered_only_with_a_registry_and_is_never_a_key` |
-| Minting shares the `Create` budget with tenant creation | `TokenRoutesTests.Minting_answers_429_after_the_create_budget_and_shares_it_with_tenant_creation` |
+| Minting has its own budget and shares none with tenant creation (#542) | `TokenRoutesTests.Minting_answers_429_after_its_own_budget_and_shares_none_with_tenant_creation` |
 | `lastUsedAt` is minute-grained, and its write never fails a request | `ApiKeyStoresTests.App_token_touches_are_throttled_to_one_a_minute`; `TokenRoutesTests.Last_used_is_recorded_within_a_minute`; `AppTokenResolutionTests.A_failed_last_used_write_never_fails_a_request_whose_token_is_valid` |
 | One person shape and one key for a creator (#542 item 1): an invitation and a token name theirs as `createdBy: { id, name }` — the name as it reads now, `null` when there is none — the mint's 201 is its list item plus the credential, and the anonymous preview names the creator by name alone | `InvitationStoreFacts.An_invitation_names_its_creator_by_their_current_display_name` (both engines); `AppTokenResponseTests.A_minted_token_answers_its_list_item_with_the_credential_and_its_header`, `…A_person_without_a_display_name_is_named_null_and_the_preview_never_names_an_id`; `InvitationRoutesTests.An_owner_invites_and_the_code_is_answered_once`; `InvitationAcceptTests.Anyone_holding_the_code_previews_it_without_signing_in` |
 | A configured API key behaves exactly as before (AC7) | `AppTokenManagementTests.A_configured_key_still_manages_as_before`; `ApiKeyStoresTests.Dev_keys_resolve_from_configuration_and_app_tokens_from_the_registry`; `ApiKeyContextResolverTests`, unchanged |
@@ -1057,7 +1057,9 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
   the token's list item plus `token` and `header` (S4 D11's shape), and the minter is `createdBy: { id, name }`, the
   key and shape every `/auth/v1` answer names a creator with — it was `mintedBy: { id, displayName }`.
 - **D15** — minting is charged `Alvo:Api:RateLimits:Create`, the budget `POST /tenants` already draws on (spec §7.3).
-  One budget for both, recorded; listing and revoking are not charged.
+  One budget for both, recorded; listing and revoking are not charged. **Reverted by #542 item 3:** each act has its own
+  hard cap (`maxPerAccount`, 100 live tokens), so a shared budget only coupled them; minting is charged
+  `Alvo:Api:RateLimits:ApiTokens` and tenant creation `Alvo:Api:RateLimits:Tenants`.
 - **D16** — public growth is exactly `ApiKeyKind`, `ApiKeyRecord.Kind`, `ApiKeyRecord.MintedBy`, `Auth.AccessTokens` and
   `AuthApiTokens`. No new problem type.
 

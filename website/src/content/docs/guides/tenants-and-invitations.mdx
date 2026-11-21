@@ -401,8 +401,8 @@ new can ever sign up. The apply still succeeds, because closed registration is a
   `401` with `WWW-Authenticate: Bearer`, the same answer as no credential at all. Previewing a code is the exception: it
   needs only a valid code, and no sign-in.
 - **Rate limits per client address.** The five invitation routes share 20 requests a minute
-  (`Alvo:Api:RateLimits:Invitations`). Creating a tenant and minting a token share 10
-  (`Alvo:Api:RateLimits:Create`). Past either, the answer is `429` with `Retry-After`.
+  (`Alvo:Api:RateLimits:Invitations`). Creating a tenant has 10 (`Alvo:Api:RateLimits:Tenants`), and minting a token
+  10 of its own (`Alvo:Api:RateLimits:ApiTokens`). Past any of them, the answer is `429` with `Retry-After`.
 - **People's tenants are the tenant list.** With `selfService` on, work that runs once per tenant (a cron
   [automation](/extending/automation/#triggers), a per-tenant [schedule](/extending/time/#schedules), a
   [data migration](/extending/time/#data-migrations)) runs for every shared tenant people created, and every personal
