@@ -524,6 +524,16 @@ name: Mutation
 # `debug-log: true` in the matrix and so run Stryker with `--log-to-file`. See
 # "`log-to-file` IS A COMMAND-LINE FLAG" below for why it is not in their configs.
 #
+# SELF-SERVICE IS MEASURED (run 44850064624, 2026-11-21, the first run in which it could
+# start): 280 mutants (estimated 95; the 0.48 upper end, 284, was the right ratio), 398 tests,
+# 225 K / 55 S / 0 T / 0 Errors, 80.36 %, 105.5 min of Stryker in a 106-minute job — more than
+# twice the ~48 the budget was estimated on. Zero timeouts (check 6 is far away) and, notably,
+# ZERO RuntimeErrors: a TestHost suite is not by itself what turns commands-http's mutants into
+# errors. Its thresholds and matrix entry are no longer provisional: break = 80.36 − max(2 pp,
+# 0.71 pp) = 78.36 -> 78, `low` 80, `high` 90 (80 is passed); REAL SLACK
+# 225 − ceil(0.78 × 280) = 6. `timeout:` 210, 2x the job. accounts and accounts-store were
+# still running when this was written; they remain PROVISIONAL until their numbers land.
+#
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
 # mutates the Data API's query parsing, authorization filter, idempotency or ETag
@@ -1080,8 +1090,9 @@ jobs:
             mutants: 122    # run 44850064624, 2026-11-21 (was 33; 68 by 2026-11-07, 110 by 11-12, unreported)
             suite: 262      # run 44850064624, 2026-11-21 (was 180)
             timeout: 30     # measured 2 min (1 min 31 s of Stryker on run 44850064624)
-          # THE ACCOUNTS LEGS — UNMEASURED. Every number on the three legs below is an estimate,
-          # and so are their configs' thresholds; "THE ACCOUNTS LEGS" in the header says how each
+          # THE ACCOUNTS LEGS — accounts and accounts-store UNMEASURED (self-service measured
+          # 2026-11-21). Every number on those two legs is an estimate, and so are their configs'
+          # thresholds; "THE ACCOUNTS LEGS" in the header says how each
           # was derived and what the first real run must replace it with.
           - name: accounts
             config: stryker-config.accounts.json
@@ -1112,13 +1123,9 @@ jobs:
           - name: self-service
             config: stryker-config.self-service.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 95     # ESTIMATED lower bound, not a probe (~592 code lines x 0.16, S5 included); re-probe on the first run
-            suite: 383      # MTP's own Accounts.Tests count after S5 task 8, 2026-11-20 — not yet Stryker's
-            timeout: 300    # MEASURING BUDGET, as on `accounts` above. The estimate was 90: one
-                            # assembly (Accounts.Tests over TestHost), up to ~179 mutants at concurrency 4.
-                            # commands-http's TestHost suite cost ~42 s per mutant of wall clock at 1034
-                            # tests; scaled to ~295 tests that is ~12 s, so ~36 min on a 10-core box and
-                            # ~48 on a runner. Cut to 2x the first run's wall clock.
+            mutants: 280    # run 44850064624, 2026-11-21 (estimated 95) — see SELF-SERVICE IS MEASURED
+            suite: 398      # same run (MTP's own count was 383)
+            timeout: 210    # 2x the measured job: 106 min (105.5 of Stryker) on run 44850064624
             debug-log: true
     steps:
       - name: Checkout
