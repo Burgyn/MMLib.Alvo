@@ -29,6 +29,9 @@
 #   scripts/test-load --tier calibration --scenarios create,hook_unit,hook_noop,hook_read,hook_after   # the hook calibration (HX-10)
 
 set -euo pipefail
+# Chosen per arm by use_image and nowhere else: inherited from the caller's shell, they would point every compose call
+# that does not name an arm — the stack's first start, the seed, cleanup — at a database or a descriptor it did not pick.
+unset ALVO_LOAD_DATABASE ALVO_LOAD_DESCRIPTOR
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/.." && pwd)"
 cd "$ROOT"
@@ -250,8 +253,9 @@ build_hooks_image() {
 }
 
 # The alvo service is recreated with another arm's image while PostgreSQL stays put; each arm serves
-# its own database and descriptor (docker-compose.load.yml says why). Both databases are seeded by
-# the same ordinal-derived seed, so a difference between the arms cannot be the rows.
+# its own database and descriptor (docker-compose.load.yml says why), each as it shipped. While the PR
+# leaves seed.sql and the descriptor alone, both databases hold the same rows, because the seed is
+# ordinal-derived; a PR that changes either measures its own rows against the merge base's.
 #   use_image IMAGE [DATABASE] [DESCRIPTOR]   — the last two default to the head arm's
 use_image() {
     local image="$1" database="${2:-$HEAD_DATABASE}" descriptor="${3:-$HEAD_DESCRIPTOR}"
@@ -261,7 +265,7 @@ use_image() {
     # container's anonymous volume, which is a thin thread to hang a measurement on.
     ALVO_LOAD_IMAGE="$image" ALVO_LOAD_DATABASE="$database" ALVO_LOAD_DESCRIPTOR="$descriptor" \
         docker compose "${COMPOSE[@]}" up --wait --no-build --no-deps --force-recreate alvo >/dev/null \
-        || alvo_did_not_start "$image"
+        || stack_did_not_start "$image"
 }
 
 # The base arm: the merge base's image over its own database, serving its own descriptor.
@@ -269,19 +273,21 @@ use_base_arm() {
     use_image "$IMAGE_BASE" "$BASE_DATABASE" "$WORKTREE/examples/field-service/field-service.alvo.json"
 }
 
-# A container that exits before it is healthy is reported with its own log, not with compose's one line ("exited (139)"),
-# which is all #547's CI run left behind. The container is still there after a failed `--wait`, so its log is too.
-alvo_did_not_start() {
+# A service that exits before it is healthy is reported with its log, not with compose's one line ("exited (139)"), which
+# is all #547's CI run left behind. Every service's, because `--wait` fails for whichever one did not come up — alvo,
+# PostgreSQL or the sink — and compose's own line above already names it. A container is still there after a failed
+# `--wait`, so its log is too.
+stack_did_not_start() {
     local image="$1"
-    say "the alvo container on $image did not become healthy; its log follows"
-    ALVO_LOAD_IMAGE="$image" docker compose "${COMPOSE[@]}" logs --no-color --tail 200 alvo >&2 || true
-    die "the alvo service did not start on $image — its log is above"
+    say "the stack did not become healthy with $image; the services' logs follow"
+    ALVO_LOAD_IMAGE="$image" docker compose "${COMPOSE[@]}" logs --no-color --tail 200 >&2 || true
+    die "the stack did not become healthy with $image — the service compose named above has its log there"
 }
 
 stack_up() {
     say "starting the stack on $BASE_URL"
     ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" up --wait --no-build >/dev/null \
-        || alvo_did_not_start "$IMAGE_HEAD"
+        || stack_did_not_start "$IMAGE_HEAD"
 }
 
 #   psql_in_container DATABASE PSQL-ARGS…
@@ -313,15 +319,17 @@ reset_created_rows() {
         -c "DELETE FROM work_orders WHERE reference LIKE 'WO-9%' OR reference LIKE 'WO-8%';" >/dev/null
 }
 
-# The base arm's database, created empty, its schema applied by the base image's own boot, then seeded with the base's
-# seed and read back through the base's API — the same validity check the head arm's seed passes.
+# The base arm's database, created empty — dropped first, so a stack kept by --keep can be run again — its schema applied
+# by the base image's own boot, then seeded with the base's seed and read back through the base's API: the same validity
+# check the head arm's seed passes. Two -c, because neither statement may run inside the one transaction a single -c is.
 prepare_base_arm() {
     local base_descriptor="$WORKTREE/examples/field-service/field-service.alvo.json"
     local base_seed="$WORKTREE/test/load/seed.sql"
     [ -f "$base_descriptor" ] || die "$BASELINE_REF has no examples/field-service/field-service.alvo.json — the base arm serves the descriptor it shipped"
     [ -f "$base_seed" ] || die "$BASELINE_REF has no test/load/seed.sql — the base arm is seeded by its own"
     say "preparing the base arm's database ($BASE_DATABASE)"
-    psql_in_container "$HEAD_DATABASE" -c "CREATE DATABASE $BASE_DATABASE;" >/dev/null
+    psql_in_container "$HEAD_DATABASE" \
+        -c "DROP DATABASE IF EXISTS $BASE_DATABASE WITH (FORCE);" -c "CREATE DATABASE $BASE_DATABASE;" >/dev/null
     use_base_arm
     seed "$BASE_DATABASE" "$base_seed"
     assert_seed_is_visible

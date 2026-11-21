@@ -10,9 +10,10 @@
 # its own descriptor, in its own database of the same PostgreSQL server, seeded by its own
 # seed.sql. Handed the head's descriptor, an older image refuses every key it does not know; the
 # head's database carries framework tables it never wrote, and no version contract says whether it
-# may serve them (deviation 55, docs/architecture/host.md). The seed derives every
-# id from a row ordinal, so the two databases hold the same rows by construction. Unset, both
-# variables name the head arm's, which is all the single-arm tiers ever use.
+# may serve them (deviation 55, docs/architecture/host.md). While a PR leaves seed.sql and the
+# descriptor alone, the two databases hold the same rows, because the seed derives every id from a
+# row ordinal; a PR that changes either is measured as it ships against the merge base as it
+# shipped. Unset, both variables name the head arm's, which is all the single-arm tiers ever use.
 #
 # `pull_policy: never` is the guard that matters here: without it a typo in the tag would send
 # compose to Docker Hub for "alvo-load", and the run would either hang or measure something that

@@ -74,8 +74,15 @@ factor alone on a two-millisecond endpoint is noise, and a gate that fires on no
 descriptor from its own database (`alvo_load_base`, beside the head's on the same PostgreSQL), seeded
 by the merge base's own `seed.sql` and read back through its API before k6 starts. Sharing the head's
 was how the gate broke on the accounts stack: the older image refused the head descriptor's new keys
-and exited before measuring anything. The seed derives every id from a row ordinal, so both databases
-hold the same rows. A container that does not become healthy has its log printed before the run stops.
+and exited before measuring anything. While a PR leaves `seed.sql` and the descriptor alone, both
+databases hold the same rows, because the seed derives every id from a row ordinal; a PR that changes
+either is measured as it ships against the merge base as it shipped. When a service does not become
+healthy, every service's log is printed before the run stops.
+
+The merge base is checked out under `$TMPDIR` and its descriptor is bind-mounted from there. Docker
+Desktop shares that path; Colima and Rancher Desktop share only `$HOME` by default, so on those run
+with `TMPDIR` under your home directory (`TMPDIR=$HOME/.cache/tmp scripts/test-load --baseline-ref …`)
+or the base arm mounts an empty directory and refuses to start.
 
 ## The gating statistic is `min`, and p95 is reported but never gated
 
