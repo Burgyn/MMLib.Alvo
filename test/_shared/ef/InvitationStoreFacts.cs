@@ -88,6 +88,26 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
         (listed.CreatedBy, listed.CreatorName).ShouldBe((owner, "Ada Lovelace"));
     }
 
+    /// <summary>
+    /// The creator's name is left-joined on, never inner-joined: an invitation whose creator has no account row any more
+    /// is still listed — named by id, with a <see langword="null"/> name — rather than silently dropped from its owners'
+    /// list (#542 item 1).
+    /// </summary>
+    [Fact]
+    public async Task An_invitation_whose_creator_has_no_account_row_is_still_listed_with_no_name()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var request = Invite(tenant, owner);
+        await store.CreateInvitationAsync(request, Ct);
+
+        await ScalarAsync(
+            services, $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} WHERE id = '{owner.Value:D}'");
+
+        var listed = (await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem();
+        (listed.Id, listed.CreatedBy, listed.CreatorName).ShouldBe((request.Id, owner, null));
+    }
+
     [Fact]
     public async Task A_member_who_is_not_an_owner_cannot_invite()
     {

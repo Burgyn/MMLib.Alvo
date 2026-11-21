@@ -29,16 +29,22 @@ internal sealed partial class EfCoreTenantStore
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        InvitationView? stored = null;
         var status = await MemberWriteAsync(
             request.Tenant,
             request.Actor,
-            (connection, transaction, actor, token) => InvitedAsync(connection, transaction, request, actor, token),
+            async (connection, transaction, actor, token) =>
+            {
+                var (written, view) = await InvitedAsync(connection, transaction, request, actor, token).ConfigureAwait(false);
+                stored = view;
+                return written;
+            },
             ct,
             request.Session is { } session ? (connection, transaction, token) => SessionLiveAsync(connection, transaction, request, session, token) : null)
             .ConfigureAwait(false);
 
         return status == MemberChangeStatus.Changed
-            ? new CreateInvitationOutcome(status, await StoredViewAsync(request.Id, ct).ConfigureAwait(false))
+            ? new CreateInvitationOutcome(status, stored)
             : new CreateInvitationOutcome(status, null);
     }
 
@@ -88,22 +94,30 @@ internal sealed partial class EfCoreTenantStore
             ct);
     }
 
-    private async Task<MemberChangeStatus> InvitedAsync(
+    /// <summary>
+    /// Inserts the invitation an owner asked for and reads it back in the same transaction, as the list reads it — so the
+    /// answer names its creator exactly as the list does (#542 item 1), and nothing can fail between the durable write and
+    /// the one answer that carries the code (the token mint's precedent).
+    /// </summary>
+    private async Task<(MemberChangeStatus Status, InvitationView? Stored)> InvitedAsync(
         DbConnection connection, DbTransaction transaction, CreateInvitationRequest request, StoredMembership actor, CancellationToken ct)
     {
         if (actor.Kind == TenantKind.Personal)
         {
-            return MemberChangeStatus.PersonalTenant;
+            return (MemberChangeStatus.PersonalTenant, null);
         }
 
         if (!actor.IsOwner)
         {
-            return MemberChangeStatus.NotOwner;
+            return (MemberChangeStatus.NotOwner, null);
         }
 
         await ExecuteAsync(connection, transaction, _invitations.InsertSql, command => BindInvitation(command, request), ct)
             .ConfigureAwait(false);
-        return MemberChangeStatus.Changed;
+        var stored = await RelationalSqlBatch.ReadRowsAsync(
+            connection, transaction, _invitations.ViewSql, command => Bind(command, ("@id", Id(request.Id))), InvitationTables.ReadView, ct)
+            .ConfigureAwait(false);
+        return (MemberChangeStatus.Changed, stored.Single());
     }
 
     /// <summary>
@@ -160,15 +174,4 @@ internal sealed partial class EfCoreTenantStore
         ("@expires_at", Instant(request.ExpiresAt)),
         ("@created_by", Id(request.Actor)),
         ("@now", Instant(request.Now)));
-
-    /// <summary>
-    /// The invitation the creation just committed, read back as the list reads it — so the creation's answer names its
-    /// creator exactly as the list does (#542 item 1), from the one <see cref="InvitationTables.ReadView"/>.
-    /// </summary>
-    private async Task<InvitationView> StoredViewAsync(Guid invitation, CancellationToken ct) =>
-        (await ReadAsync(
-            _invitations.ViewSql,
-            command => Bind(command, ("@id", Id(invitation))),
-            InvitationTables.ReadView,
-            ct).ConfigureAwait(false)).Single();
 }

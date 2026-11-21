@@ -52,6 +52,8 @@ public sealed class InvitationAcceptTests
         anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
         var expires = team.World.Clock.GetUtcNow().AddDays(7).AddMinutes(-1).ToString("yyyy-MM-ddTHH:mm:ss+00:00", CultureInfo.InvariantCulture);
         text.ShouldBe($$"""{"tenantName":"Acme","createdBy":{"name":"Ada Lovelace"},"roles":["dispatcher","technician"],"isOwner":false,"expiresAt":"{{expires}}","emailBound":true}""");
+        var creator = JsonNode.Parse(text)!["createdBy"]!.AsObject();
+        creator.ContainsKey("id").ShouldBeFalse("an anonymous preview never names an account id (#542)");
         keyed.StatusCode.ShouldBe(HttpStatusCode.OK, await keyed.ReadTextAsync());
         (await keyed.ReadTextAsync()).ShouldBe(text);
     }
