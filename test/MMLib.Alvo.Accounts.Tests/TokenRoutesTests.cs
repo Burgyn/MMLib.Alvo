@@ -214,6 +214,23 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
+    public async Task A_personal_tenant_the_descriptor_no_longer_honours_is_the_stranger_404_for_a_service_token()
+    {
+        await using var team = await TeamAsync();
+        var personal = (await team.World.PersonalTenantAsync(team.Ada)).Value;
+        await team.World.ReapplyAsync(descriptor => descriptor["tenancy"]!["selfService"]!.AsObject().Remove("personalTenant"));
+
+        using var unhonoured = await team.World.MintAsync(team.Ada, Service(team, personal, ["dispatcher"], ["jobs:read"]));
+        using var unknown = await team.World.MintAsync(team.Ada, Service(team, Guid.NewGuid(), ["dispatcher"], ["jobs:read"]));
+
+        unhonoured.StatusCode.ShouldBe(HttpStatusCode.NotFound, await unhonoured.ReadTextAsync());
+        (await unhonoured.Content.ReadAsByteArrayAsync(Ct)).ShouldBe(
+            await unknown.Content.ReadAsByteArrayAsync(Ct),
+            "a membership no route honours is a stranger's, not the personal tenant's 409");
+        (await team.World.CountAsync("_api_keys")).ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_service_token_carries_only_roles_its_owner_holds()
     {
         await using var team = await TeamAsync();
@@ -302,13 +319,33 @@ public sealed class TokenRoutesTests
     public async Task The_live_cap_is_409()
     {
         await using var team = await TeamAsync();
-        await SeedLiveAsync(team, 100);
+        await SeedLiveAsync(team, team.AdaId, 100);
 
         using var response = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
 
         response.StatusCode.ShouldBe(HttpStatusCode.Conflict, await response.ReadTextAsync());
         (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Conflict);
         (await response.ReadProblemDetailAsync()).ShouldContain("100 live tokens");
+        (await team.World.CountAsync("_api_keys")).ShouldBe(100);
+    }
+
+    [Fact]
+    public async Task A_stranger_at_the_live_cap_is_the_same_404_for_either_kind()
+    {
+        await using var team = await TeamAsync();
+        var (carol, _) = await team.World.SignInAsync("carol", email: "carol@gmail.com");
+        await SeedLiveAsync(team, await team.World.UserIdAsync(carol), 100);
+
+        var bodies = new List<byte[]>();
+        foreach (var request in new[] { Personal(team, team.Tenant), Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]) })
+        {
+            using var response = await team.World.MintAsync(carol, request);
+            response.StatusCode.ShouldBe(HttpStatusCode.NotFound, await response.ReadTextAsync());
+            bodies.Add(await response.Content.ReadAsByteArrayAsync(Ct));
+        }
+
+        bodies.Select(Convert.ToBase64String).Distinct(StringComparer.Ordinal).Count()
+            .ShouldBe(1, "the cap is the stranger's own, and must not tell a service mint from a personal one");
         (await team.World.CountAsync("_api_keys")).ShouldBe(100);
     }
 
@@ -740,14 +777,14 @@ public sealed class TokenRoutesTests
         return minted["token"]!.GetValue<string>();
     }
 
-    private static async Task SeedLiveAsync(Team team, int count)
+    private static async Task SeedLiveAsync(Team team, UserId minter, int count)
     {
         var store = team.World.Api.Services.GetRequiredService<IAppTokenStore>();
         var now = team.World.Clock.GetUtcNow();
         for (var i = 0; i < count; i++)
         {
             var seed = new MintTokenRequest(
-                $"alvo_pat_seed{i}", ApiKeyKind.Personal, "hash", "seed", team.AdaId, team.AdaId, null, [], ["jobs:read"], now.AddDays(7), count + 1, now);
+                $"alvo_pat_seed{i}", ApiKeyKind.Personal, "hash", "seed", minter, minter, null, [], ["jobs:read"], now.AddDays(7), count + 1, now);
             (await store.MintAsync(seed, Ct)).Status.ShouldBe(MintTokenStatus.Minted);
         }
     }

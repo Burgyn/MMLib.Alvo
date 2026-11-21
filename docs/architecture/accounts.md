@@ -1000,9 +1000,12 @@ later than now and at most `maxLifetimeDays` ahead. An unknown member is refused
 
 Three behaviours, recorded so they read as decisions:
 
-- **A caller already at the live cap gets 409 before any tenant check.** The registry counts the minter's live tokens
-  under the account lock first, so a person holding 100 who asks for a service token in a stranger's tenant is told
-  409, not 404. The answer reveals only their own state.
+- **A stranger's tenant is 404 before the live cap, for either kind.** The registry counts the minter's live tokens
+  under the account lock before it reads the membership, so the route asks the membership first
+  (`SelfServiceCall.MembershipAsync`, the one every tenant-scoped route asks): a person holding 100 who asks for a token
+  in a stranger's tenant is told 404, personal or service alike, never 409 for one kind and 404 for the other
+  (`TokenRoutesTests.A_stranger_at_the_live_cap_is_the_same_404_for_either_kind`). The registry still checks the
+  membership again in the mint's transaction. Inside a tenant they are in, the cap is 409 before the tenant's own checks.
 - **A service token the descriptor no longer honours is invisible to the token routes.** While `selfService` is off no
   shared membership counts, so the list drops service tokens, and revoking one answers the unknown id's 404 without
   touching the registry. Both use one predicate (`TokenRoutes.Honoured`, over S3's `MembershipRules.Honours`). Turn

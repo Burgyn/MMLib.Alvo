@@ -24,12 +24,12 @@ internal static partial class AccountsSchemas
 
     private static void AddAppTokenComponents(OpenApiDocument document)
     {
-        document.AddComponent(AppTokenRequestId, AppTokenRequest());
-        document.AddComponent(AppTokenId, AppToken(document));
-        document.AddComponent(AppTokenListItemId, AppTokenListItem(document));
+        document.AddComponent(AppTokenRequestId, AppTokenRequestSchema());
+        document.AddComponent(AppTokenId, AppTokenSchema(document));
+        document.AddComponent(AppTokenListItemId, AppTokenListItemSchema(document));
     }
 
-    private static OpenApiSchema AppTokenRequest()
+    private static OpenApiSchema AppTokenRequestSchema()
     {
         var schema = Object(
             "A new personal or service token. `name`, `kind`, `scopes` and `expiresAt` are always required; no other property is accepted.",
@@ -81,7 +81,7 @@ internal static partial class AccountsSchemas
         return schema;
     }
 
-    private static OpenApiSchema AppToken(OpenApiDocument document)
+    private static OpenApiSchema AppTokenSchema(OpenApiDocument document)
     {
         var properties = AppTokenProperties(document);
         properties.InsertRange(
@@ -96,7 +96,7 @@ internal static partial class AccountsSchemas
             [.. properties]);
     }
 
-    private static OpenApiSchema AppTokenListItem(OpenApiDocument document) => Object(
+    private static OpenApiSchema AppTokenListItemSchema(OpenApiDocument document) => Object(
         "An app token as listed: never its credential or a hash.",
         _appTokenRequired,
         [.. AppTokenProperties(document)]);
@@ -121,9 +121,9 @@ internal static partial class AccountsSchemas
         ("revokedAt", NullableInstant("When it was revoked; null while it is not.")),
         ("status", Enumerated(
             "`revoked`, else `expired`, else `active` — the first that holds, judged when the answer was made.",
-            MMLib.Alvo.Tenants.SelfService.AppTokenListItem.ActiveStatus,
-            MMLib.Alvo.Tenants.SelfService.AppTokenListItem.ExpiredStatus,
-            MMLib.Alvo.Tenants.SelfService.AppTokenListItem.RevokedStatus)),
+            AppTokenListItem.ActiveStatus,
+            AppTokenListItem.ExpiredStatus,
+            AppTokenListItem.RevokedStatus)),
     ];
 
     private static OpenApiSchema NullableInstant(string description)
