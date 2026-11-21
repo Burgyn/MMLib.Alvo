@@ -13,6 +13,9 @@
          ring0 Docker-free. -->
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
     <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <!-- Already reached through Data.Sqlite; named directly for the accounts-store mutation leg, which needs a
+         test project that references the EF adapter DIRECTLY — see MMLib.Alvo.Data.Sqlite.Tests.csproj. -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

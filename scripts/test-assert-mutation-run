@@ -768,6 +768,112 @@ derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\10/' || exit 
 assert_ok "a bare 'Timeout: 0' is a legitimate reading, not a malformed one" \
   "$DERIVED" "$CORE_CFG" 543 1135
 
+# ============================================ check 7 — the RuntimeError share
+#
+# Stryker leaves an errored mutant out of the score, so a run that is nearly all errors
+# scores on what is left. commands-http-runtime-errors.txt is the real capture: 157 tested,
+# 1 Killed / 156 Errors, "100.00 %", exit 0, a green leg.
+echo "check 7 — a score computed over the few mutants that did not error is not a measurement"
+
+HTTP_CFG="$ROOT/stryker-config.commands-http.json"
+ERROR_SHARE="ended in a RuntimeError"
+NO_ERRORS_LINE="but never 'Errors: N'"
+
+assert_rejected "a leg that is 156 of 157 RuntimeErrors is rejected, whatever score it printed" "$ERROR_SHARE" \
+  "$FIXTURES/commands-http-runtime-errors.txt" "$HTTP_CFG" 157 1236
+case "$GUARD_OUT" in
+  *"156 of 157"*) pass "the rejection names the counts (156 of 157)" ;;
+  *) fail "the rejection names the counts (156 of 157)" "'156 of 157' in the message" "$GUARD_OUT" ;;
+esac
+
+# One-sided, at the same integer ceiling as check 6: 565 tested -> 113 allowed, 114 refused.
+# The digits sit between SGR escapes in this CI capture, so only they are perturbed.
+derive data-ef-rest-no-timeouts.txt 's/\(^Errors:  .*13m\)  0/\1113/' || exit 1
+assert_ok "errors exactly at the 20 % ceiling are accepted (the bound is one-sided)" \
+  "$DERIVED" "$REST_CFG" 565 554
+derive data-ef-rest-no-timeouts.txt 's/\(^Errors:  .*13m\)  0/\1114/' || exit 1
+assert_rejected "one errored mutant over the ceiling is rejected" "$ERROR_SHARE" \
+  "$DERIVED" "$REST_CFG" 565 554
+
+# Fail-closed on a rewording, like check 6.
+derive data-ef-rest-no-timeouts.txt '/^Errors:/d' || exit 1
+assert_rejected "a summary with no 'Errors:' line is refused, not read as zero" "$NO_ERRORS_LINE" \
+  "$DERIVED" "$REST_CFG" 565 554
+
+# ================================== every config key is one Stryker accepts at all
+#
+# Stryker refuses a WHOLE config over one key it does not know, at startup, before it
+# mutates anything — and post-merge is the first place that is seen. #486 put
+# `"log-to-file": true` (a command-line flag, `-L|--log-to-file`) into
+# stryker-config.commands-http.json, three accounts configs copied it, and those four legs
+# then failed in ~30 s with no score on every main run for nine days. This is the same
+# refusal, made on the PR in milliseconds.
+#
+# The list is Stryker 4.16.0's own, copied verbatim from that refusal (run 44834820709,
+# leg "commands and webhooks over HTTP"). It is pinned to the version in
+# .config/dotnet-tools.json: a Stryker bump that adds or drops a key needs it re-copied,
+# and the error message that bump prints when a config breaks is where to copy it from.
+STRYKER_KEYS='additional-timeout baseline break-on-initial-test-failure concurrency configuration
+coverage-analysis dashboard-url disable-bail disable-mix-mutants ignore-methods ignore-mutations
+language-version mutate mutation-level project project-info report-file-name reporters since
+solution target-framework test-case-filter test-projects test-runner thresholds verbosity'
+if ! command -v jq >/dev/null 2>&1; then
+  fail "every stryker-config*.json key is one Stryker accepts" "jq on PATH" "jq is not installed"
+else
+  allowed="$(printf '%s\n' $STRYKER_KEYS | jq -R . | jq -s .)"
+
+  # FAIL-CLOSED. The first version failed open two ways, which are the negative cases
+  # below: a config whose wrapper key is not "stryker-config" (`null | keys` errors) and a
+  # file that is not JSON at all (jq dies) both left the captured output EMPTY, which read
+  # as "no unknown keys" — a pass. So a missing wrapper is an explicit error, and jq's
+  # exit status is checked before its output is.
+  # Sets UNKNOWN; returns non-zero when the file could not be judged at all.
+  unknown_keys() { # <config>
+    UNKNOWN="$(jq -r --argjson allowed "$allowed" \
+      '(.["stryker-config"] // error("no \"stryker-config\" object")) | keys - $allowed | join(", ")' "$1" 2>&1)"
+  }
+
+  judge_config() { # <label> <config>
+    if ! unknown_keys "$2"; then
+      fail "$1" "a config jq can read, wrapped in \"stryker-config\"" "jq refused it: $UNKNOWN"
+    elif [ -n "$UNKNOWN" ]; then
+      fail "$1" "keys from Stryker's allowed list" "unknown: $UNKNOWN"
+    else
+      pass "$1"
+    fi
+  }
+
+  for cfg in "$ROOT"/stryker-config*.json; do
+    judge_config "$(basename "$cfg") uses only keys Stryker accepts" "$cfg"
+  done
+
+  # The check must be able to fail, three ways. First, the key that cost the four legs
+  # nine days is refused.
+  probe="$TMP_ROOT/stryker-config.probe.json"
+  jq '.["stryker-config"]["log-to-file"] = true' "$ROOT/stryker-config.canary.json" > "$probe"
+  if unknown_keys "$probe" && [ "$UNKNOWN" = "log-to-file" ]; then
+    pass "a config carrying \"log-to-file\" is refused, as Stryker refuses it"
+  else
+    fail "a config carrying \"log-to-file\" is refused, as Stryker refuses it" "unknown: log-to-file" "$UNKNOWN"
+  fi
+
+  # Then a config under the wrong wrapper key, and a file that is not JSON: neither may
+  # come back as "no unknown keys".
+  jq '{stryker: .["stryker-config"]}' "$ROOT/stryker-config.canary.json" > "$probe"
+  if unknown_keys "$probe"; then
+    fail "a config not wrapped in \"stryker-config\" is refused, not judged empty" "a jq error" "exit 0, unknown: '$UNKNOWN'"
+  else
+    pass "a config not wrapped in \"stryker-config\" is refused, not judged empty"
+  fi
+
+  printf '{"stryker-config": {"project": "x",\n' > "$probe"
+  if unknown_keys "$probe"; then
+    fail "a config that is not valid JSON is refused, not judged empty" "a jq error" "exit 0, unknown: '$UNKNOWN'"
+  else
+    pass "a config that is not valid JSON is refused, not judged empty"
+  fi
+fi
+
 # ============================================================================ total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
