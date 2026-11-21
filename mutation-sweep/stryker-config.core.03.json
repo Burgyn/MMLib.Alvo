@@ -1,0 +1,32 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Data/Internal/FilterTranslator.Calls.cs",
+      "Data/Internal/FilterTranslator.Values.cs",
+      "Data/Internal/FilterTranslator.cs",
+      "Data/Internal/GeneratedEntityCheck.cs",
+      "Data/Internal/GeneratedEntitySource.cs",
+      "Data/Internal/LambdaShape.cs",
+      "Data/Internal/LambdaValues.cs",
+      "Data/Internal/PortFieldFacets.cs",
+      "Data/Internal/RecordMaterializer.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

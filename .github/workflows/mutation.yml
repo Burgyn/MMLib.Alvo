@@ -1,8 +1,10 @@
 name: Mutation
 
-# Mutation testing of the security-relevant logic. Path-filtered so it runs only
-# when a mutated project changes. Eleven targets run in parallel via a matrix, the
-# canary first (see THE CANARY below):
+# Mutation testing of the security-relevant logic. Path-filtered so a push runs it only
+# when a mutated project changes. WHAT RUNS WHEN is THE CADENCE below: on a push, seven legs
+# in full and the four long ones with Stryker `since` the previous main commit; weekly and on
+# workflow_dispatch, the long ones in full as 46 generated shards (mutation-sweep/).
+# The legs, the canary first (see THE CANARY below):
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
 #   - "security core (rules, auth, rest)" → the rest of src/MMLib.Alvo EXCEPT Api/**
@@ -48,8 +50,8 @@ name: Mutation
 #                        (stryker-config.accounts-store.json) — against
 #                        MMLib.Alvo.Data.Sqlite.Tests and MMLib.Alvo.Accounts.Tests. A third
 #                        partition of the EF project beside data-ef-core and data-ef-rest; see
-#                        "THE ACCOUNTS LEGS" below for why, and for how their thresholds were set
-#                        without a measurement.
+#                        "THE ACCOUNTS LEGS" below for why. The one leg still PROVISIONAL: it
+#                        timed out on its first run (ACCOUNTS-STORE TIMED OUT, below).
 #   - "self-service"   → the self-service tenant routes of the core — the twelve
 #                        Tenants/SelfService/** files reachable only through
 #                        SelfServiceEndpoints.Map, whose one caller is MapAlvoAccounts
@@ -171,8 +173,10 @@ name: Mutation
 # where the reasoning lives. It asserts POSITIVELY — the run must not be vacuous, must
 # report the number of test projects the config declares, must not have lost 40 % of
 # either its mutants or its suite, and must not have spent more than 20 % of its mutants
-# on timeouts (check 6, above) — because the first version of the solution-mode check
-# was a negative `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker
+# on timeouts (check 6, above) or on RuntimeErrors (check 7, added 2026-11-21 after
+# commands-http printed 100.00 % on 1 Killed / 156 Errors and went green) — because the
+# first version of the solution-mode check was a negative `grep -q 'will mutate
+# solution'`, which fails OPEN the moment a Stryker
 # release rewords that line. Note especially why the solution-mode check is the
 # TEST-PROJECT count and not the mutant count: solution mode leaves the mutant count
 # untouched (834 and 834, 596 and 596 above) and moves only the suite. The `mutants:` and
@@ -366,6 +370,26 @@ name: Mutation
 # is the gate weakening, so the commit message carries the log or report it was
 # recomputed from.
 #
+# data-postgresql WENT RED ON TWO FEATURES, NOT ON DRIFT, AND WAS RE-CUT 2026-11-21. It last
+# passed on 4b0f25d7 (run 43226956170: 68 mutants, 64 K, 94.12 %). #477's BtreeGistComparison
+# took it to 110 mutants / 85.45 %, the scoped-setNull version check to 122 / 77.87 % (run
+# 44834820709, 27 survivors) — both landed tested on the paths they were written for and not
+# on the rest. Tests for 18 of the 27, plus moving one refusal out of a static initializer
+# (which the MTP runner executes once per test host, with no mutant active), measured on run
+# 44850064624: 115 K / 7 S / 0 T of 122, 94.26 %. The 7 are equivalent: ConfigureAwait(false)
+# -> true (6), and `installed && v >= min` -> `||` on a path reached only when one of the two
+# already decided (1). break = 94.26 − max(2 pp, 2 mutants = 1.64 pp) = 92.26 -> 92 (was 90),
+# `low` 94 (was 95, the Killed-only floor), `high` 100.
+# REAL SLACK 115 − ceil(0.92 × 122) = 115 − 113 = 2 kills.
+# Note the cleartext table's "survived" column: it counts Ignored mutants too, so it read
+# 110 for a leg with 27 survivors, and 36 for AlvoPostgreSqlBuilderExtensions.cs, whose
+# exclusion works (all 34 of its mutants are "Removed by mutate filter"). Read the json report.
+#
+# data-sqlite RE-CUT THE SAME DAY, upward and without ceremony: 113 K / 9 S / 0 T of 122 on
+# both runs 44834820709 and 44850064624, 92.62 %. break = 92.62 − max(2 pp, 1.64 pp) = 90.62
+# -> 90 (was 81, cut on 44 mutants at 86.36 %), `low` 92, `high` 95 (was 90, now passed).
+# REAL SLACK 113 − ceil(0.90 × 122) = 3.
+#
 # WHY `rules, auth, rest` IS THE ONE LEG UNDER 80, AS ARITHMETIC RATHER THAN AS AN EXCUSE.
 # 1707 tested, 988 killed, 719 survivors. Classifying each survivor by whether the mutated
 # string literal is message PROSE (a sentence carrying no contract — bucket 3 of the design
@@ -402,7 +426,9 @@ name: Mutation
 # all — the leg that runs it is the 60-minute one. Its first post-merge score is the
 # measurement.
 #
-# THE ACCOUNTS LEGS (accounts S2, 2026-11-14) — TWO LEGS, AND BOTH ARE UNMEASURED.
+# THE ACCOUNTS LEGS (accounts S2, 2026-11-14) — TWO LEGS, PLUS SELF-SERVICE BELOW. accounts and
+# self-service were measured on 2026-11-21 (ACCOUNTS IS MEASURED, SELF-SERVICE IS MEASURED);
+# accounts-store timed out and is the only one still PROVISIONAL.
 #
 # WHY TWO. A Stryker config mutates ONE project, and sign-in lives in two: the
 # MMLib.Alvo.Accounts package, and the account store inside the EF adapter. The store's
@@ -413,11 +439,16 @@ name: Mutation
 # (SqliteAccountsEngineTests) live in MMLib.Alvo.Accounts.Tests. So every store mutant
 # would have been a survivor by construction — the data-ef-rest blind spot this header
 # already describes, on purpose this time. data-ef-rest now excludes the four files and
-# `accounts-store` mutates them against the two suites that do run them. Both reference the
-# EF project only transitively (through Data.Sqlite), which Stryker resolves the way it
-# already does for Data.Sqlite.Tests on data-ef-core. No test filter: under MTP a filtered
-# run executes the whole assembly anyway (stryker-net#3750, under WHY coverage-analysis
-# above), so a filter would only make the cost look smaller than it is.
+# `accounts-store` mutates them against the two suites that do run them. Both used to reach the
+# EF project only transitively (through Data.Sqlite), on the theory that Stryker resolves that
+# the way it does for Data.Sqlite.Tests on data-ef-core. It does not: data-ef-core resolves
+# through its OTHER suite, EntityFrameworkCore.Tests, which references the project directly.
+# Stryker 4.16 looks only among a test project's direct references, so run 44849353407 (the
+# first that got past `log-to-file`) stopped at "No project found" in 12 s. Both suites now
+# carry a direct ProjectReference to the EF adapter, commented as being for this leg.
+# No test filter: under MTP a filtered run executes the whole assembly anyway
+# (stryker-net#3750, under WHY coverage-analysis above), so a filter would only make the
+# cost look smaller than it is.
 #
 # The tenant registry (accounts S3) joins the store leg for the same reason: its contract
 # facts (test/_shared/ef/TenantStoreFacts.cs) compile into the same two engine suites and
@@ -437,11 +468,13 @@ name: Mutation
 # because here it is not plain DI wiring: it registers the startup refusals
 # (ValidateOnStart) and every AccountsOptionsTests fact builds a real host through it.
 #
-# WHY THE THRESHOLDS ARE `break: 30`, `low: 40`, `high: 80`, PROVISIONAL. This header has
+# WHY accounts-store'S THRESHOLDS ARE STILL `break: 30`, `low: 40`, `high: 80`, PROVISIONAL —
+# the reasoning all three legs started under, which now applies to accounts-store alone (the
+# other two were re-cut from their first run; see the MEASURED paragraphs below). This header has
 # one rule for setting `break` — the KILLED-ONLY score of a measured run minus max(2 pp,
-# 2 mutants) — and these legs have no measured run: running Stryker to take one was out of
-# scope for the change that added them. The prescribed procedure is therefore not
-# applicable yet, and a calibrated-LOOKING number would be the fabrication the api.json
+# 2 mutants) — and a leg with no completed run has nothing to apply it to: running Stryker to
+# take one was out of scope for the change that added these legs. The prescribed procedure
+# is therefore not applicable yet, and a calibrated-LOOKING number would be the fabrication the api.json
 # paragraph above refuses. 30 is chosen as a COLLAPSE floor, not a latch: it is below the
 # lowest honest score any leg here has ever measured (38.15 %, the ten-file commands-http
 # run), so it does not fire on ordinary test debt, and it does fire on the failure no
@@ -450,7 +483,9 @@ name: Mutation
 # the first run needs no ceremony, lowering it would. `low` 40 only colours the report;
 # `high` 80 is the ambition every leg shares.
 #
-# `mutants:` AND `suite:` ARE ESTIMATES TOO, and they are marked as such in the matrix.
+# `mutants:` AND `suite:` WERE ESTIMATES TOO — HISTORY NOW, kept because the miss is the lesson:
+# accounts came in at 1381 against 240, self-service at 280 against 95, accounts-store at 888
+# against 247. All three matrix entries carry measured counts since 2026-11-21. The estimate was:
 # `suite:` is MTP's own case count from `dotnet test` on 2026-11-14 (Accounts.Tests 237,
 # Data.Sqlite.Tests 1228) — the same unit Stryker's "Number of tests found" sums per
 # project (data-ef-core's 2156 = 1286 + 870 on 2026-10-30), but not taken from Stryker.
@@ -461,7 +496,7 @@ name: Mutation
 # -> 139. Both floors are one-sided, so an under-estimate is the safe direction; the upper
 # end of the same ratios (765 and 416) is what the budgets are sized on.
 #
-# THE SELF-SERVICE LEG (accounts S3, 2026-11-14) — A THIRD, AND UNMEASURED TOO. S3 put the
+# THE SELF-SERVICE LEG (accounts S3, 2026-11-14) — A THIRD, MEASURED 2026-11-21. S3 put the
 # self-service tenant routes in the core project (src/MMLib.Alvo/Tenants/SelfService/**), so
 # the core leg's `**/*.cs` glob swept them up — against MMLib.Alvo.Tests, which references
 # only MMLib.Alvo.csproj and cannot map them: their one entry point, SelfServiceEndpoints.Map,
@@ -473,9 +508,10 @@ name: Mutation
 # MMLib.Alvo.Accounts.Tests (TenantRoutesTests, MemberRoutesTests, the engine facts). The pure
 # half of the folder — MembershipRules, SelfServicePolicy, SelfServiceName, GlobalWriteWarnings,
 # RegistryTenantCatalog, RegistryMembershipResolution — stays on the core leg, whose suite tests
-# it directly. Its thresholds are the same provisional 30 / 40 / 80 for the same reason;
-# `mutants:` is ~374 code lines x 0.16 -> 59 (upper end x 0.48 -> 179, what the budget is sized
-# on), `suite:` MTP's own Accounts.Tests count after S3.
+# it directly. Until its first run its thresholds were the same provisional 30 / 40 / 80, and its
+# `mutants:` an estimate of ~374 code lines x 0.16 -> 59 (upper end x 0.48 -> 179); the three S5
+# paragraphs below track how that estimate grew. All of it is superseded by SELF-SERVICE IS
+# MEASURED.
 #
 # S5 (accounts, tokens) adds three route files to this leg — TokenRoutes, AppTokenResponse, AppTokenProblems
 # (~129 code lines; `POST {prefix}/tokens` and its answers), judged by TokenRoutesTests in the same
@@ -492,11 +528,48 @@ name: Mutation
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
 # its "Number of tests found", `timeout:` with ~2x its wall clock, and `break` with
-# KILLED-ONLY − max(2 pp, 2 mutants), floored — then delete this paragraph's
-# "PROVISIONAL". Check its timeout share against check 6 and its RuntimeError count too:
-# Accounts.Tests drives a real HTTP pipeline over TestHost the way Api.Tests does, and
-# commands-http's run on that kind of suite once came back all RuntimeError (run
-# 42335661278, above) — which is why both configs set `log-to-file`.
+# KILLED-ONLY − max(2 pp, 2 mutants), floored — then mark it measured. Done for accounts and
+# self-service (below); still owed by accounts-store. Check its timeout share against check 6
+# and its RuntimeError count against check 7: Accounts.Tests drives a real HTTP pipeline over
+# TestHost the way Api.Tests does, and commands-http's run on that kind of suite came back all
+# RuntimeError (run 42335661278, below). That is why the unmeasured legs ran with
+# `debug-log: true`; see "`log-to-file` IS A COMMAND-LINE FLAG" below for who keeps it.
+#
+# SELF-SERVICE IS MEASURED (run 44850064624, 2026-11-21, the first run in which it could
+# start): 280 mutants (estimated 95; the 0.48 upper end, 284, was the right ratio), 398 tests,
+# 225 K / 55 S / 0 T / 0 Errors, 80.36 %, 105.5 min of Stryker in a 106-minute job — more than
+# twice the ~48 the budget was estimated on. Zero timeouts (check 6 is far away) and, notably,
+# ZERO RuntimeErrors: a TestHost suite is not by itself what turns commands-http's mutants into
+# errors. Its thresholds and matrix entry are no longer provisional: break = 80.36 − max(2 pp,
+# 0.71 pp) = 78.36 -> 78, `low` 80, `high` 90 (80 is passed); REAL SLACK
+# 225 − ceil(0.78 × 280) = 6. `timeout:` 210, 2x the job.
+#
+# ACCOUNTS IS MEASURED (same run): 1381 mutants (estimated 240 — the documentation files alone,
+# AccountsSchemas*.cs and AccountsDocumentation*.cs, are 740 of them), 398 tests, 1365 K / 12 S /
+# 0 T / 4 Errors, 99.13 %, a 186.5-minute job. Not provisional any more: break = 99.13 − max(2 pp,
+# 0.15 pp) = 97.13 -> 97, `low` 99, `high` 100; REAL SLACK 1365 − ceil(0.97 × 1377) = 29.
+# `timeout:` 340, which is NOT 2x: 373 is past the 360-minute ceiling (see the matrix entry).
+# The score was checked for #142's shape before it was believed, because 99 % is what that
+# defect produced: the 12 survivors are scattered through the run (ids 303-327, 1312-1318, 1454),
+# not bunched at the start of each test host as a process-poisoned suite would leave them; the
+# same suite scored self-service an ordinary 80.36 % in the same run; the canary was honest.
+# What the number does NOT say: most kills are by ~250 of the 398 tests at once (a mutant that
+# breaks host startup or the OpenAPI document fails every test that builds a host), and 732 of
+# the 1365 are documentation strings pinned by the document's snapshot. The 12 survivors are the
+# debt: 8 in AccountsDocumentation.Tenants.cs, 3 in OidcIdTokenVerifier.cs, 1 in PersonResolver.cs.
+#
+# ACCOUNTS-STORE TIMED OUT. It got past the two fixes above (the config key, then the direct
+# ProjectReference) and was cancelled at 300 minutes on run 44850064624 with 888 mutants and 1750
+# tests, so it has no report and no score: its thresholds stay PROVISIONAL. 300 minutes x 4
+# runners / 888 is more than 81 s of runner time per mutant; for comparison data-sqlite, on
+# Data.Sqlite.Tests alone, measured 102 s (122 mutants, 52 min). Two assemblies per mutant is the
+# data-ef-core cost again, and no budget under the ceiling holds it.
+# Its sample on run 44877284451 (EfCoreTenantStore.Members + .Invitations, 148 mutants) was
+# cancelled at 240 minutes too, and the trace log says why: 120 of its 124 mutant runs ended with
+# Stryker force-killing an Accounts.Tests host at the test-run timeout — commands-http's failure,
+# not a slow suite. So it is sharded AND run at `concurrency: 2`, and every number it carries
+# (7 shards, 150 s a mutant) is an ESTIMATE; its `debug-log` stays on until a sweep measures it.
+# See THE CADENCE below.
 #
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
@@ -565,7 +638,58 @@ name: Mutation
 # Every test-host run under a mutant ended in a RuntimeError, where the 2026-10-30 probe had 24 of
 # 145; the suite itself passes under the Stryker environment variables (1133 / 0 failed, run by
 # hand). The cause is not in the log Stryker prints, so the leg now writes Stryker's debug log
-# (`log-to-file`) and uploads it with the json report; read `logs/` in `stryker-log-<shard>` first.
+# (`--log-to-file`) and uploads it with the json report; read `logs/` in `stryker-log-<shard>` first.
+# Runs 42386024356 and 43226956170 (2026-11-07 and 11-12) repeated it: 148 tested, 146 and 144
+# Errors, ~3 h 50 min each, and a "50.00 %" made of two scored mutants that passed `break` 40.
+#
+# `log-to-file` IS A COMMAND-LINE FLAG, NOT A CONFIG KEY, and putting it in the config cost this
+# leg every run since. #486 added `"log-to-file": true` to stryker-config.commands-http.json and
+# the three accounts configs copied it; Stryker 4.16 refuses the whole config at startup — "The
+# allowed keys for the "stryker-config" object are { … } but "log-to-file" was found" — so
+# commands-http has failed in ~30 s with no score on every run since 43280958743 (2026-11-12), the
+# three accounts legs on every run they have had (the first was 44834820709, 2026-11-20), and the
+# debug log they were all meant to write was never written. The key is gone from
+# all four; the matrix's `debug-log: true` passes `-L|--log-to-file` ("always uses loglevel
+# trace"). It is kept only where a leg has an UNEXPLAINED failure to diagnose — commands-http
+# (its host crashes) and accounts-store (it has never finished) — and was dropped from accounts
+# and self-service once their first run came back with 4 and 0 RuntimeErrors: a trace log
+# grows with every test of every mutant, and on the measured legs it would only be cost. The
+# size to watch, now measured (run 44877284451): the trace log itself is 3-8 MB a leg, but the
+# `logs/test-servers/` RPC transcripts beside it ran to ~1 GB for one 104-mutant sample, so the
+# upload now takes `logs/*.txt` only. Since that run explained commands-http's "crashes"
+# (#486'S COMMANDS-HTTP HALF, below), the flag stays only on the accounts-store sweep shards,
+# the one leg still without a measurement.
+# scripts/test-assert-mutation-run now refuses any config key outside the allowed set, on the PR.
+#
+# #486's COMMANDS-HTTP HALF, CLOSED AS FAR AS ONE RUN CAN CLOSE IT. Run 44850064624 is the first
+# since 2026-11-12 to run this leg: 157 mutants, 1236 tests, 1 Killed / 0 Survived / 0 Timeout /
+# 156 Errors in 4 h 02 min, "100.00 %", exit 0 — a GREEN leg on one scored mutant. What it
+# settles: the json report gives every one of the 156 the same `statusReason`, "The test host
+# crashed or became unreachable while testing this mutant", so these are not test failures, and
+# not timeouts (Stryker would say Timeout): the MTP host process dies or stops answering, at
+# ~6 min per mutant per runner. What it does NOT settle is why. The trace log that was the point
+# of `--log-to-file` was written but not uploaded — the upload glob was `logs/*.log` and matched
+# nothing; it is `logs/**` now. Two leads, neither verified: memory (four Api.Tests hosts of 1236
+# tests on a 16 GB runner, where the honest 2026-10-30 run was on a 10-core box with 24 errors of
+# 145, and the Accounts.Tests legs in the same run had 0 and 4), and one test that kills its host
+# under any mutant. Next steps, in order: read `logs/` from the next run; then a single dispatch of
+# this leg at `--concurrency 2`, which separates the two. Meanwhile scripts/assert-mutation-run's
+# check 7 fails a leg whose errors exceed 20 % of its tested mutants, so this leg now goes RED
+# instead of green; its `break` 40 and `mutants`/`suite` floors are not re-cut from a run that
+# measured nothing.
+#
+# SETTLED BY THE SAMPLING RUN 44877284451 (2026-11-21): it was concurrency, and the "crash" was a
+# timeout. The same 157 mutants at `--concurrency 2`: 149 K / 8 S / 0 T / 0 Errors, 94.90 %, in
+# 41.7 minutes — a quarter of the time the crashing run spent. Stryker's trace log names the
+# mechanism on the accounts-store sample, which failed the same way: each host ran past Stryker's
+# own test-run timeout (initial run x 1.5 + `additional-timeout`, 356-384 s there), Stryker
+# force-killed it ("Force-killing test server ... A test host crashed during this run"), and a
+# killed host is reported as a RuntimeError, not a Timeout. Four TestHost-heavy hosts on a
+# 4-vCPU runner are slower than the initial run alone by more than that formula allows. So this
+# leg runs at `concurrency: 2`, and is calibrated from that run by the FIRST REAL RUN rule:
+# `mutants` 157, `suite` 1236, `timeout` 90 (2x the 42-minute job), break = 94.90 − max(2 pp,
+# 1.27 pp) = 92.90 -> 92 (was 40), `low` 94, `high` 100; REAL SLACK 149 − ceil(0.92 × 157) = 4.
+# It leaves `debug-log`: the cause is known, and its trace log is ~40 MB zipped.
 #
 # WHY data-ef IS TWO LEGS, AND WHY IT IS SPLIT BY *TEST PROJECT* RATHER THAN BY FILE.
 # The single data-ef leg was killed by `timeout-minutes: 120` on three consecutive main
@@ -619,6 +743,119 @@ name: Mutation
 # cancelled at their budgets). Only the counts are re-probed here; the budgets those legs
 # need are a measurement this change did not take, so their `timeout:` values are left
 # as they were and the shortfall is stated rather than guessed at.
+#
+# RE-PROBED 2026-11-21, from CI's own logs: run 44834820709 (main 1512d5eb, after the accounts
+# stack) and the on-demand run 44850064624 (branch debt/mutation-legs, which adds only tests,
+# config fixes and two ProjectReferences). Four legs were cancelled at their budgets on the
+# first, which is the trigger the rule above names; their counts come from the discovery lines
+# a cancelled leg's uploaded log still carries (see the upload step).
+#
+#   shard                     mutants: declared -> now    suite: declared -> now   outcome
+#   canary                           13 ->   13                 194 ->  230    0 K, honest
+#   expressions                    1949 -> 2591                3825 -> 5330    cancelled at 180
+#   rules, auth, rest              5715 -> 9557                3825 -> 5330    cancelled at 120
+#   data-ef-core                    584 ->  863                2156 -> 2903    cancelled at 240
+#   data-ef-rest                   1816 -> 2950                1286 -> 1560    cancelled at 120
+#   data-sqlite                      65 ->  122                 870 -> 1352    92.62 %, 52-56 min
+#   data-postgresql                  33 ->  122                 180 ->  262    94.26 %, 1.5 min
+#
+# THE FOUR CANCELLED BUDGETS ARE NOT RE-SIZED HERE, for the 2026-10-30 reason: a cancelled
+# leg has no wall clock to double, only a lower bound. What the counts do say is that the
+# 360-minute ceiling is now the binding constraint, not the budget. rules/auth/rest at its last
+# measured cost (~6.2 s of runner time per mutant, against a suite 4.5x smaller) is ~990 min
+# for 9557 mutants; no budget fits that, and the lever is the re-shard #143 and #245 already
+# describe, or `mutation-level: Basic` (see TWO ONE-LINE LEVERS) — a decision, not a number.
+# data-sqlite was 4 min short of its 60 on both runs and is now 120.
+#
+# THE CADENCE — DECIDED BY THE MAINTAINER, 2026-11-21, AND MEASURED BEFORE IT WAS BUILT.
+# Five legs could not finish under GitHub's 360-minute ceiling (expressions, rules/auth/rest,
+# data-ef-rest, data-ef-core, accounts-store). The maintainer confirmed re-sharding over lowering
+# `mutation-level`, and chose the cadence:
+#   - on every push to main, the legs that fit run FULL (job `mutation`: canary, commands-http,
+#     data-ef-rest, data-sqlite, data-postgresql, accounts, self-service), and the four long legs
+#     run with Stryker's `since` the commit main was at before the push (job `since`), mutating
+#     only what the merge changed;
+#   - the FULL long legs run weekly (Saturday 02:17 UTC) and on workflow_dispatch, sharded
+#     (job `sweep`, matrix in mutation-sweep/matrix.json, generated by scripts/mutation-shards).
+#     A dispatch with the `since` input runs the `since` legs against that commit instead, which
+#     is how the diff path is tried on a branch; a dispatch without it launches the full sweep.
+# data-ef-rest is full per push by a later ruling (the debt-cleanup session's, on the maintainer's
+# behalf): it fits one job, and the header's own rule is that a leg which fits a push runs full.
+# Cost: ~124 runner-minutes per push, sized from the sample below and PROVISIONAL until measured.
+#
+# THE MEASUREMENT IT IS SIZED FROM: the sampling run 44877284451 (branch debt/mutation-sample,
+# deleted after), each long leg's own suite against a ~100-150-mutant sample, `--log-to-file`.
+# Runner seconds per mutant = the mutation loop's wall clock x concurrency / mutants:
+#
+#   sample                  suite (assemblies)          mutants  K / S / T / E       s/mutant
+#   Expressions CelLexer+   Alvo.Tests (5339)               147  138 / 1 / 8 / 0         68.9
+#   Rules PolicyEngine+     Alvo.Tests (5339)               104   93 / 11 / 0 / 0        59.9
+#   EF RenamePrePass+       EF.Tests (1560)                  73   30 / 43 / 0 / 0        10.1
+#   EfAlvoData.Units.cs     EF.Tests + Sqlite.Tests (2912)   97   27 / 70 / 0 / 0        97.5
+#   EfCoreTenantStore.*     Sqlite + Accounts.Tests (1750)  148  cancelled at 240 min, see below
+#   commands-http, conc. 2  Api.Tests (1236)                157  149 / 8 / 0 / 0         28.4
+#
+# Survivors cost ~4x what kills do on the core suite (the two Alvo.Tests samples solve to ~44 s
+# a kill and ~194 s a survivor), and rules/auth/rest last measured ~58 % killed, so its shards
+# are sized at 107 s a mutant rather than the sample's 59.9. data-ef-rest fits ONE job
+# (2950 x 10.1 s / 4 = ~124 min), so it is neither sharded nor diffed: it runs in full per push. accounts-store is sized on an ESTIMATE of
+# 150 s at concurrency 2 — its sample never produced a number (ACCOUNTS-STORE TIMED OUT).
+#
+# THE TRACE LOG NAMES EVERY MUTANT'S FILE ("Mutating <file>", then one "Mutant N created" per
+# mutant), for the whole project, before the mutate filter. So one sample's trace log gives every
+# file's weight; scripts/fixtures/mutation-shards/created-*.tsv are those weights, and
+# scripts/mutation-shards cuts each long leg's resolved file list — in path order, so a shard is
+# an area — into contiguous runs of near-equal weight, none projected past 180 minutes except a
+# single file heavier than that. The shards (all PROVISIONAL until the first sweep measures them:
+# their `mutants:` floors are 70 % of an estimate, their `break` the collapse floor 30):
+#
+#   leg                 shards  projected per shard     budget  concurrency
+#   expressions              5  123-167 min                340  4
+#   rules, auth, rest       27  ~136-179 min (one 20)      340  4
+#   data-ef-core             3  24-195 min (EfAlvoData.cs alone ~195)  340  4
+#   accounts-store           7  49-203 min (EfCoreAccountStore.cs alone ~203)  340  2
+#
+# PLUS ONE CATCH-ALL PER LEG (46 in all): the leg's own globs minus a `!` for every listed file,
+# so a source file ADDED since the shards were cut is mutated there with no regeneration, and a
+# DELETED one is harmless — Stryker 4.16 accepts a `mutate` entry or a `!` exclude that matches
+# nothing (measured on the canary, 2026-11-21: the same 13 mutants, exit 0). Ruled 2026-11-21 by
+# the debt-cleanup session on the maintainer's behalf, after the PR gate went red on this branch
+# when a merge from main added .cs files: no contributor should meet an unrelated mutation-tooling
+# failure in Build & test for adding a file. `scripts/mutation-shards --check` therefore no longer
+# regenerates and compares; it proves the committed shards WELL-FORMED (listed shards disjoint,
+# the catch-all their exact complement, every other key the parent's). The cost: the catch-all
+# grows with every added file until the next regeneration — regenerate when it has grown large,
+# at the latest when a sweep's measurements recalibrate the shards. Sweep shards run the assert in
+# mode `sweep` (zero mutants allowed, floor waived): an empty catch-all and a shard whose files
+# were deleted are both legitimate.
+#
+# Two single files exceed 180 and stay whole — Stryker's file-level `mutate` cannot cut inside
+# one without line spans, which this change does not take on. EfAlvoData.cs at 340/195 = 1.74x
+# is inside the >= 1.7x rule; EfCoreAccountStore.cs at 1.67x is not, on a cost that is itself an
+# estimate — the first sweep settles which way that goes.
+#
+# WHAT THE CADENCE COSTS, stated: 46 shards at `max-parallel: 13`, beside the 7 per-push legs
+# that run with them, so a sweep never asks for more than GitHub's 20 concurrent jobs — 4 batches
+# of up to 340 minutes. A sweep can take most of a day of wall clock, which is why it is weekly,
+# and why a dispatch without the `since` input is not to be launched casually. A shard's
+# `break` 30 is a collapse floor, not a latch: until the first sweep has measured each shard,
+# a weekly regression in one area shows as a lower number in the report, not as a red shard.
+# And the per-push `since` legs apply each leg's own threshold to the CHANGED code only, so a
+# merge into an area that scores under the leg's latch (Events at ~51 % against rules/auth/rest's
+# 55) goes red on that push — which is the intended signal, and the likeliest source of noise.
+# `since` with coverage-analysis off cannot tell which mutants a changed TEST covers, so test-file
+# changes are excluded from its diff (.github/actions/stryker-leg); a weakened test is the
+# weekly sweep's to catch. So a GREEN per-push run says the changed SOURCE is covered — not that
+# the leg is, and not that no test was loosened.
+#
+# A `since` run may test ZERO mutants — a merge that changed none of a leg's files — and must
+# then pass. But zero is also what a diff Stryker failed to see looks like, so the action
+# intersects the merge's changed src/**/*.cs with the leg's own resolved file set
+# (scripts/mutation-shards --resolve): if they meet, scripts/assert-mutation-run runs in mode
+# `since-changed` and refuses zero. A `before` this clone does not have (a force push) falls back
+# to HEAD~1 with a ::warning::, and the commits it rewrote wait for the weekly sweep.
+# Neither the `since` diff nor the weekly cron has run in CI yet: the first push after this lands
+# is the first measurement of the one, the first Saturday of the other.
 #
 # THE MODEL THAT ACTUALLY PREDICTS THE COST IS NOT mutants x test COUNT. Measured on
 # run 33593316805 — the last data-ef leg that SUCCEEDED: 888 mutants, mutation loop
@@ -712,8 +949,8 @@ name: Mutation
 # runner rather than the shard. rules/auth/rest keeps 120 against a measured 41-47 min:
 # it grew 149 % in mutants since its last calibration and is the next leg to run out.
 # A too-TIGHT budget has the worse failure mode, and that asymmetry is why nothing here
-# is cut below ~2x: a cancelled shard never reaches its log-upload step, so there is
-# neither a score nor a log to read.
+# is cut below ~2x: a cancelled shard writes no report, so there is no score to read —
+# only a console log cut off mid-run (see the upload step for what IS captured).
 #
 # THREE BUDGETS WENT UP ON 2026-09-14, AGAINST THE DIRECTION OF THAT RULE, and the
 # reason is worth stating because it is not budget creep. Raising `additional-timeout`
@@ -847,6 +1084,7 @@ on:
       # exercise it. stryker-config.canary.json WAS excluded on that same rule and is
       # now listed above, because the canary has a leg.
       - '.github/workflows/mutation.yml'
+      - '.github/actions/stryker-leg/**'
       - 'scripts/assert-mutation-run'
       # scripts/mutation-notify is deliberately NOT here, on the same rule as
       # stryker-config.api.json above and for a sharper version of the same reason: a
@@ -856,6 +1094,16 @@ on:
       # `Script suites` job, in seconds — and that folds into the required
       # `Build & test`.
   workflow_dispatch:
+    inputs:
+      since:
+        description: >-
+          Run the per-push `since` legs against this commit instead of the full sweep (empty:
+          the full sweep, most of a day). For trying the diff path on a branch.
+        required: false
+        default: ''
+  # The weekly full sweep of the long legs (see THE CADENCE). Saturday, off-peak.
+  schedule:
+    - cron: '17 2 * * 6'
 
 permissions:
   contents: read
@@ -867,10 +1115,17 @@ permissions:
 # superseded — dropping exactly the commit whose score you needed, as a grey
 # "cancelled" nobody reads.
 concurrency:
-  group: mutation-${{ github.sha }}-${{ github.workflow }}
+  group: mutation-${{ github.sha }}-${{ github.event_name }}-${{ github.workflow }}
   cancel-in-progress: false
 
 jobs:
+  # THREE MATRICES, ONE CADENCE — decided by the maintainer on 2026-11-21; "THE CADENCE" in the
+  # header has the measurement behind it. Every leg runs through .github/actions/stryker-leg, so
+  # the guard, the working directory and scripts/assert-mutation-run are the same for all three.
+  #   mutation — the legs that fit a push: run FULL on every trigger.
+  #   since    — the long legs on a push: Stryker `since` the previous main commit.
+  #   sweep    — the long legs in full, sharded (mutation-sweep/, generated by
+  #              scripts/mutation-shards): weekly and on workflow_dispatch, never on a push.
   mutation:
     name: Stryker (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -884,274 +1139,274 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The security core is sharded by `mutate` glob, not because one shard is a
-          # meaningful unit, but because wall-clock is this gate's whole cost: with
-          # coverage-analysis off every mutant reruns the full test project, so time is
-          # mutants × suite. `Expressions/**` in one leg, everything except `Api/**` in the
-          # other, and `Api/**` in neither — see DECLARED GAP in the header, which also
-          # names the six HTTP-glue files that have their own leg since HX-08.
-          #
           # `mutants:` and `suite:` below are MEASURED counts, not estimates — they size
           # the budget and they are what checks 3 and 4 of scripts/assert-mutation-run
-          # take their floors from. RE-PROBED 2026-09-10 (discovery only, from `test/`),
-          # because every one of them had gone stale since 2026-08-02 and check 3's floor
-          # is one-sided, so growth reported nothing: data-ef had reached 1108 mutants
-          # against a budget sized for 596, and rules/auth/rest 1638 against 657. Re-probe
-          # a leg the moment it starts timing out, and re-probe ALL of them when one does
-          # — the stale set is what made #205 look like one shard's problem.
+          # take their floors from. Re-probe a leg the moment it starts timing out, and
+          # re-probe ALL of them when one does — the stale set is what made #205 look like
+          # one shard's problem. `timeout:` is sized from MEASURED WALL CLOCK.
           #
-          # `timeout:` is now sized from MEASURED WALL CLOCK rather than from the mutant
-          # count; the table in the header carries each measurement and its source.
-          #
-          # THE CANARY GOES FIRST, and only it carries `canary:` — the other legs leave the
-          # key undefined, which `${{ matrix.canary }}` renders as the empty string that
-          # scripts/assert-mutation-run's optional 6th argument accepts. It is first
-          # because its answer is known in advance (0 killed, by construction), so a kill
-          # here says every other leg's number on this run is measured through a defect
-          # rather than through the mutants. See THE CANARY in the header.
+          # THE CANARY GOES FIRST, and only it carries `mode: canary` — the other legs leave
+          # the key undefined, which renders as the empty string that scripts/assert-mutation-run's
+          # optional 6th argument accepts. It is first because its answer is known in advance
+          # (0 killed, by construction), so a kill here says every other leg's number on this
+          # run is measured through a defect rather than through the mutants. See THE CANARY.
           - name: canary
             config: stryker-config.canary.json
             project: src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj
             mutants: 13
-            suite: 194     # probed 2026-10-30 (was 142)
+            suite: 230     # run 44834820709, 2026-11-20 (was 194)
             timeout: 10     # measured ~20 s warm; the margin is cold checkout, setup-dotnet,
                             # `dotnet tool restore` and Stryker's own build, none of which this
-                            # workflow caches. A timed-out job is CANCELLED, which uploads no log
+                            # workflow caches. A timed-out job is CANCELLED, which writes no report
                             # and still files a tracking issue, so the tight-budget rule the other
                             # legs follow is the wrong trade on the one leg that must be believed.
-            canary: canary
-          # Every count below is re-probed as of 2026-10-30, locally after HX-08 (the
-          # RE-PROBED 2026-10-30 table in the header); the 2026-09-14 values came from run
-          # 34828632562's own logs. Every leg grew with nothing reporting it, because check
-          # 3's and 4's floors are one-sided by design.
-          - name: security core (expressions)
-            config: stryker-config.expressions.json
-            project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 1949   # probed 2026-10-30 (was 900)
-            suite: 3825     # probed 2026-10-30 (was 1188); same test project as the leg below, so the two must be equal
-            timeout: 180    # measured 27, 31 and 26 min on three runs, but 68 of its 900 mutants were
-                            # timing out and `additional-timeout` lets each run to the new ceiling: worst
-                            # case 110 min (see THE MODEL in the header). This is the ONE leg whose
-                            # timeouts may genuinely be endless loops — it mutates an expression evaluator
-                            # — so the budget covers the case where all 68 are. Cut it back once a real
-                            # post-merge run says how many actually were.
-          - name: security core (rules, auth, rest)
-            config: stryker-config.json
-            project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 5715   # probed 2026-10-30 (was 1713), after the HTTP glue moved to the leg below.
-                            # Unchanged by accounts S3 on purpose: the self-service route files it now
-                            # excludes postdate that probe, so excluding them removes nothing it counted
-                            # (the data-ef-rest precedent). Not re-probed — no Stryker run.
-            suite: 3825     # probed 2026-10-30 (was 1188)
-            timeout: 120    # measured 28 min on run 34828632562, at 36 of 1713 timing out (2.1 %).
-                            # Worst case with the raised timeout is 72 min, inside the existing budget,
-                            # so this one is left alone — see THE MODEL in the header.
+            mode: canary
           # The security-relevant HTTP glue of commands, inbound webhooks and the caller
           # gate, against the suite that drives it over HTTP. Six files rather than the ten
-          # its design named: the ten-file set measured past the budget a 2x rule can give
-          # it — see "Carved out of the gap by HX-08" under DECLARED GAP for both runs.
+          # its design named — see "Carved out of the gap by HX-08" under DECLARED GAP.
           - name: commands and webhooks over HTTP
             config: stryker-config.commands-http.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 149    # 145 probed 2026-10-30 + ~4 ESTIMATED for ManagementCallerFilter (25 lines x 0.16)
-            suite: 1034
-            timeout: 280    # measured 102.7 min run to completion (10-core, --concurrency 4, 0
-                            # timeouts, 24 runtime errors); ~139 min scaled to a 4-vCPU runner the
-                            # way data-ef-core's was, and 2x that. Cut it to 2x a real post-merge
-                            # run's wall clock once one exists.
-          # THE TWO HALVES OF THE OLD data-ef LEG. Split by test project, not by file —
-          # see "WHY data-ef IS TWO LEGS" in the header for the measurement that decided
-          # it and the rule that decides which leg a file lands on. 459 + 649 = 1108, the
-          # single leg's count: same mutant set, and scripts/test-assert-mutation-run
-          # asserts the two configs stay its partition.
-          #
-          # RE-PARTITIONED 2026-09-14 ON DIRECT MEASUREMENT, and it moved files OFF the
-          # expensive leg rather than onto it. The membership rule used to be a
-          # conservative proxy — "unless EntityFrameworkCore.Tests can be SHOWN to hold
-          # its killers" — because running both halves against both suites had never been
-          # done. It has now: core's 543 mutants score 11.42 % against
-          # EntityFrameworkCore.Tests alone (62 killed, 78 seconds) and 59.30 % against
-          # both (321 killed, 74 minutes). Per file, five of the thirteen are killed by
-          # EXACTLY the same mutants either way — SortSqlRenderer, RenamePrePass,
-          # RenameGuessSplitter, OutboxEventFactory, AlvoModelCacheKeyFactory, 84 mutants
-          # — so they were paying 57x for a second assembly that changed no verdict. They
-          # are on `rest` now. The other eight genuinely need it: 259 of core's mutants
-          # die only when Data.Sqlite.Tests is present, 177 of them in EfAlvoData.cs
-          # alone, which is why this leg still exists.
-          - name: data-ef-core
-            config: stryker-config.data-ef-core.json
-            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 584   # probed 2026-10-30 (was 459)
-            suite: 2156    # probed 2026-10-30 (was 1135); two test projects — the only leg that pays for a second one
-            timeout: 240   # RAISED WITH `additional-timeout`, and the two go together. Measured:
-                           # 543 mutants took 60 min on CI while cutting 249 of them off at the
-                           # timeout, and 74 min locally (10-core, --concurrency 4) once none were
-                           # cut off. Letting a survivor run to completion cost ~2x on the one set
-                           # where both were measured on the same machine (31 -> 63 min). 459
-                           # mutants at that rate is ~100 min on a 4-vCPU runner; 240 covers the
-                           # extrapolation with margin, because the asymmetry still holds — a
-                           # cancelled shard uploads no log and yields no verdict at all. The first
-                           # post-merge run is the measurement that replaces this estimate.
+            mutants: 157    # run 44877284451, 2026-11-21, at --concurrency 2
+            suite: 1236     # same run
+            timeout: 90     # 2x the measured job: 42 min (41.7 of Stryker) at --concurrency 2
+            concurrency: 2  # at 4, 156 of 157 hosts overran the test-run timeout and were force-killed
+                            # (RuntimeErrors); at 2, none — see #486'S COMMANDS-HTTP HALF in the header
+          # Full on every push although it is the costliest leg that does — ruled 2026-11-21 by the
+          # debt-cleanup session on the maintainer's behalf, on the header's own rule that a leg
+          # which fits a push runs full: one fast assembly, sized from the sampling run at
+          # 2950 x 10.1 s / 4 = ~124 min. Cost: ~124 runner-minutes per push.
           - name: data-ef-rest
             config: stryker-config.data-ef-rest.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 1816  # probed 2026-10-30 (was 649). Unchanged by accounts S2 and S3 on purpose: the
-                           # account-store and tenant-registry files postdate that probe, so excluding them
-                           # (they sit on the accounts-store leg) removes nothing it counted. Not re-probed —
-                           # no Stryker run.
-            suite: 1286    # probed 2026-10-30 (was 554); one test project
-            timeout: 120   # measured 2 min for 565 mutants on CI with ZERO timeouts — one fast
-                           # assembly, so `additional-timeout` changes nothing here. The budget is
-                           # left at 120 rather than cut to match: this is the leg the test debt
-                           # will be paid on, so it is the one most likely to grow.
+            mutants: 2950   # run 44834820709's own log, 2026-11-20
+            suite: 1560     # same run
+            timeout: 250    # 2x the ~124 min projected from run 44877284451's sample (10.1 s a mutant);
+                            # PROVISIONAL until a full per-push run measures it
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
-            mutants: 65     # probed 2026-10-30 (was 44)
-            suite: 870      # probed 2026-10-30 (was 581)
-            timeout: 60     # measured 5.5 min, but 22 of its 44 mutants were being cut off at the
-                            # timeout (100.00 % reported on 22 killed / 0 survived / 22 timeout).
-                            # Those 22 now run to completion, and this leg stands up real databases
-                            # per test, so double the budget and let the next run measure it.
+            mutants: 122    # runs 44834820709 and 44850064624, 2026-11-20/21 (was 65)
+            suite: 1352     # run 44850064624 (1343 on 44834820709; was 870)
+            timeout: 120    # 2x measured: Stryker ran 56 min on run 44834820709 and 52 min on
+                            # 44850064624, 0 timeouts both times.
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
-            mutants: 33     # probed 2026-10-30 (was 20)
-            suite: 180      # probed 2026-10-30 (was 110)
-            timeout: 30     # measured 2 min
-          # THE ACCOUNTS LEGS — UNMEASURED. Every number on the three legs below is an estimate,
-          # and so are their configs' thresholds; "THE ACCOUNTS LEGS" in the header says how each
-          # was derived and what the first real run must replace it with.
+            mutants: 122    # run 44850064624, 2026-11-21 (was 33; 68 by 2026-11-07, 110 by 11-12, unreported)
+            suite: 262      # run 44850064624, 2026-11-21 (was 180)
+            timeout: 30     # measured 2 min (1 min 31 s of Stryker on run 44850064624)
           - name: accounts
             config: stryker-config.accounts.json
             project: src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj
-            mutants: 240    # ESTIMATED lower bound, not a probe (code lines x 0.16); re-probe on the first run
-            suite: 237      # MTP's own count, 2026-11-14 — not yet Stryker's
-            timeout: 120    # ESTIMATED: one ~11 s assembly, up to ~765 mutants at concurrency 4 is
-                            # ~45 min on a 10-core box, ~60 on a 4-vCPU runner (the 1.35x data-ef-core
-                            # scaling), and 2x that. Cut to 2x the first run's wall clock.
-          - name: accounts-store
-            config: stryker-config.accounts-store.json
-            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 247    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
-                            # 70 + tenant registry 69 + invitations 54 — S4's three new files, 336
-                            # code lines — + app tokens 54, S5's two store files, 340 code
-                            # lines); still an estimate, re-probe on the first run
-            suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
-                            # (S3's tenant-store facts add to the first; a floor, so left as measured)
-            timeout: 140    # ESTIMATED: two assemblies (~13 s + ~11 s a run), up to ~416 mutants at
-                            # concurrency 4 is ~52 min on a 10-core box, ~70 on a runner, and 2x that.
-                            # Cut to 2x the first run's wall clock.
+            mutants: 1381   # run 44850064624, 2026-11-21 (estimated 240) — see ACCOUNTS IS MEASURED
+            suite: 398      # same run (MTP's own count was 237 on 2026-11-14)
+            timeout: 340    # 2x the measured job (186.5 min) is 373, past GitHub's 360-minute ceiling;
+                            # 340 is 1.8x and the most the ceiling leaves room for. The next growth of
+                            # this leg is a split, not a budget — see ACCOUNTS IS MEASURED.
           - name: self-service
             config: stryker-config.self-service.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 95     # ESTIMATED lower bound, not a probe (~592 code lines x 0.16, S5 included); re-probe on the first run
-            suite: 383      # MTP's own Accounts.Tests count after S5 task 8, 2026-11-20 — not yet Stryker's
-            timeout: 90     # ESTIMATED: one assembly (Accounts.Tests over TestHost), up to ~179 mutants at
-                            # concurrency 4. commands-http's TestHost suite cost ~42 s per mutant of wall
-                            # clock at 1034 tests; scaled to ~295 tests that is ~12 s, so ~36 min on a
-                            # 10-core box and ~48 on a runner — 2x would be 96, rounded to 90 because the
-                            # 0.48 upper end is itself a ceiling. Cut to 2x the first run's wall clock.
+            mutants: 280    # run 44850064624, 2026-11-21 (estimated 95) — see SELF-SERVICE IS MEASURED
+            suite: 398      # same run (MTP's own count was 383)
+            timeout: 210    # 2x the measured job: 106 min (105.5 of Stryker) on run 44850064624
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+      - name: Mutation leg
+        uses: ./.github/actions/stryker-leg
         with:
-          global-json-file: global.json
-
-      # Fails the shard rather than skipping it. This step used to set run=false and
-      # let every later step skip, which reported the leg as SUCCESS — a shard that
-      # measured nothing looking exactly like a shard that measured everything, and
-      # `notify` never firing because the matrix result was 'success'. That guard made
-      # sense while the mutated projects were still being created one at a time; all
-      # of them exist now, so a missing csproj means a rename that silently retired a
-      # leg, which is precisely the failure this workflow exists to make loud.
-      - name: Guard — mutated project must exist
-        env:
-          PROJECT: ${{ matrix.project }}
-          SHARD: ${{ matrix.name }}
-        run: |
-          if [ ! -f "$PROJECT" ]; then
-            echo "::error::Mutation run ($SHARD) has no project at '$PROJECT'. If it was renamed or moved, update the matrix; a shard that cannot find its project must not report success."
-            exit 1
-          fi
-
-      - name: Restore tools
-        run: dotnet tool restore
-
-      - name: Mutation test
-        shell: bash
-        # From `test/`, NOT the repo root: with MMLib.Alvo.slnx in the working directory
-        # Stryker enters solution mode and ignores each config's `test-projects`, running
-        # every test project that references the mutated assembly (measured: 2211 tests
-        # instead of 722 for the expressions shard, Testcontainers integration suites
-        # included). The header comment has the numbers. Hence `../<config>` too.
-        working-directory: test
-        env:
-          CONFIG: ../${{ matrix.config }}
-          MUTANTS: ${{ matrix.mutants }}
-          SUITE: ${{ matrix.suite }}
-          SHARD: ${{ matrix.name }}
-          # Empty for every leg but the canary — see the matrix comment.
-          CANARY: ${{ matrix.canary }}
-        run: |
-          # `shell: bash` means `bash -eo pipefail`, so the pipeline below would abort
-          # the whole step the moment Stryker exits non-zero — before the assertions
-          # run. Turn -e off around it and take the exit code by hand, so that a run
-          # which measured the WRONG THING is diagnosed as that rather than as a low
-          # score. `|| true` would not do: it clobbers PIPESTATUS.
-          #
-          # --concurrency: Stryker defaults to half the logical cores, i.e. 2 test runners on a
-          # GitHub-hosted 4-vCPU runner, leaving half the machine idle for a run whose whole cost
-          # is wall-clock. The runner has ~16 GB, comfortably more than four MTP hosts need for
-          # this suite. Set on the command line rather than in the config so this reasoning has
-          # somewhere to live — the config files are strict JSON with nowhere to put a comment.
-          set +e
-          dotnet tool run dotnet-stryker -f "$CONFIG" --concurrency 4 2>&1 | tee stryker-output.log
-          stryker_exit="${PIPESTATUS[0]}"
-          set -e
-
-          # Did this run MEASURE what the config asked for? Four positive assertions —
-          # vacuity, the test-project count, a floor on the mutant count and a floor on
-          # the suite size — live in scripts/assert-mutation-run so they can be run over
-          # a saved log by hand, which is how they were verified
-          # (scripts/test-assert-mutation-run). Read that script's header before
-          # changing any of them; in particular it records WHY the solution-mode check
-          # is the test-project count and not the mutant count (measured: solution mode
-          # leaves the mutant count identical and moves only the test count).
-          ../scripts/assert-mutation-run \
-            stryker-output.log "$CONFIG" "$MUTANTS" "$SUITE" "$SHARD" "$CANARY"
-
-          exit "$stryker_exit"
+          config: ${{ matrix.config }}
+          project: ${{ matrix.project }}
+          mutants: ${{ matrix.mutants }}
+          suite: ${{ matrix.suite }}
+          shard: ${{ matrix.name }}
+          mode: ${{ matrix.mode }}
+          concurrency: ${{ matrix.concurrency || 4 }}
+          debug-log: ${{ matrix.debug-log }}
 
       # The tracking issue tells whoever reads it to open the log to tell a vacuous run
-      # from a below-threshold score. Until now that log existed only in the job console,
+      # from a below-threshold score. That log exists otherwise only in the job console,
       # which is not linkable from an issue and is truncated for a long run — so upload it.
       # `always()` so it survives the shard failing, which is the only case anyone wants it.
       #
-      # WHAT THIS DOES NOT COVER, deliberately stated: a shard killed by `timeout-minutes`
-      # is CANCELLED, and a cancelled job does not run its remaining steps, `always()`
-      # included. So the one outcome with no verdict at all — #98's whole subject — is also
-      # the one whose log is not captured here. Nothing short of streaming the log
-      # elsewhere fixes that, and it is not worth it: a timeout needs the shard's budget
-      # looked at, not its log read.
+      # WHAT THIS DOES AND DOES NOT COVER ON A TIMEOUT. This comment used to say a shard
+      # killed by `timeout-minutes` runs none of its remaining steps, `always()` included.
+      # Run 44834820709 refutes it: rules/auth/rest and data-ef-rest were cancelled at their
+      # 120-minute budgets and this step still ran and uploaded `stryker-output.log` for
+      # both. What a cancelled shard does NOT have is `mutation-report.json` — Stryker writes
+      # it only at the end — and its console log holds the discovery counts but no progress,
+      # since the progress reporter does not survive `tee`. So the counts can be re-probed
+      # from a timed-out leg; its score and its share of mutants done cannot.
+      #
+      # `logs/*.txt` and NOT `logs/**`: the trace log Stryker writes for `--log-to-file` is
+      # logs/log-<date>.txt (3-8 MB a leg, and it names every mutant's file — which is where
+      # mutation-sweep's weights come from), but `logs/test-servers/` beside it holds the
+      # test-host RPC transcripts, ~1 GB for 104 mutants on run 44877284451's sample-rules leg.
       - name: Upload the Stryker log
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: stryker-log-${{ matrix.name }}
-          # `json` reporter -> mutation-report.json: one entry per mutant with file, line,
-          # mutator, replacement and status, so a survivor is readable instead of only a
-          # per-file count (#486). `logs/` is Stryker's own debug log (config `log-to-file`),
-          # the only place a RuntimeError's cause can show up.
           path: |
             test/stryker-output.log
             test/StrykerOutput/**/reports/mutation-report.json
-            test/StrykerOutput/**/logs/*.log
+            test/StrykerOutput/**/logs/*.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # THE LONG LEGS ON A PUSH: each runs its whole committed config with Stryker `since` the
+  # commit main was at before this push, so it mutates only the files the merge changed. A
+  # merge that touched none of a leg's files tests zero mutants and passes — that is what
+  # scripts/assert-mutation-run's `since` mode allows, and the only thing it allows. The
+  # thresholds are the leg's own, applied to the changed code; the weekly sweep is the full
+  # measurement. `timeout:` is a cap, not a sizing: a refactor touching a whole area can
+  # approach the full leg's cost, and a cancelled diff run files a tracking issue like any
+  # other — that is the signal to run the sweep by hand.
+  since:
+    name: Stryker (${{ matrix.name }}, since previous main)
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.since != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: security core (expressions)
+            config: stryker-config.expressions.json
+            project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 2591
+            suite: 5330
+          - name: security core (rules, auth, rest)
+            config: stryker-config.json
+            project: src/MMLib.Alvo/MMLib.Alvo.csproj
+            mutants: 9557
+            suite: 5330
+          - name: data-ef-core
+            config: stryker-config.data-ef-core.json
+            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+            mutants: 863
+            suite: 2903
+          - name: accounts-store
+            config: stryker-config.accounts-store.json
+            project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
+            mutants: 888
+            suite: 1750
+            concurrency: 2
+    steps:
+      # The whole history: `since` diffs against `github.event.before`, which a shallow
+      # checkout does not contain.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: The commit main was at before this push
+        id: base
+        env:
+          BEFORE: ${{ inputs.since || github.event.before }}
+        shell: bash
+        run: |
+          # A push that created the branch has no `before` (all zeros), and a force push can name
+          # a `before` this clone does not contain. Either way diff against the parent — and say
+          # so, because a force push that rewrote several commits is then only partly covered.
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            echo "::warning::No previous commit to diff against; using HEAD~1."
+            BEFORE="$(git rev-parse HEAD~1)"
+          elif ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "::warning::'$BEFORE' is not in this clone (a force push?); using HEAD~1, so commits it rewrote are not covered until the weekly sweep."
+            BEFORE="$(git rev-parse HEAD~1)"
+          fi
+          echo "sha=$BEFORE" >> "$GITHUB_OUTPUT"
+
+      - name: Mutation leg
+        uses: ./.github/actions/stryker-leg
+        with:
+          config: ${{ matrix.config }}
+          project: ${{ matrix.project }}
+          mutants: ${{ matrix.mutants }}
+          suite: ${{ matrix.suite }}
+          shard: ${{ matrix.name }}
+          mode: since
+          since: ${{ steps.base.outputs.sha }}
+          concurrency: ${{ matrix.concurrency || 4 }}
+
+      - name: Upload the Stryker log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stryker-log-${{ matrix.name }}, since previous main
+          path: |
+            test/stryker-output.log
+            test/StrykerOutput/**/reports/mutation-report.json
+            test/StrykerOutput/**/logs/*.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # THE WEEKLY SWEEP reads its matrix from mutation-sweep/matrix.json, which
+  # scripts/mutation-shards generates from the long legs' committed configs and the PR gate
+  # proves well-formed (scripts/test-assert-mutation-run). A file rather than YAML so that 46
+  # generated entries are not hand-edited; each leg's catch-all keeps a file added since the
+  # last regeneration under mutation.
+  sweep-plan:
+    name: Plan the sweep
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.since == '')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read mutation-sweep/matrix.json
+        id: read
+        shell: bash
+        run: echo "matrix=$(jq -c . mutation-sweep/matrix.json)" >> "$GITHUB_OUTPUT"
+
+  sweep:
+    name: Stryker (${{ matrix.name }})
+    needs: sweep-plan
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.since == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      # 13 here plus the 7 per-push legs that run alongside a sweep is GitHub's 20 concurrent
+      # jobs; the 42 shards therefore run in 4 batches (see THE CADENCE).
+      max-parallel: 13
+      matrix: ${{ fromJSON(needs.sweep-plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Mutation leg
+        uses: ./.github/actions/stryker-leg
+        with:
+          config: ${{ matrix.config }}
+          project: ${{ matrix.project }}
+          mutants: ${{ matrix.mutants }}
+          suite: ${{ matrix.suite }}
+          shard: ${{ matrix.name }}
+          mode: ${{ matrix.mode }}
+          concurrency: ${{ matrix.concurrency || 4 }}
+          debug-log: ${{ matrix.debug-log }}
+
+      - name: Upload the Stryker log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stryker-log-${{ matrix.name }}
+          path: |
+            test/stryker-output.log
+            test/StrykerOutput/**/reports/mutation-report.json
+            test/StrykerOutput/**/logs/*.txt
           if-no-files-found: ignore
           retention-days: 30
 
@@ -1168,7 +1423,7 @@ jobs:
   # on that commit's. scripts/mutation-notify owns the routing.
   notify:
     name: Report a failed mutation run
-    needs: mutation
+    needs: [mutation, since, sweep-plan, sweep]
     # NOT `failure()`. A job killed by `timeout-minutes` ends with conclusion
     # `cancelled`, so `failure()` is false and this job was SKIPPED for the one
     # outcome that is worse than a low score: a run that produced no verdict at
@@ -1187,10 +1442,12 @@ jobs:
     # waiting on — and it notified nothing. Both triggers are still named
     # explicitly rather than collapsed to `always()`, so adding a trigger to `on:`
     # later is a conscious decision about whether it should file issues.
+    # `skipped` is not a failure: on a push the sweep is skipped, on a schedule the
+    # `since` legs are. Any `failure` or `cancelled` among the three is.
     if: >-
       always()
-      && needs.mutation.result != 'success'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1219,7 +1476,7 @@ jobs:
           SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          MATRIX_RESULT: ${{ needs.mutation.result }}
+          MATRIX_RESULT: per-push ${{ needs.mutation.result }}, since ${{ needs.since.result }}, sweep plan ${{ needs.sweep-plan.result }}, sweep ${{ needs.sweep.result }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
         shell: bash

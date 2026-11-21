@@ -1,0 +1,43 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Migrations/RuntimeSchemaService.cs",
+      "Migrations/SchemaMigrationRunner.cs",
+      "Reads/Enrich{T}.cs",
+      "Reads/IQueryNarrowing.cs",
+      "Reads/IQueryNarrowing{T}.cs",
+      "Reads/IRecordEnricher{T}.cs",
+      "Reads/Internal/ReadDescription.cs",
+      "Reads/Internal/ReadEnrichment.cs",
+      "Reads/Internal/ReadExtensionBinding.cs",
+      "Reads/Internal/ReadExtensionRegistration.cs",
+      "Reads/Internal/ReadExtensionRunner.cs",
+      "Reads/Internal/ReadFailures.cs",
+      "Reads/Internal/ReadInvoker.cs",
+      "Reads/Internal/ReadLog.cs",
+      "Reads/Internal/RowShaping.cs",
+      "Reads/Internal/Setup.cs",
+      "Reads/QueryNarrowing.cs",
+      "Rules/BeforeHooks.cs",
+      "Rules/IPolicyCatalogProvider.cs",
+      "Rules/Internal/AccessCatalogBuilder.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

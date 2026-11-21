@@ -282,6 +282,86 @@ public sealed class PostgreSqlDialectSeamTests
         prerequisite.Refusals.Select(refusal => refusal.Pointer).ShouldBe([null, "/entities/bookings/indexes/0/fields/1"]);
     }
 
+    /// <summary>
+    /// Version 15 itself ships the boolean class, so an installed extension that still lacks it is an outdated extension —
+    /// the fix is the update, not a server upgrade.
+    /// </summary>
+    [Fact]
+    public async Task An_installed_btree_gist_without_the_boolean_class_on_exactly_15_is_refused_with_the_update()
+    {
+        var refusal = (await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: true, available: true, mayInstall: false, serverVersion: 150000, uncomparable: "boolean"), [Archived], Ct))
+            .Refusals.ShouldHaveSingleItem();
+
+        refusal.Message.ShouldBe(
+            "Excluding overlaps per 'archived' compares a boolean for equality, which the btree_gist installed in this database cannot do. Nothing was applied.");
+        refusal.Fix.ShouldBe("Ask the database owner to run ALTER EXTENSION btree_gist UPDATE; in this database, then apply again.");
+    }
+
+    /// <summary>
+    /// An installed extension is judged by the probe's own type names, so every admitted equality type has to map onto the
+    /// name the probe reports it under — a field whose name is missing from that map is never refused, whatever is missing.
+    /// </summary>
+    [Theory]
+    [InlineData(FieldType.String, "text")]
+    [InlineData(FieldType.Text, "text")]
+    [InlineData(FieldType.Enum, "text")]
+    [InlineData(FieldType.Integer, "bigint")]
+    [InlineData(FieldType.Decimal, "numeric")]
+    [InlineData(FieldType.Boolean, "boolean")]
+    [InlineData(FieldType.Uuid, "uuid")]
+    [InlineData(FieldType.Ref, "uuid")]
+    [InlineData(FieldType.Date, "date")]
+    [InlineData(FieldType.DateTime, "timestamp with time zone")]
+    public async Task An_installed_btree_gist_missing_the_class_a_field_is_stored_as_refuses_that_field(FieldType type, string storedAs)
+    {
+        var refusal = (await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: true, available: true, mayInstall: false, serverVersion: 160000, uncomparable: storedAs),
+            [new ExclusionEqualityField("/entities/bookings/indexes/0/fields/0", "room", type)], Ct))
+            .Refusals.ShouldHaveSingleItem();
+
+        refusal.Pointer.ShouldBe("/entities/bookings/indexes/0/fields/0");
+        refusal.Message.ShouldBe(
+            $"Excluding overlaps per 'room' compares a {type.ToString().ToLowerInvariant()} for equality, which the btree_gist installed in this database cannot do. Nothing was applied.");
+    }
+
+    [Fact]
+    public async Task A_field_is_not_refused_for_a_class_it_is_not_stored_as()
+        => (await Dialect.ExclusionPrerequisiteAsync(
+            new ProbeConnection(installed: true, available: true, mayInstall: false, serverVersion: 160000, uncomparable: "bigint,numeric,boolean,uuid,date"),
+            [new ExclusionEqualityField("/entities/bookings/indexes/0/fields/0", "room", FieldType.String)], Ct))
+            .ShouldBe(ExclusionPrerequisite.Ready);
+
+    [Fact]
+    public async Task The_scoped_set_null_check_reads_the_server_version_number()
+    {
+        var connection = new ProbeConnection(true, true, true);
+
+        await Dialect.ScopedSetNullRefusalAsync(connection, Ct);
+
+        connection.CommandText.ShouldBe("SELECT current_setting('server_version_num')::int");
+    }
+
+    /// <summary><c>ON DELETE SET NULL (column)</c> is PostgreSQL 15's: from 15.0 on nothing is refused.</summary>
+    [Theory]
+    [InlineData(150000)]
+    [InlineData(160004)]
+    public async Task A_scoped_set_null_on_15_or_later_is_not_refused(int serverVersion)
+        => (await Dialect.ScopedSetNullRefusalAsync(new ProbeConnection(true, true, true, serverVersion), Ct)).ShouldBeNull();
+
+    [Theory]
+    [InlineData(149999, 14)]
+    [InlineData(120017, 12)]
+    public async Task A_scoped_set_null_before_15_is_refused_naming_the_server_and_the_way_out(int serverVersion, int major)
+        => (await Dialect.ScopedSetNullRefusalAsync(new ProbeConnection(true, true, true, serverVersion), Ct)).ShouldBe(
+            $"This PostgreSQL server is version {major}; onDelete: setNull between two scoped entities needs PostgreSQL 15 or later. "
+            + "Use restrict or cascade, or upgrade the server.");
+
+    [Fact]
+    public async Task A_scoped_set_null_check_without_a_connection_is_refused()
+        => (await Should.ThrowAsync<ArgumentNullException>(async () => await Dialect.ScopedSetNullRefusalAsync(null!, Ct)))
+            .ParamName.ShouldBe("connection");
+
     private static ExclusionEqualityField Archived => new("/entities/bookings/indexes/0/fields/1", "archived", FieldType.Boolean);
 
     private static PostgresException Failure(string sqlState) =>
@@ -295,7 +375,7 @@ public sealed class PostgreSqlDialectSeamTests
 
     /// <summary>
     /// A connection whose one command answers the probe's single row: three booleans, the server's version number, and the
-    /// comma-separated types the installed btree_gist cannot compare.
+    /// comma-separated types the installed btree_gist cannot compare — and, asked for a scalar, the version number alone.
     /// </summary>
     private sealed class ProbeConnection(bool installed, bool available, bool mayInstall, int serverVersion = 160000, string uncomparable = "") : DbConnection
     {
@@ -364,7 +444,8 @@ public sealed class PostgreSqlDialectSeamTests
 
         public override int ExecuteNonQuery() => throw new NotSupportedException();
 
-        public override object? ExecuteScalar() => throw new NotSupportedException();
+        /// <summary>The one scalar asked of this connection: <c>server_version_num</c>, as PostgreSQL's <c>::int</c> answers it.</summary>
+        public override object? ExecuteScalar() => serverVersion;
 
         public override void Prepare()
         {

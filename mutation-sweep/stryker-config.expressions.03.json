@@ -1,0 +1,30 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Expressions/Internal/CelParser.cs",
+      "Expressions/Internal/CelPath.cs",
+      "Expressions/Internal/CelTemporal.cs",
+      "Expressions/Internal/CelText.cs",
+      "Expressions/Internal/CelToken.cs",
+      "Expressions/Internal/CelTree.cs",
+      "Expressions/Internal/CelTypeChecker.Relations.cs"
+    ],
+    "thresholds": {
+      "high": 96,
+      "low": 92,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

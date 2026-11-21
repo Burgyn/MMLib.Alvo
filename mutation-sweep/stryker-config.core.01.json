@@ -1,0 +1,51 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Ai/AlvoAiOptions.cs",
+      "Ai/Internal/AiConnectionResolver.cs",
+      "AlvoEndpointRouteBuilderExtensions.cs",
+      "Auth/AlvoAuthOptions.cs",
+      "Auth/Internal/AlvoAuthOptionsValidator.cs",
+      "Auth/Internal/AlvoContextAccessor.cs",
+      "Auth/Internal/ApiKeyContextResolver.cs",
+      "Auth/Internal/ApiKeyHash.cs",
+      "Auth/Internal/ApiKeyStores.cs",
+      "Auth/Internal/AppTokenPolicy.cs",
+      "Auth/Internal/AppTokenPrincipals.cs",
+      "Auth/Internal/AppTokenSecret.cs",
+      "Auth/Internal/CallerResolution.cs",
+      "Auth/Internal/CallerResolvers.cs",
+      "Auth/Internal/InMemoryApiKeyStore.cs",
+      "Auth/Internal/MembershipResolution.cs",
+      "Auth/Internal/NoBootstrapAdmin.cs",
+      "Auth/Internal/PersonSessionKey.cs",
+      "Auth/Internal/PresentedCredential.cs",
+      "Auth/Internal/SignInPolicy.cs",
+      "Auth/ScopeGate.cs",
+      "Auth/TenantResolver.cs",
+      "Commands/AlvoCommandContext.cs",
+      "Commands/IAlvoCommand.cs",
+      "Commands/IAlvoCommands.cs",
+      "Commands/Internal/AccessTranslator.cs",
+      "Commands/Internal/AlvoCommands.cs",
+      "Commands/Internal/CommandAccess.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}
