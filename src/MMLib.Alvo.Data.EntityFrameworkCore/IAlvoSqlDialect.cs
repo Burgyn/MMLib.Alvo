@@ -617,4 +617,26 @@ public interface IAlvoSqlDialect
     /// <param name="left">The left expression, already rendered.</param>
     /// <param name="right">The right expression, already rendered.</param>
     internal string RenderDistinct(string left, string right) => $"{left} IS DISTINCT FROM {right}";
+
+    /// <summary>
+    /// The statement that gives a renamed table's primary key the name the model gives it, or <see langword="null"/> on an
+    /// engine where a key's name is held by nothing a later statement could address or collide with (#523).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it exists.</b> Both engines carry a table's constraints through <c>RENAME</c> under the names they were created
+    /// with. On PostgreSQL a primary key is also an index, a relation of the schema, so the old name stays taken: a later
+    /// entity created under the renamed table's old name could not create its own key. SQLite keeps a key's name only in the
+    /// table's stored definition, so it answers <see langword="null"/>; a table rebuild re-creates the key from the model.
+    /// </para>
+    /// <para>
+    /// <b>A dialect member, not a migration operation,</b> because EF has no operation that renames a key, and an index
+    /// rename (<c>RenameIndexOperation</c>) is one the SQLite generator only accepts for an index the model declares.
+    /// Internal, for <see cref="ApplyLockTimeoutStatement"/>'s reason: the published dialect port does not grow.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The table, under its new name.</param>
+    /// <param name="name">The key's name in the database.</param>
+    /// <param name="newName">The key's name in the model.</param>
+    internal string? RenamePrimaryKeyStatement(string table, string name, string newName) => null;
 }

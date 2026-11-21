@@ -36,12 +36,13 @@ public abstract class TenantGuardMigrationFacts
     /// <summary>Whether the leg can run at all (PostgreSQL needs a Linux Docker daemon).</summary>
     protected virtual bool Runnable => true;
 
-    /// <summary>Plans and applies <paramref name="from"/> to <paramref name="to"/>, destructive changes allowed.</summary>
+    /// <summary>Plans and applies <paramref name="from"/> to <paramref name="to"/>.</summary>
     /// <param name="from">The schema the database holds.</param>
     /// <param name="to">The schema to reach.</param>
-    protected async Task MigrateAsync(SchemaModel from, SchemaModel to)
+    /// <param name="allowDestructive">Whether the plan may drop a column or narrow one — never needed by a rename.</param>
+    protected async Task MigrateAsync(SchemaModel from, SchemaModel to, bool allowDestructive = false)
     {
-        var options = new MigrationOptions { AllowDestructive = true };
+        var options = new MigrationOptions { AllowDestructive = allowDestructive };
         var plan = await Migrator.PlanAsync(from, to, options, Ct);
         await Migrator.ApplyAsync(plan, options, Ct);
     }
@@ -113,7 +114,7 @@ public abstract class TenantGuardMigrationFacts
         Assert.SkipUnless(Runnable, "This engine's leg needs a Linux Docker daemon.");
 
         await MigrateAsync(new SchemaModel([]), TenantGuardSchemas.Pair(from));
-        await MigrateAsync(TenantGuardSchemas.Pair(from), TenantGuardSchemas.Pair(to));
+        await MigrateAsync(TenantGuardSchemas.Pair(from), TenantGuardSchemas.Pair(to), allowDestructive: true);
 
         (await Migrator.PlanAsync(TenantGuardSchemas.Pair(to), TenantGuardSchemas.Pair(to), new MigrationOptions(), Ct)).IsEmpty.ShouldBeTrue();
         await ShouldBeGuardedAsync(to);
@@ -133,7 +134,7 @@ public abstract class TenantGuardMigrationFacts
         var guarded = TenantGuardSchemas.Pair(OnDelete.Restrict);
 
         await MigrateAsync(new SchemaModel([]), guarded);
-        await MigrateAsync(guarded, TenantGuardSchemas.Flipped(entity));
+        await MigrateAsync(guarded, TenantGuardSchemas.Flipped(entity), allowDestructive: true);
         (await IntrospectReferenceAsync("visits", "work_order_id")).ShouldBe(new RefSchema("work_orders", OnDelete.Restrict));
         await MigrateAsync(TenantGuardSchemas.Flipped(entity), guarded);
 
@@ -163,7 +164,7 @@ public abstract class TenantGuardMigrationFacts
         (await Migrator.PlanAsync(renamed, renamed, new MigrationOptions(), Ct)).IsEmpty.ShouldBeTrue();
         await ShouldBeGuardedAsync(OnDelete.Restrict, target, field);
 
-        await MigrateAsync(renamed, TenantGuardSchemas.RenamedWithoutTheReference(renames));
+        await MigrateAsync(renamed, TenantGuardSchemas.RenamedWithoutTheReference(renames), allowDestructive: true);
         (await RawAsync($"""DELETE FROM "{target}" """)).ShouldBeNull("no constraint survives the reference that declared it");
     }
 

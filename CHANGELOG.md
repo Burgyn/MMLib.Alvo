@@ -1526,6 +1526,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A declared rename no longer leaves an index or a primary key under its old name** (#523). Both engines carry an
+  index's and a key's names through `RENAME`, while EF names them from the table and column names — so after renaming an
+  entity or a field, a later plan that dropped the field's `unique` or `indexed` index named an index the database did
+  not have (both engines), and an entity or field that later took an old name collided with the index still holding it
+  (both engines) or, on PostgreSQL, with the renamed table's primary key. The rename's plan now also renames each such
+  index (`ALTER INDEX … RENAME` on PostgreSQL; a drop and a create on SQLite, which cannot rename an index) and, on
+  PostgreSQL, the primary key; an index the same plan drops is dropped by the name the database holds. **A database
+  renamed before this fix keeps its stale names**: there is no repair step (pre-v0.1, no deployments to carry), so
+  recreate it if a later plan trips over one. Pinned on both engines by `RenamedConstraintNameFacts`, which reads each
+  engine's catalog, and the tenant-guard facts now apply every rename with `AllowDestructive = false`.
 - **An owner's removal racing her ban no longer deadlocks on PostgreSQL** (#543). Both revoked her invitations with an
   unordered multi-row `UPDATE`, one walking the `tenant_id` index and one the heap; after a HOT update they met her rows
   in opposite orders, and one of the two failed with `40P01` (a 500 that rolled back) — 9 of 10 staged runs. Every
