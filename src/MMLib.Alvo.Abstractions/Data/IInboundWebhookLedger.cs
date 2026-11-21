@@ -18,8 +18,8 @@ internal interface IInboundWebhookLedger
     /// <summary>Gives up a claim the run still holds, so the sender's retry runs it again.</summary>
     Task ReleaseAsync(string receiver, string webhookId, string token, CancellationToken cancellationToken);
 
-    /// <summary>Deletes every id received before <paramref name="receivedBefore"/>; answers how many.</summary>
-    Task<int> SweepAsync(DateTimeOffset receivedBefore, CancellationToken cancellationToken);
+    /// <summary>Deletes at most <paramref name="limit"/> ids received before <paramref name="receivedBefore"/>; answers how many.</summary>
+    Task<int> SweepAsync(DateTimeOffset receivedBefore, int limit, CancellationToken cancellationToken);
 }
 
 /// <summary>What claiming a webhook id found.</summary>
@@ -47,8 +47,6 @@ internal static class InboundWebhookLimits
     /// <summary>How long a handled id is remembered.</summary>
     internal static TimeSpan Retention { get; } = TimeSpan.FromDays(7);
 
-    /// <summary>How often the framework ledgers are swept.</summary>
-    internal static TimeSpan SweepInterval { get; } = TimeSpan.FromHours(1);
 
     /// <summary>The longest <c>webhook-id</c> accepted, in UTF-8 bytes.</summary>
     internal const int MaxIdBytes = 255;

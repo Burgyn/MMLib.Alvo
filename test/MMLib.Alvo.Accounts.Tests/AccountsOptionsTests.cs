@@ -187,6 +187,8 @@ public sealed class AccountsOptionsTests : IDisposable
     [InlineData(nameof(AlvoAccountsOptions.AccessTokenMinutes), 0)]
     [InlineData(nameof(AlvoAccountsOptions.AccessTokenMinutes), 61)]
     [InlineData(nameof(AlvoAccountsOptions.RefreshIdleDays), 0)]
+    [InlineData(nameof(AlvoAccountsOptions.RetentionDays), 0)]
+    [InlineData(nameof(AlvoAccountsOptions.RetentionDays), 3651)]
     [InlineData(nameof(AlvoAccountsOptions.SessionLifetimeDays), 29)]
     [InlineData(nameof(AlvoAccountsOptions.RefreshReuseGraceSeconds), -1)]
     [InlineData(nameof(AlvoAccountsOptions.RefreshReuseGraceSeconds), 61)]
@@ -328,6 +330,7 @@ public sealed class AccountsOptionsTests : IDisposable
         {
             case nameof(AlvoAccountsOptions.AccessTokenMinutes): options.AccessTokenMinutes = value; break;
             case nameof(AlvoAccountsOptions.RefreshIdleDays): options.RefreshIdleDays = value; break;
+            case nameof(AlvoAccountsOptions.RetentionDays): options.RetentionDays = value; break;
             case nameof(AlvoAccountsOptions.SessionLifetimeDays): options.SessionLifetimeDays = value; break;
             case nameof(AlvoAccountsOptions.RefreshReuseGraceSeconds): options.RefreshReuseGraceSeconds = value; break;
             default: throw new ArgumentOutOfRangeException(nameof(setting), setting, "Not a lifetime setting.");

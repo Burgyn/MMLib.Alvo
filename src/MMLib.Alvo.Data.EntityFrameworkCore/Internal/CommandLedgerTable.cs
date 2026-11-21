@@ -132,14 +132,15 @@ internal static class CommandLedgerTable
             ct);
 
     internal static Task<int> SweepAsync(
-        DbConnection connection, string table, DateTimeOffset claimedBefore, CancellationToken ct) =>
+        DbConnection connection, string table, DateTimeOffset claimedBefore, int limit, CancellationToken ct) =>
         ExecutedAsync(
             Command(
                 connection,
                 null,
-                $"DELETE FROM {table} WHERE claimed_at < @before",
+                $"DELETE FROM {table} WHERE (scope, idempotency_key) IN "
+                + $"(SELECT scope, idempotency_key FROM {table} WHERE claimed_at < @before ORDER BY scope, idempotency_key LIMIT @limit)",
                 null,
-                [("@before", StoredInstant.Text(claimedBefore))]),
+                [("@before", StoredInstant.Text(claimedBefore)), ("@limit", limit)]),
             ct);
 
     private static (string Name, object? Value)[] Lease(string token, DateTimeOffset now) =>

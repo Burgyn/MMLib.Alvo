@@ -133,8 +133,14 @@ transaction" is one port member. The caller passes in every id and instant, so t
 clock. Its contract facts are `test/_shared/ef/AccountStoreFacts.cs`, run by `SqliteAccountStoreTests` and
 `PostgreSqlAccountStoreTests`.
 
-A refresh token's value is `alvo_rt_<id>_<HMAC-SHA256(key, id)>` (D6). The row stores only the id, and the server
-re-derives the child's value instead of storing it. That is what lets the grace window answer the *same* child twice.
+A refresh token's value is `alvo_rt_<session>_<id>_<HMAC-SHA256(key, session_id)>` (D6; the session since #527). The
+row stores only the id, and the server re-derives the child's value instead of storing it. That is what lets the grace
+window answer the *same* child twice. **The session is in the value so the sweep can delete rotated ancestors without
+blinding reuse detection** (RFC 9700 §4.14.2): a value the MAC proves genuine whose row is gone but whose session is
+live can only be a swept ancestor, so it is answered as a reuse after the window and ends the session
+(`AccountStoreFacts.A_swept_ancestor_presented_again_kills_its_live_session`, both engines); one naming a dead session is
+only refused (`…A_swept_ancestor_of_a_dead_session_is_only_refused`). The session is inside the MAC, so a value cannot
+be moved to another session (`RefreshTokenFormatTests`).
 
 ## How a request becomes a person
 
@@ -269,10 +275,8 @@ The S2 plan adds its own recorded deviations:
 - Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation:
   [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544) (its `azp` half is done, see *Deviations* above).
 - Auth events and role-change audit (spec D9).
-- A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
-  yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
-  for the ID-token acceptance window, or single use breaks. Follow-up:
-  [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527).
+- ~~A sweep of sessions and refresh tokens (spec D10).~~ **Done in [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)**
+  — see [*The sweep (#527)*](#the-sweep-527) at the end of this page.
 - §3.1's global-write warning — S3, below.
 
 ## Tenants a person creates (S3)
@@ -1154,9 +1158,8 @@ And where the implementation answered differently from the plan's first wording,
   judged by the rules.
 - A per-token IP allow-list.
 - OAuth client credentials (spec D3). A service token is an API key, not an OAuth client.
-- A sweep of revoked and expired rows. Nothing deletes an `_api_keys` row yet, so the table grows by every mint —
-  bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
-  grows by this table).
+- ~~A sweep of revoked and expired rows.~~ **Done in [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)**: a token
+  revoked or expired more than `RetentionDays` ago is deleted ([*The sweep (#527)*](#the-sweep-527)).
 - Events and an audit trail for minting and revoking (spec D9).
 - ~~A settled `/auth/v1` contract before v0.1~~ — done in [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542):
   `createdBy: { id, name }` everywhere, a 401 Bearer challenge for any API key on a person-only route, the descriptor key
@@ -1497,3 +1500,46 @@ write gate cannot have (design §2.3).
 | An owner's removal and her ban at once never deadlock, and leave one state: banned, gone, no live invitation, the other owner still owning | `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` (10 staged iterations; 9 deadlocks before the fix); `TenantStoreFacts.An_owner_s_removal_and_her_ban_at_once_leave_one_consistent_state` (20 iterations, both engines) |
 | A removal, leaving and a demotion take the member's account row before any of her credentials, and hold none while they wait for it | `PostgreSqlTenantStoreTests.A_member_write_that_sweeps_takes_the_member_s_account_row_before_their_credentials` (red on all three before the fix) |
 | A reuse and an invitation's creation take the account row before the session | `PostgreSqlAccountStoreTests.A_reuse_or_an_invitation_takes_the_account_row_before_the_session` (red on both before the fix) |
+
+## The sweep (#527)
+
+Every sign-in inserts a session, every refresh a refresh token, every mint an app token, every invitation a row — and
+until #527 nothing deleted any of them. The design is `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`
+§5 and its rulings (Q9 retention, Q11 the session-bound value, and the controller's "one framework sweeper").
+
+**One framework sweeper, four accounts jobs.** The core's `FrameworkSweeper` (`src/MMLib.Alvo/Sweeping`) is the one
+hosted service that sweeps framework tables: hourly, it runs every registered `ISweepJob` in batches of 500 while a
+batch comes back full, at most 20 a tick, and logs and skips a failed job without stopping the others. It began as the
+ledger sweep, whose two ledgers (inbound webhook ids, command keys) are its first jobs. `AddAlvoAccounts` registers four
+more, in `AccountsSweepJobs`, each turning `AlvoAccountsOptions` into instants its `IAccountStore` call binds — one
+SQL text on both engines, a bounded `… WHERE key IN (SELECT key … LIMIT @limit)`:
+
+| Job | Deletes | Keeps regardless |
+|---|---|---|
+| `end-user sessions` | sessions revoked, expired, or idle past `RefreshIdleDays`, for longer than `RetentionDays` (default 30, at least 1), each with every refresh token it has, in one transaction | any session younger than the ID-token window (`AccountsSweepJobs.IdTokenWindow`, 7 min: `iat` ≤ 5 min + 2 min skew), so its `subject_token_id` keeps an ID token single-use (spec D10) |
+| `rotated refresh tokens` | tokens rotated more than the grace window plus a minute ago | a session's unrotated tip, and its parent inside the grace window |
+| `app tokens` | personal and service tokens revoked or expired more than `RetentionDays` ago | — |
+| `invitations` | invitations revoked, expired, or used up and created, more than `RetentionDays` ago | — (a membership keeps its `invitation_id`, which may then name no row) |
+
+**Reuse detection survives the sweep** because a refresh-token value names its session (see *The tables*): a presented
+ancestor whose row is gone is still a reuse while its session lives. New indexes: `_auth_sessions(expires_at)`,
+`(revoked_at)`, `_auth_refresh_tokens(rotated_at)`, `_api_keys(expires_at)`, `(revoked_at)`,
+`_tenant_invitations(expires_at)`. **Deviation from design §5.3:** `_tenant_invitations(created_by)` is not added
+here — it would turn the ban's invitation sweep into an index scan and invalidate the staging of #543's race fact
+(`PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks`, which asserts the ban plans a heap
+scan); add it together with an adjusted fact. **Deviation from the issue's wording** ("an Alvo scheduled job"): Alvo's
+schedules are descriptor-declared and per tenant; this is infrastructure, so it is a hosted service. Every replica
+sweeps; the deletes are idempotent. A batch that loses a deadlock (`40P01`) to another replica's sweep is retried once
+at Debug; a job that still fails — or cannot even be resolved — is logged and retried next tick while the other jobs
+run. The session job reads its dead ids once and deletes the tokens and the sessions by them, so a concurrent commit
+cannot shift what the second delete names (`AccountStoreFacts.Two_replicas_sweeping_at_once_leave_no_orphan_token`,
+both engines). Every `IN (SELECT … LIMIT)` orders by the primary key. **The Apps line's N6** — a row `retention` trait, pruning `alvo_outbox` (#154) and
+`alvo_idempotency` (#115) — adds jobs to this sweeper, never a second one.
+
+| Invariant | Held by |
+|---|---|
+| Dead sessions past the retention go with their tokens; live ones and ones younger than the ID-token window stay; a call deletes at most its limit | `AccountStoreFacts.The_sweep_deletes_dead_sessions_with_their_tokens_and_keeps_the_rest` (both engines) |
+| Rotated refresh tokens go; the tip stays and still refreshes; a presented swept ancestor still ends its live session | `AccountStoreFacts.The_sweep_deletes_rotated_refresh_tokens_and_keeps_the_tip`, `…A_swept_ancestor_presented_again_kills_its_live_session`, `…A_swept_ancestor_of_a_dead_session_is_only_refused` (both engines) |
+| Dead app tokens and invitations past the retention go; live ones stay | `AccountStoreFacts.The_sweep_deletes_dead_app_tokens_and_invitations_past_the_retention` (both engines) |
+| One sweeper, bounded batches, a failed job skipped; the ledgers are its first jobs and bounded too | `FrameworkSweeperTests`; `LedgerFacts.A_ledger_sweep_deletes_at_most_its_limit` (both engines) |
+| Accounts registers four jobs on the one sweeper; a real host forgets a signed-out session past the retention and keeps a live one | `AccountsSweepTests` |

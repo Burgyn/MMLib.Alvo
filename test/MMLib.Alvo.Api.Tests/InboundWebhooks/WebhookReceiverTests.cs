@@ -406,7 +406,7 @@ public sealed class WebhookReceiverTests : IDisposable
         using var first = await SendAsync(world, "/hooks/payments", "msg_8", "{}");
         _time.Advance(TimeSpan.FromDays(7) + TimeSpan.FromHours(1));
 
-        _ = await world.Services.GetServices<IHostedService>().OfType<LedgerSweeper>().Single()
+        _ = await world.Services.GetServices<IHostedService>().OfType<MMLib.Alvo.Sweeping.FrameworkSweeper>().Single()
             .SweepOnceAsync(TestContext.Current.CancellationToken);
         using var redelivered = await SendAsync(world, "/hooks/payments", "msg_8", "{}");
 
@@ -635,7 +635,7 @@ public sealed class WebhookReceiverTests : IDisposable
         public Task ReleaseAsync(string receiver, string webhookId, string token, CancellationToken cancellationToken) =>
             throw new InvalidOperationException(Failure);
 
-        public Task<int> SweepAsync(DateTimeOffset receivedBefore, CancellationToken cancellationToken) => Task.FromResult(0);
+        public Task<int> SweepAsync(DateTimeOffset receivedBefore, int limit, CancellationToken cancellationToken) => Task.FromResult(0);
     }
 
     /// <summary>Every log line's level and rendered message, from every category.</summary>

@@ -76,7 +76,12 @@ internal sealed partial class EfCoreAccountStore
         DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
     {
         var token = await TokenAsync(connection, transaction, request.TokenId, ct).ConfigureAwait(false);
-        if (token is null || !token.IsUsable(request.Now))
+        if (token is null)
+        {
+            return await SweptAncestorAsync(connection, transaction, request, ct).ConfigureAwait(false);
+        }
+
+        if (!token.IsUsable(request.Now))
         {
             return _refused;
         }
@@ -128,13 +133,42 @@ internal sealed partial class EfCoreAccountStore
             return token.Child is { } child ? token.Answer(RefreshStatus.Replayed, child) : _refused;
         }
 
-        await ExecuteAsync(
-            connection, transaction, _tables.LockAccountRowSql, command => Bind(command, ("@account_id", Id(token.Account))), ct)
+        return await ReusedAsync(connection, transaction, token.Account, token.Session, token.SessionStartedAt, request.Now, ct)
             .ConfigureAwait(false);
-        await RevokeAsync(connection, transaction, token.Session, SessionRevocations.Reuse, request.Now, ct).ConfigureAwait(false);
-        await RevokeMintedSinceAsync(connection, transaction, token.Account, token.SessionStartedAt, request.Now, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ends a reused session and sweeps what was minted since it started, in one transaction (stack review A-I1) — both
+    /// reuse paths, a rotated row presented again and a swept ancestor (#527), come here. It keeps #543's lock order: the
+    /// person's account row first (<see cref="AuthTables.LockAccountRowSql"/>), then the session, then invitations and
+    /// tokens. The session was read before the lock, so it is re-read after it: a ban or a sign-out that committed while
+    /// this waited has ended it already, and the presentation is then only refused — as it would have been had it come a
+    /// moment later — with nothing left to sweep that the ban did not.
+    /// </summary>
+    private async Task<RefreshOutcome> ReusedAsync(
+        DbConnection connection, DbTransaction transaction, UserId account, Guid session, DateTimeOffset startedAt, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        await ExecuteAsync(
+            connection, transaction, _tables.LockAccountRowSql, command => Bind(command, ("@account_id", Id(account))), ct)
+            .ConfigureAwait(false);
+        if (!await SessionLiveAsync(connection, transaction, session, now, ct).ConfigureAwait(false))
+        {
+            return _refused;
+        }
+
+        await RevokeAsync(connection, transaction, session, SessionRevocations.Reuse, now, ct).ConfigureAwait(false);
+        await RevokeMintedSinceAsync(connection, transaction, account, startedAt, now, ct).ConfigureAwait(false);
         return new RefreshOutcome(RefreshStatus.Reused, null, null, null, null);
     }
+
+    private async Task<bool> SessionLiveAsync(
+        DbConnection connection, DbTransaction transaction, Guid session, DateTimeOffset now, CancellationToken ct) =>
+        (await RelationalSqlBatch.ReadRowsAsync(
+            connection, transaction, _tables.LiveSessionByIdSql,
+            command => Bind(command, ("@session_id", Id(session)), ("@now", Instant(now))),
+            static _ => true,
+            ct).ConfigureAwait(false)).Count == 1;
 
     /// <summary>
     /// Revokes, beside the reused session and in its transaction, every invitation and app token
@@ -154,6 +188,34 @@ internal sealed partial class EfCoreAccountStore
         await ExecuteAsync(
             connection, transaction, _appTokenTables.RevokeMintedSinceSql,
             command => Bind(command, ("@now", Instant(now)), ("@account_id", Id(account)), ("@since", Instant(since))), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A genuine value whose row is gone (#527): the sweep deletes rotated ancestors past the grace window, so when the
+    /// session the value names is still live this is a rotated token presented again after its window — a reuse, answered
+    /// exactly as one whose row survived (RFC 9700 §4.14.2). A value naming no live session is only refused: there is
+    /// nothing left to revoke.
+    /// </summary>
+    private async Task<RefreshOutcome> SweptAncestorAsync(
+        DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
+    {
+        if (request.Session == Guid.Empty)
+        {
+            return _refused;
+        }
+
+        var live = await RelationalSqlBatch.ReadRowsAsync(
+            connection, transaction, _tables.LiveSessionByIdSql,
+            command => Bind(command, ("@session_id", Id(request.Session)), ("@now", Instant(request.Now))),
+            reader => (Account: UserIdOf(reader.GetString(0)), StartedAt: StoredInstant.Of(reader.GetString(1))),
+            ct).ConfigureAwait(false);
+        if (live.Count == 0)
+        {
+            return _refused;
+        }
+
+        return await ReusedAsync(connection, transaction, live[0].Account, request.Session, live[0].StartedAt, request.Now, ct)
+            .ConfigureAwait(false);
     }
 
     private static bool IsWithinGrace(DateTimeOffset rotatedAt, RefreshRequest request) =>

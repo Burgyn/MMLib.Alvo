@@ -102,14 +102,15 @@ internal static class InboundWebhookTable
                 [("@token", token)]),
             ct);
 
-    internal static Task<int> SweepAsync(DbConnection connection, string table, DateTimeOffset before, CancellationToken ct) =>
+    internal static Task<int> SweepAsync(DbConnection connection, string table, DateTimeOffset before, int limit, CancellationToken ct) =>
         ExecutedAsync(
             Command(
                 connection,
                 null,
-                $"DELETE FROM {table} WHERE received_at < @before",
+                $"DELETE FROM {table} WHERE (receiver, webhook_id) IN "
+                + $"(SELECT receiver, webhook_id FROM {table} WHERE received_at < @before ORDER BY receiver, webhook_id LIMIT @limit)",
                 null,
-                [("@before", StoredInstant.Text(before))]),
+                [("@before", StoredInstant.Text(before)), ("@limit", limit)]),
             ct);
 
     private static WebhookClaim Found(DbDataReader reader, DateTimeOffset now) =>

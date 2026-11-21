@@ -116,7 +116,51 @@ internal interface IAccountStore
     /// <param name="ct">A token to cancel the operation.</param>
     /// <exception cref="InvalidOperationException">The deployment mounted no secret encryption key.</exception>
     Task<IReadOnlyList<StoredKey>> ReadKeysAsync(string purpose, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes at most <see cref="SessionSweep.Limit"/> sessions dead past the retention, each with every refresh token it
+    /// still has, in one transaction (#527); answers how many sessions. A session started after
+    /// <see cref="SessionSweep.BornBefore"/> is never deleted, so its <c>subject_token_id</c> keeps an ID token single-use
+    /// for as long as the token could be accepted.
+    /// </summary>
+    /// <param name="sweep">The thresholds and the bound.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<int> SweepSessionsAsync(SessionSweep sweep, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes at most <paramref name="limit"/> refresh tokens rotated before <paramref name="rotatedBefore"/> — ancestors a
+    /// live session no longer needs, since a presented value names its session (#527); a session's unrotated tip is never
+    /// deleted. Answers how many.
+    /// </summary>
+    /// <param name="rotatedBefore">The instant past the grace window.</param>
+    /// <param name="limit">The most rows to delete.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<int> SweepRotatedRefreshTokensAsync(DateTimeOffset rotatedBefore, int limit, CancellationToken ct);
+
+    /// <summary>Deletes at most <paramref name="limit"/> app tokens revoked or expired before <paramref name="deadBefore"/> (#527).</summary>
+    /// <param name="deadBefore">The instant past the retention.</param>
+    /// <param name="limit">The most rows to delete.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<int> SweepAppTokensAsync(DateTimeOffset deadBefore, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes at most <paramref name="limit"/> invitations revoked, expired, or used up and created, before
+    /// <paramref name="deadBefore"/> (#527). A membership keeps its <c>invitation_id</c>, which may then name no row.
+    /// </summary>
+    /// <param name="deadBefore">The instant past the retention.</param>
+    /// <param name="limit">The most rows to delete.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<int> SweepInvitationsAsync(DateTimeOffset deadBefore, int limit, CancellationToken ct);
 }
+
+/// <summary>What makes a session dead for long enough to sweep (#527), as instants the caller computed.</summary>
+/// <param name="RevokedBefore">A session revoked before this goes.</param>
+/// <param name="ExpiredBefore">A session whose absolute expiry is before this goes.</param>
+/// <param name="IdleBefore">A session last refreshed (or started) before this — idle past the limit and the retention — goes.</param>
+/// <param name="BornBefore">Only sessions started before this go: the ID-token acceptance window's guard.</param>
+/// <param name="Limit">The most sessions to delete.</param>
+internal sealed record SessionSweep(
+    DateTimeOffset RevokedBefore, DateTimeOffset ExpiredBefore, DateTimeOffset IdleBefore, DateTimeOffset BornBefore, int Limit);
 
 /// <summary>An identity a provider asserted and the verifier accepted.</summary>
 /// <param name="Provider">The provider's name in the descriptor, e.g. <c>google</c>.</param>
@@ -212,8 +256,14 @@ internal sealed record AccountView(
 /// <param name="Grace">How long after its rotation a token still answers its child; zero refuses any reuse.</param>
 /// <param name="Idle">How long an unrotated token stays usable after it was issued.</param>
 /// <param name="PersonalTenant">The personal tenant to ensure, or <see langword="null"/> when the descriptor gives none.</param>
+/// <param name="Session">
+/// The session the presented value names, inside its verified HMAC (#527). When the token's row is gone — a rotated
+/// ancestor the sweep deleted — a live session here makes the presentation a reuse after the window, exactly as if the
+/// row were still there; <see cref="Guid.Empty"/> names no session and such a presentation is only refused.
+/// </param>
 internal sealed record RefreshRequest(
-    Guid TokenId, Guid ChildId, DateTimeOffset Now, TimeSpan Grace, TimeSpan Idle, PersonalTenantRequest? PersonalTenant);
+    Guid TokenId, Guid ChildId, DateTimeOffset Now, TimeSpan Grace, TimeSpan Idle, PersonalTenantRequest? PersonalTenant,
+    Guid Session = default);
 
 /// <summary>What one caller read asks (S3 plan D4).</summary>
 /// <param name="Account">The account the access token names.</param>

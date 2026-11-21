@@ -20,15 +20,7 @@ internal static partial class WebhookLog
     [LoggerMessage(Level = LogLevel.Error, Message = "Webhook receiver '{Receiver}' could not give a delivery's id back; the sender's retry is answered 409 until its claim's lease runs out.")]
     internal static partial void NotReleased(ILogger logger, string receiver, Exception exception);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Swept {Webhooks} inbound webhook ids older than seven days and {Commands} command keys older than a day.")]
-    internal static partial void Swept(ILogger logger, int webhooks, int commands);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "The ledger sweep found no inbound webhook id or command key to forget.")]
-    internal static partial void NothingSwept(ILogger logger);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The ledger sweep failed; it runs again in an hour.")]
-    internal static partial void SweepFailed(ILogger logger, Exception failure);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The ledger sweep failed while the host was stopping; the next start sweeps again.")]
-    internal static partial void SweeperStopped(ILogger logger, Exception failure);
 }

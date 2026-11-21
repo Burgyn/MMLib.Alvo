@@ -375,6 +375,17 @@ public sealed class PersonResolverTests
         public Task<SignInOutcome> SignInAsync(SignInRequest request, CancellationToken ct) =>
             Calls.Count(nameof(SignInAsync), inner.SignInAsync(request, ct));
 
+        public Task<int> SweepSessionsAsync(SessionSweep sweep, CancellationToken ct) => inner.SweepSessionsAsync(sweep, ct);
+
+        public Task<int> SweepRotatedRefreshTokensAsync(DateTimeOffset rotatedBefore, int limit, CancellationToken ct) =>
+            inner.SweepRotatedRefreshTokensAsync(rotatedBefore, limit, ct);
+
+        public Task<int> SweepAppTokensAsync(DateTimeOffset deadBefore, int limit, CancellationToken ct) =>
+            inner.SweepAppTokensAsync(deadBefore, limit, ct);
+
+        public Task<int> SweepInvitationsAsync(DateTimeOffset deadBefore, int limit, CancellationToken ct) =>
+            inner.SweepInvitationsAsync(deadBefore, limit, ct);
+
         public Task<AccountView?> GetAccountAsync(UserId account, CancellationToken ct) =>
             Calls.Count(nameof(GetAccountAsync), inner.GetAccountAsync(account, ct));
 
