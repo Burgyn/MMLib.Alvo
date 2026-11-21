@@ -1,0 +1,43 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Scheduling/DataMigrationStarter.cs",
+      "Scheduling/IAlvoDataMigration.cs",
+      "Scheduling/IAlvoScheduledJob.cs",
+      "Scheduling/JobDescription.cs",
+      "Scheduling/JobInvocation.cs",
+      "Scheduling/JobSpec.cs",
+      "Scheduling/ScheduleChecks.cs",
+      "Scheduling/SchedulePump.cs",
+      "Scheduling/SchedulePumpLog.cs",
+      "Scheduling/ScheduleRuns.cs",
+      "Scheduling/Setup.cs",
+      "Scheduling/TenantCatalogs.cs",
+      "Scheduling/TimerEntries.cs",
+      "Scheduling/TimerLog.cs",
+      "Scheduling/TimerPump.cs",
+      "Secrets/Internal/AlvoSecretOptionsValidation.cs",
+      "Secrets/Internal/ConfigurationSecretStore.cs",
+      "Secrets/Internal/LayeredSecretStore.cs",
+      "Secrets/Internal/RequiredSecret.cs",
+      "Secrets/Internal/RequiredSecretsCheck.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Management/Internal/AlvoOperationsService.Writes.cs",
+      "Management/Internal/AlvoOperationsService.cs",
+      "Management/Internal/CapabilityReport.cs",
+      "Management/Internal/DeliveryFixtures.cs",
+      "Management/Internal/DeliveryQueries.cs",
+      "Management/Internal/DeliveryViews.cs",
+      "Management/Internal/ExpressionSlotCheck.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

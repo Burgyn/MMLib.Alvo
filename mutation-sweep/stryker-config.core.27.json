@@ -1,0 +1,26 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Tenants/SelfService/SelfServiceName.cs",
+      "Tenants/SelfService/SelfServicePolicy.cs",
+      "Tenants/SelfService/SelfServiceRoles.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

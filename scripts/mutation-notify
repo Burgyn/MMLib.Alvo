@@ -42,7 +42,14 @@ event_name="${6:?missing event name}"
 ref_name="${7:?missing ref name}"
 
 short_sha="${sha:0:12}"
-title="Mutation gate failed on ${ref_name} — ${short_sha}"
+# The weekly sweep gets its own title: it is a different run (every long leg in full, ~42
+# shards) on the same commit as that commit's push run, and the two must not merge into one
+# issue — a sweep shard failing is news about the suite, not about the merge.
+if [ "$event_name" = schedule ]; then
+    title="Weekly mutation sweep failed on ${ref_name} — ${short_sha}"
+else
+    title="Mutation gate failed on ${ref_name} — ${short_sha}"
+fi
 
 # PLAIN `mktemp`, and the reason is worth a line because the first version of this
 # was `mktemp -t mutation-report`, which is a hard failure on the only platform the
@@ -88,8 +95,22 @@ EOF
     cat <<'MD'
 
 Mutation runs post-merge by design, so this did not block the merge — it
-needs someone to act. There are three shapes, and the right action differs
-per shape; each shard's conclusion above says which one you are looking at.
+needs someone to act. WHICH JOB a shard belongs to changes what it means
+(see THE CADENCE in .github/workflows/mutation.yml):
+
+- **A plain leg name** (canary, commands-http, data-ef-rest, data-sqlite,
+  data-postgresql, accounts, self-service) ran in full on this push.
+- **`…, since previous main`** ran only on the source files this merge
+  changed. A low score there is about the CHANGED code, measured against
+  the whole leg's threshold; a vacuous failure there means the merge
+  changed this leg's files and Stryker still tested nothing — a diff it
+  did not see.
+- **`… N of M`** is a shard of the weekly (or dispatched) full sweep. Its
+  thresholds are PROVISIONAL (break 30) until a sweep has calibrated it,
+  so a red one is either a collapse or a budget problem, not a latch.
+
+Then there are three shapes, and the right action differs per shape; each
+shard's conclusion above says which one you are looking at.
 
 - **`failure` — mutation score below threshold.** The adversarial suite
   stopped biting. The fix is to add or strengthen a test, not to revert.
@@ -105,10 +126,10 @@ per shape; each shard's conclusion above says which one you are looking at.
 
 Each shard uploads its Stryker log as a **`stryker-log-<shard>`** artifact
 on the run linked above; that is how to tell a vacuous run from a
-below-threshold score. One gap worth knowing rather than discovering: a
-shard killed by `timeout-minutes` is *cancelled*, and a cancelled job never
-reaches its upload step — so the third case above is precisely the one with
-no artifact. It is a budget question anyway, not a log-reading one.
+below-threshold score. A shard killed by `timeout-minutes` still uploads its
+console log (its discovery counts are there), but no report: Stryker writes
+`mutation-report.json` only at the end. It is a budget question anyway, not
+a log-reading one.
 
 This issue is keyed on the commit above. A later commit opens its own issue
 rather than commenting here, so a stale one closing does not lose news about
