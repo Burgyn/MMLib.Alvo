@@ -31,7 +31,7 @@ variant; it seeds two million rows and takes a while.
 | Rows | 10 k work orders per tenant | 100 k per tenant |
 | Per scenario | 15 s | 60 s |
 | Offered rate (list shapes) | 40 /s | 20 /s |
-| Arms | merge base + HEAD, interleaved | HEAD only |
+| Arms | `--baseline-ref` (CI: the PR's base) + HEAD, interleaved | HEAD only |
 | Verdict | **pass/fail** | **publishes** (`--report-only`); never fails on a number |
 
 The large tier's rate is **lower**, and that is correctness rather than timidity. Every
@@ -66,9 +66,32 @@ statement about the feature rather than about the hardware. Every ratio is ancho
 `list_indexed`, the analysis's own headline shape.
 
 **Absolute, across two arms** — the coarse half. Four scenarios have no meaningful denominator;
-they are the floor. A regression fires only when HEAD is **both** a factor slower than the merge
-base **and** slower by more than an absolute floor in milliseconds. Both conditions, because a
+they are the floor. A regression fires only when HEAD is **both** a factor slower than the baseline
+ref **and** slower by more than an absolute floor in milliseconds. Both conditions, because a
 factor alone on a two-millisecond endpoint is noise, and a gate that fires on noise gets muted.
+
+**Each arm is the code it names, as it shipped** (#547). The base arm is whatever `--baseline-ref`
+names — CI passes the PR's `base.sha`; a local `--baseline-ref origin/main` is wherever `origin/main`
+is now, which may have moved past the PR's base. It serves that ref's own descriptor from its own
+database (`alvo_load_base`, beside the head's on the same PostgreSQL), seeded by that ref's own
+`seed.sql` and read back through its API before k6 starts. Sharing the head's was how the gate broke
+on the accounts stack: the older image refused the head descriptor's new keys and exited before
+measuring anything. While a PR leaves `seed.sql` and the descriptor alone, both databases hold the
+same rows, because the seed derives every id from a row ordinal; a PR that changes either is
+measured as it ships against the baseline ref as it shipped. When a service does not become healthy,
+every service's log is printed before the run stops.
+
+The baseline ref is checked out under `$TMPDIR` and its descriptor is bind-mounted from there, so
+`$TMPDIR` has to be a directory the Docker VM shares. Docker Desktop shares a fixed list (Settings →
+Resources → File sharing; macOS's default `$TMPDIR` under `/var/folders` is on it out of the box, an
+arbitrary path is not); Colima and Rancher Desktop share only `$HOME` by default. Otherwise the base
+arm mounts an empty directory and refuses to start. Pointing `TMPDIR` under your home directory works
+on all three:
+
+```sh
+mkdir -p "$HOME/.cache/tmp"
+TMPDIR="$HOME/.cache/tmp" scripts/test-load --baseline-ref origin/main
+```
 
 ## The gating statistic is `min`, and p95 is reported but never gated
 
@@ -214,7 +237,7 @@ the generator is off-box.
 | `scenarios.js` | the k6 script: one `exec` function and one `Trend` per shape |
 | `seed.sql` | the bulk seed, parameterised by `:rows` |
 | `baselines/gate.json` | ratio ceilings and A/B factors — the reviewable artifact |
-| `docker-compose.load.yml` | the field-service stack with a pre-built image, so the A/B can swap arms |
+| `docker-compose.load.yml` | the field-service stack with a pre-built image, its database and descriptor per arm, so the A/B can swap arms |
 | `../../tools/MMLib.Alvo.Load.Host` | the hooks arm's host: the standalone composition plus three calibration hooks and the probe |
 | `../../scripts/test-load` | the driver: image, stack, seed, cursor walk, k6, verdict |
 | `../../scripts/assert-load-baseline` | the verdict — the one authority on pass/fail |

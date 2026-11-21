@@ -1,0 +1,41 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-boot-newer",
+  "description": "The host-boot descriptor as a newer Alvo might write it: one auth key this build does not know.",
+  "auth": {
+    "providers": [
+      "local"
+    ],
+    "roles": [
+      "admin"
+    ],
+    "passkeys": {
+      "enabled": true
+    }
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": {
+          "type": "string",
+          "required": true,
+          "unique": true,
+          "maxLength": 20
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 60
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}

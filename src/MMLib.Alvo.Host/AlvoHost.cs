@@ -154,7 +154,7 @@ public static class AlvoHost
     /// segmentation fault; it now prints the path and the fix and exits
     /// <c>78</c> (<c>EX_CONFIG</c>). Refusing to start is unchanged and deliberate — see
     /// <c>docs/architecture/host.md</c> — because a container that reported healthy with no schema would be
-    /// strictly worse. Only <see cref="AlvoHostExit.IsConfigurationFailure"/>'s two shapes are caught; anything
+    /// strictly worse. Only <see cref="AlvoHostExit.IsConfigurationFailure"/>'s named shapes are caught; anything
     /// else still propagates, so a genuine defect keeps the runtime's own report and crash dump.
     /// </para>
     /// <para>
