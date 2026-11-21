@@ -39,6 +39,9 @@ internal static partial class AccountsSchemas
     /// <summary>One tenant a person belongs to.</summary>
     internal const string MembershipId = "authMembership";
 
+    /// <summary>A keyed create's replay for a creator who has since left the tenant: its id alone.</summary>
+    internal const string CreatedTenantId = "authCreatedTenant";
+
     /// <summary>A tenant's name, as creating or renaming one sends it.</summary>
     internal const string TenantNameId = "authTenantName";
 
@@ -61,6 +64,7 @@ internal static partial class AccountsSchemas
         document.AddComponent(TokenRequestId, TokenRequest());
         document.AddComponent(TokenId, Token());
         document.AddComponent(MembershipId, Membership());
+        document.AddComponent(CreatedTenantId, CreatedTenant());
         document.AddComponent(UserId, User(document));
         document.AddComponent(TenantNameId, TenantName());
         document.AddComponent(MemberId, Member());
@@ -130,6 +134,12 @@ internal static partial class AccountsSchemas
             MembershipResponse.SharedKind)),
         ("roles", Strings("The tenant roles the person holds here, as `@user.roles` counts them in this tenant's scoped entities.")),
         ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether the person manages this tenant. Not a role." }));
+
+    private static OpenApiSchema CreatedTenant() => Object(
+        "A keyed create's replay for a creator who has since left the tenant: the id the first 201 already gave, and "
+        + "nothing the person no longer sees.",
+        ["tenantId"],
+        ("tenantId", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The tenant the first create made." }));
 
     private static OpenApiSchema TenantName()
     {

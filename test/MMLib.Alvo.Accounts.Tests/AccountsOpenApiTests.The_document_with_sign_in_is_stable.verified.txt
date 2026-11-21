@@ -556,7 +556,7 @@
         },
         "responses": {
           "201": {
-            "description": "The tenant was created; the body is the person's owner membership.",
+            "description": "The tenant was created; the body is the person's owner membership. A keyed retry answers the same 201 and `Location` with the membership as it reads now — or, when the person has since left the tenant, only `{tenantId}`.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -575,7 +575,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/authMembership"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/authMembership"
+                    },
+                    {
+                      "$ref": "#/components/schemas/authCreatedTenant"
+                    }
+                  ]
                 }
               }
             }
@@ -3633,6 +3640,20 @@
         },
         "additionalProperties": false,
         "description": "A new personal or service token. `name`, `kind`, `scopes` and `expiresAt` are always required; no other property is accepted."
+      },
+      "authCreatedTenant": {
+        "required": [
+          "tenantId"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "description": "The tenant the first create made.",
+            "format": "uuid"
+          }
+        },
+        "description": "A keyed create's replay for a creator who has since left the tenant: the id the first 201 already gave, and nothing the person no longer sees."
       },
       "authInvitation": {
         "required": [

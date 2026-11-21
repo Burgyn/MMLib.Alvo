@@ -148,3 +148,75 @@ Ruling 20): keep 250 ms while `hook_read`'s p99 ≤ 25 ms on the calibration rig
 that restores tenfold headroom. The margin is real but not wide (21.85 against 25), and it was measured once, on this
 rig: a slower rig, or a hook that does more than one read, is what `AlvoHookOptions.Timeout` per registration and
 `Alvo:Extensions:CelFunctionBudget` are for.
+
+## Calibration on `ubuntu-latest` — 2026-11-21, pre-v0.1 (`main` @ `6a71769f`)
+
+**What it is.** The first calibration-tier run on the rig the gate judges on: a `workflow_dispatch` of the Load workflow
+([run 44878011339](https://github.com/Burgyn/MMLib.Alvo/actions/runs/44878011339)) against `main` at `6a71769f`. Both
+tables below are copied from that run's `calibration.md` artifact, never edited.
+
+**Rig.** GitHub-hosted `ubuntu-latest` (runner image `ubuntu-26.04`), generator co-resident with the server and
+PostgreSQL 16 (`postgres:16-alpine`). k6 v2.2.0. Not comparable in absolute terms with the two laptop sections above
+(qualification 1).
+
+**Data and load.** As the baseline: the `examples/field-service` descriptor, 100 000 work orders per tenant,
+`constant-arrival-rate`, 60 s per scenario — 20 req/s for every list shape, 40 for the keyed read, 10 for a write, 5 for
+the OpenAPI document. The main arm ran 13 004 iterations and the hooks arm 2 502, **0 dropped** and **0 failed** in
+both. The probe (`calibration-probe` refusing `WO-89000001` with 409) passed before the hooks arm was measured.
+
+All values in milliseconds.
+
+| Scenario | min | med | p95 | p99 | max |
+|---|---|---|---|---|---|
+| `count_exact` | 25.56 | 30.06 | 37.69 | 41.9 | 48.47 |
+| `create` | 4.95 | 5.83 | 7.58 | 11.99 | 366.29 |
+| `list_indexed` | 7.54 | 9.29 | 11.7 | 13.36 | 16.05 |
+| `openapi` | 4.54 | 4.89 | 7.14 | 8.31 | 9.33 |
+| `page_deep` | 21.91 | 24.86 | 30.1 | 34.15 | 39.03 |
+| `page_shallow` | 7.63 | 9.5 | 12 | 13.92 | 17.42 |
+| `read_by_id` | 1 | 1.25 | 1.83 | 2.45 | 8.68 |
+| `row_policy` | 21.96 | 25.81 | 30.59 | 34.52 | 38.84 |
+| `select_projection` | 6.3 | 8.24 | 10.76 | 13.06 | 18.28 |
+| `sort_nullable` | 33.66 | 36.78 | 44.57 | 51.85 | 62.28 |
+| `unindexed_filter` | 29.95 | 32.41 | 38.65 | 42.31 | 49.52 |
+
+The hooks arm:
+
+| Shape | min | med | p95 | p99 | max | min / create min |
+|---|---|---|---|---|---|---|
+| `create` | 4.95 | 5.83 | 7.58 | 11.99 | 366.29 | 1x |
+| `hook_after` | 5.14 | 6.17 | 7.74 | 9.4 | 12.37 | 1.04x |
+| `hook_read` | 5.78 | 6.81 | 8.5 | 9.64 | 14.08 | 1.17x |
+| `hook_unit` | 5.07 | 6.16 | 8.24 | 11.33 | 267.13 | 1.03x |
+| `hook_noop` | 5.05 | 6.13 | 7.93 | 10.7 | 13.3 | 1.02x |
+
+### Against the analysis's own bar, on the CI rig
+
+**`list_indexed` p95 = 11.7 ms over 100 000 rows on an indexed column** — inside `baas-analyza.md:142`'s 50 ms by a
+factor of four, now on the rig that gates rather than on a laptop.
+
+### Ratios on `min`, against the gate's ceilings
+
+The calibration tier runs the guard with `--report-only`, and its verdict marks four ratios `over`. **That is not a
+regression:** the ceilings in `test/load/baselines/gate.json` are set at the gate tier's 10 000 rows, and ratios grow
+with row count (qualification 3; `test/load/README.md`, *A ceiling is only valid for the tier it was measured on*).
+
+| Ratio | Value | Gate ceiling | What it says |
+|---|---|---|---|
+| `sort_nullable` | **4.47×** | 3.0 | #178's portable `CASE` rank — still the most expensive thing a caller can do to a list. |
+| `count_exact` | **3.39×** | 3.0 | The second statement over the whole matching set; opt-in for this reason. |
+| `row_policy` | **2.91×** | 2.4 | The rule engine's cost in the hot path — the ratio to watch hardest. |
+| `page_deep` | **2.87×** | 2.2 | Against `page_shallow`: ~100 000 rows of depth on the same sort. |
+| `unindexed_filter` | 3.97× | — | What an index is worth on this data. Context, not a budget. |
+| `select_projection` | **0.84×** | 1.3 | Below 1.0, as the baseline said it would be once `?select=` narrowed the read (#117): two fields now cost less than all of them. The fix measured rather than asserted. |
+
+### The hooks, on this rig
+
+**What each step costs, on `min`:** `hook_unit − create` = 0.12 ms; `hook_noop − hook_unit` = −0.02 ms (below this
+rig's resolution); `hook_read − hook_noop` = 0.73 ms, the one read through `write.Transaction`; `hook_after − hook_unit`
+= 0.07 ms. A before-write hook that does one read costs about 0.8 ms of service time over a hook-free create — as on the
+laptop.
+
+**Verdict.** 250 ms stays, now with a wide margin: `hook_read`'s p99 on the calibration rig is 9.64 ms against HX-10
+Ruling 20's 25 ms. `create`'s max (366.29 ms) and `hook_unit`'s (267.13 ms) are single tail samples of the rig, not of
+the hooks: `hook_noop` and `hook_read`, which do more, top out at 13.3 and 14.08 ms.
