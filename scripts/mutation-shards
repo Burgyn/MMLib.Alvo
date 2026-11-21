@@ -2,38 +2,50 @@
 """Generate the weekly mutation sweep's shards: mutation-sweep/*.json and mutation-sweep/matrix.json.
 
 WHY THIS EXISTS. Four legs of .github/workflows/mutation.yml cannot finish under GitHub's 360-minute
-job ceiling (expressions, rules/auth/rest, data-ef-core, accounts-store; see "RE-SHARDING THE LONG
-LEGS" in its header). On every push they run with Stryker's `since` against the previous main
-commit, mutating only what the merge changed. The FULL measurement runs weekly and on
-workflow_dispatch, split into shards that each fit — and this script is the one place those shards
-come from, so that a source file added tomorrow cannot silently fall out of every shard.
+job ceiling — expressions, rules/auth/rest, data-ef-core and accounts-store; see "THE CADENCE" in
+its header (a fifth, data-ef-rest, fits one job and runs in full on every push). On every push
+the four run with Stryker's `since` against the previous main commit, mutating only what the merge
+changed. The FULL measurement runs weekly and on workflow_dispatch, split into shards that each
+fit — and this script is the one place those shards come from, so that a source file added
+tomorrow cannot silently fall out of every shard.
 
 HOW A SHARD IS CUT. Each long leg keeps its committed config (stryker-config.<leg>.json) as the
 single source of what it mutates. This script resolves that config's `mutate` globs over the
 project's *.cs files, orders them (by path; accounts-store by store), weighs each by the mutants
 Stryker CREATES in it (scripts/fixtures/mutation-shards/created-*.tsv, read from a real trace
-log), and cuts the ordered list into N contiguous runs of near-equal weight. Contiguous, so a shard
+log), and cuts the ordered list into contiguous runs of near-equal weight. Contiguous, so a shard
 reads as an area (Events/..., Migrations/...) rather than a scatter. Each shard config is its
 parent with `mutate` replaced by the exact file list; the union of a leg's shards is its parent's
 file set, disjoint, which `--check` re-proves on every PR (scripts/test-assert-mutation-run).
 
-HOW N IS CHOSEN — measured cost, not mutant count. Runner seconds per mutant per suite, from the
-sampling run 44877284451 (2026-11-21): expressions 68.9 s (147 mutants, 94 % killed), the core
-suite on Rules 59.9 s (104, 89 %), data-ef-core 97.5 s (97, 28 %), data-ef-rest 10.1 s (73).
-Survivors cost ~4x what kills do there, and rules/auth/rest last measured ~58 % killed, so its
-cost is taken at 107 s (0.58 x 44 s + 0.42 x 194 s, the split the two core-suite samples give),
-not at the sample's 59.9. accounts-store has NO measurement: its sample was cancelled with every
+WHAT CAN MAKE `--check` FAIL, AND WHAT CANNOT. The output depends on the committed configs, the
+weight tables and the SET of files each config resolves to — never on a file's contents. A file
+the weight table does not list gets a constant weight (the table's median), not one derived from
+its line count, so a comment edit anywhere cannot turn the PR gate red; a file ADDED to, removed
+from or renamed in a long leg's area does, until the shards are regenerated.
+
+HOW THE SHARD COUNT IS CHOSEN — measured cost, not mutant count. Runner seconds per mutant per
+suite, from the sampling run 44877284451 (2026-11-21): expressions 68.9 s (147 mutants, 94 %
+killed), the core suite on Rules 59.9 s (104, 89 %), data-ef-core 97.5 s (97, 28 %). Survivors
+cost ~4x what kills do there, and rules/auth/rest last measured ~58 % killed, so its cost is taken
+at 107 s (0.58 x 44 s + 0.42 x 194 s, the split the two core-suite samples give), not at the
+sample's 59.9. accounts-store has NO measurement: its sample was cancelled with every
 Accounts.Tests host force-killed at the test-run timeout under --concurrency 4; at concurrency 2
-it is ESTIMATED at 150 s. N is the smallest count that keeps each shard's projected wall clock
-(mutants x cost / concurrency) near 180 minutes, so a 340-minute budget is >= 1.7x.
+it is ESTIMATED at 150 s. Each leg gets the fewest shards none of which is projected (mutants x
+cost / concurrency) past 180 minutes — except a single file heavier than that — so a 340-minute
+budget is >= 1.7x.
 
 EVERY NUMBER A SHARD CARRIES IS PROVISIONAL until the first sweep measures it: its `mutants:` floor
 is 70 % of an estimate (weight x the leg's tested/created ratio), and its `break` is the
 collapse floor 30 the header uses for unmeasured legs.
 
 Usage:
-  scripts/mutation-shards            write mutation-sweep/
-  scripts/mutation-shards --check    fail (exit 1) if mutation-sweep/ is stale or not a partition
+  scripts/mutation-shards                       write mutation-sweep/
+  scripts/mutation-shards --check               fail (exit 1) if mutation-sweep/ is stale
+  scripts/mutation-shards --resolve <config>    print the repo-relative files <config> mutates
+                                                (used by the `since` legs to tell "the merge
+                                                changed nothing here" from "nothing was tested")
+  --root <dir>                                  act on another checkout (the --check tests)
 """
 
 from __future__ import annotations
@@ -43,17 +55,25 @@ import json
 import math
 import pathlib
 import re
+import statistics
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT = ROOT / "mutation-sweep"
-WEIGHTS = ROOT / "scripts" / "fixtures" / "mutation-shards"
 TARGET_MINUTES = 180
 BUDGET = 340
 SHARD_BREAK = 30
 
 CORE = "src/MMLib.Alvo/MMLib.Alvo.csproj"
 EF = "src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj"
+
+# Which project each config mutates: its `project` key names a csproj file, not a path.
+PROJECTS = {
+    "MMLib.Alvo.csproj": CORE,
+    "MMLib.Alvo.Data.EntityFrameworkCore.csproj": EF,
+    "MMLib.Alvo.Data.Sqlite.csproj": "src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj",
+    "MMLib.Alvo.Data.PostgreSql.csproj": "src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj",
+    "MMLib.Alvo.Accounts.csproj": "src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj",
+    "MMLib.Alvo.Testing.csproj": "src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj",
+}
 
 # tested = "N total mutants will be tested" of the leg's last full discovery (run 44834820709 /
 # 44850064624); suite = its "Number of tests found"; cost = runner seconds per mutant (see above).
@@ -73,12 +93,6 @@ LEGS = [
      "order": ["EfCoreAccountStore", "Internal/AuthTables", "EfCoreTenantStore.cs", "EfCoreTenantStore.Members",
                "Internal/TenantTables", "EfCoreTenantStore.Invitations", "Internal/InvitationTables",
                "Internal/InvitationAcceptance", "EfCoreAppTokenStore", "Internal/AppTokenTables"]},
-]
-
-# Run whole in the sweep: it fits one job (2950 x 10.1 s / 4 = ~124 min).
-WHOLE = [
-    {"name": "data-ef-rest", "config": "stryker-config.data-ef-rest.json", "project": EF,
-     "mutants": 2950, "suite": 1560, "timeout": 250},
 ]
 
 
@@ -109,24 +123,24 @@ def resolve(project_dir: pathlib.Path, mutate: list[str]) -> list[str]:
     return files
 
 
-def weights(project: str, files: list[str]) -> dict[str, float]:
+def weights(root: pathlib.Path, project: str, files: list[str]) -> dict[str, float]:
+    """The measured created-mutant count per file; a file the table does not list weighs the
+    table's median — a constant, so nothing here depends on what a file contains."""
     name = pathlib.Path(project).stem
     table = {}
-    for line in (WEIGHTS / f"created-{name}.tsv").read_text(encoding="utf-8").splitlines():
+    tsv = root / "scripts" / "fixtures" / "mutation-shards" / f"created-{name}.tsv"
+    for line in tsv.read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#"):
             rel, count = line.split("\t")
             table[rel] = int(count)
-    project_dir = ROOT / pathlib.Path(project).parent
-    lines_known = sum(len((project_dir / r).read_text(encoding="utf-8").splitlines())
-                      for r in table if (project_dir / r).exists())
-    per_line = sum(table.values()) / max(lines_known, 1)
-    return {rel: table.get(rel, len((project_dir / rel).read_text(encoding="utf-8").splitlines()) * per_line)
-            for rel in files}
+    unlisted = statistics.median(v for v in table.values() if v > 0)
+    return {rel: table.get(rel, unlisted) for rel in files}
 
 
 def order(files: list[str], prefixes: list[str] | None) -> list[str]:
     if not prefixes:
         return files
+
     def key(rel: str) -> tuple[int, str]:
         for index, prefix in enumerate(prefixes):
             if rel.startswith(prefix):
@@ -163,14 +177,14 @@ def cut(files: list[str], weight: dict[str, float], limit: float) -> list[list[s
     return greedy(files, weight, high)
 
 
-def build() -> dict[str, str]:
+def build(root: pathlib.Path) -> dict[str, str]:
     files_out: dict[str, str] = {}
     matrix = []
     for leg in LEGS:
-        parent = json.loads((ROOT / leg["parent"]).read_text(encoding="utf-8"))
-        project_dir = ROOT / pathlib.Path(leg["project"]).parent
+        parent = json.loads((root / leg["parent"]).read_text(encoding="utf-8"))
+        project_dir = root / pathlib.Path(leg["project"]).parent
         files = order(resolve(project_dir, parent["stryker-config"]["mutate"]), leg.get("order"))
-        weight = weights(leg["project"], files)
+        weight = weights(root, leg["project"], files)
         total = sum(weight.values())
         ratio = leg["tested"] / total
         minutes_per_weight = ratio * leg["cost"] / leg["concurrency"] / 60
@@ -182,8 +196,7 @@ def build() -> dict[str, str]:
             config["stryker-config"]["mutate"] = shard
             thresholds = config["stryker-config"].setdefault("thresholds", {})
             thresholds["break"] = SHARD_BREAK
-            name = f"{leg['slug']}.{number:02d}"
-            path = f"mutation-sweep/stryker-config.{name}.json"
+            path = f"mutation-sweep/stryker-config.{leg['slug']}.{number:02d}.json"
             files_out[path] = json.dumps(config, indent=2, ensure_ascii=False) + "\n"
             estimate = sum(weight[f] for f in shard) * ratio
             minutes = estimate * leg["cost"] / leg["concurrency"] / 60
@@ -196,19 +209,42 @@ def build() -> dict[str, str]:
                 "projected-minutes": round(minutes), "files": len(shard),
                 **({"debug-log": True} if leg.get("debug-log") else {}),
             })
-    for whole in WHOLE:
-        matrix.append({**whole, "concurrency": 4})
     files_out["mutation-sweep/matrix.json"] = json.dumps({"include": matrix}, indent=2) + "\n"
     return files_out
 
 
-def main() -> int:
-    check = sys.argv[1:] == ["--check"]
-    wanted = build()
-    on_disk = {p.relative_to(ROOT).as_posix() for p in OUT.glob("*.json")} if OUT.exists() else set()
-    if check:
+def resolve_config(root: pathlib.Path, config_path: str) -> list[str]:
+    config = json.loads((root / config_path).read_text(encoding="utf-8"))["stryker-config"]
+    project = PROJECTS.get(config["project"])
+    if project is None:
+        raise SystemExit(f"{config_path}: project '{config['project']}' is not one this script knows")
+    project_dir = pathlib.Path(project).parent
+    return [(project_dir / rel).as_posix() for rel in resolve(root / project_dir, config["mutate"])]
+
+
+USAGE = "usage: mutation-shards [--root <dir>] [--check | --resolve <config>]"
+
+
+def main(argv: list[str]) -> int:
+    root = pathlib.Path(__file__).resolve().parent.parent
+    args = list(argv)
+    if args[:1] == ["--root"]:
+        if len(args) < 2:
+            print(USAGE, file=sys.stderr)
+            return 2
+        root, args = pathlib.Path(args[1]).resolve(), args[2:]
+    if args not in ([], ["--check"]) and not (len(args) == 2 and args[0] == "--resolve"):
+        print(USAGE, file=sys.stderr)
+        return 2
+    if args[:1] == ["--resolve"]:
+        print("\n".join(resolve_config(root, args[1])))
+        return 0
+    out = root / "mutation-sweep"
+    wanted = build(root)
+    on_disk = {p.relative_to(root).as_posix() for p in out.glob("*.json")} if out.exists() else set()
+    if args == ["--check"]:
         stale = sorted(p for p, text in wanted.items()
-                       if not (ROOT / p).exists() or (ROOT / p).read_text(encoding="utf-8") != text)
+                       if not (root / p).exists() or (root / p).read_text(encoding="utf-8") != text)
         extra = sorted(on_disk - set(wanted))
         if stale or extra:
             for path in stale:
@@ -219,17 +255,16 @@ def main() -> int:
             return 1
         print(f"mutation-sweep/ is current: {len(wanted) - 1} shard configs and matrix.json.")
         return 0
-    OUT.mkdir(exist_ok=True)
+    out.mkdir(exist_ok=True)
     for path in on_disk - set(wanted):
-        (ROOT / path).unlink()
+        (root / path).unlink()
     for path, text in wanted.items():
-        (ROOT / path).write_text(text, encoding="utf-8")
-    matrix = json.loads(wanted["mutation-sweep/matrix.json"])["include"]
-    for entry in matrix:
-        print(f"{entry['name']:28s} files {entry.get('files', '-'):>4} floor {entry['mutants']:>5} "
-              f"~{entry.get('projected-minutes', '-')} min  budget {entry['timeout']}  c={entry['concurrency']}")
+        (root / path).write_text(text, encoding="utf-8")
+    for entry in json.loads(wanted["mutation-sweep/matrix.json"])["include"]:
+        print(f"{entry['name']:28s} files {entry['files']:>4} floor {entry['mutants']:>5} "
+              f"~{entry['projected-minutes']} min  budget {entry['timeout']}  c={entry['concurrency']}")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

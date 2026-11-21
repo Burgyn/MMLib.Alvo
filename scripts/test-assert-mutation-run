@@ -111,7 +111,7 @@ CANARY_KILLED="the CANARY reported"
 CANARY_NO_KILLED_LINE="never reports 'Killed: N'"
 CANARY_NO_SURVIVED_LINE="never reports 'Survived: N'"
 CANARY_SHORT="reports only"
-CANARY_BAD_ARG="must be the word 'canary', the word 'since', or absent"
+CANARY_BAD_ARG="must be the word 'canary', 'since' or 'since-changed', or absent"
 
 # A perturbation that silently matches nothing would leave the fixture untouched, and
 # the `assert_ok` drift/growth cases would then pass against an UNCHANGED fixture —
@@ -672,6 +672,25 @@ else
   esac
 fi
 
+# `since-changed`: the merge DID touch a file this leg mutates, so zero mutants tested is a
+# diff Stryker failed to see — the false green this mode exists to refuse — while the full
+# leg's floor stays waived.
+GUARD_OUT="$("$GUARD" "$FIXTURES/vacuous-run.txt" "$EXPR_CFG" 834 722 "test-shard" "since-changed" 2>&1)"
+if [ $? -eq 0 ]; then
+  fail "since-changed: zero mutants tested is refused when the merge changed this leg's files" "non-zero exit" "exit 0: $GUARD_OUT"
+else
+  case "$GUARD_OUT" in
+    *"$VACUOUS"*) pass "since-changed: zero mutants tested is refused when the merge changed this leg's files" ;;
+    *) fail "since-changed: zero mutants tested is refused when the merge changed this leg's files" "rejection mentioning '$VACUOUS'" "$GUARD_OUT" ;;
+  esac
+fi
+
+if GUARD_OUT="$("$GUARD" "$FIXTURES/data-ef-scoped.txt" "$EF_CFG" 5000 858 "test-shard" "since-changed" 2>&1)"; then
+  pass "since-changed: a diff run far below the full leg's mutant count is still accepted"
+else
+  fail "since-changed: a diff run far below the full leg's mutant count is still accepted" "exit 0" "$GUARD_OUT"
+fi
+
 derive vacuous-run.txt 's/Number of tests found: 722/Number of tests found: 0/' || exit 1
 if run_since "$DERIVED" "$EXPR_CFG" 834 722; then
   fail "since: an empty SUITE is still vacuous" "non-zero exit" "exit 0: $GUARD_OUT"
@@ -928,6 +947,48 @@ if python3 "$ROOT/scripts/mutation-shards" --check >/dev/null 2>&1; then
 else
   fail "mutation-sweep/ is what scripts/mutation-shards generates from the committed configs" \
     "--check exit 0" "$(python3 "$ROOT/scripts/mutation-shards" --check 2>&1 | head -5)"
+fi
+
+# Both directions, on a scratch copy of exactly what the generator reads. An edit INSIDE a
+# file must not move a shard — or a comment fix anywhere in the core would turn the required
+# Build & test red — while a NEW file in a long leg's area must, or it falls out of every shard.
+SHARD_ROOT="$TMP_ROOT/shards"
+mkdir -p "$SHARD_ROOT/scripts/fixtures" "$SHARD_ROOT/src"
+cp "$ROOT"/stryker-config*.json "$SHARD_ROOT/"
+cp -R "$ROOT/mutation-sweep" "$SHARD_ROOT/"
+cp -R "$ROOT/scripts/fixtures/mutation-shards" "$SHARD_ROOT/scripts/fixtures/"
+for project in MMLib.Alvo MMLib.Alvo.Data.EntityFrameworkCore; do
+  (cd "$ROOT/src" && find "$project" -name '*.cs' -not -path '*/bin/*' -not -path '*/obj/*' -print0 \
+    | xargs -0 -I{} sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$SHARD_ROOT/src" {})
+done
+
+printf '\n// an edit that moves no shard\n' >> "$SHARD_ROOT/src/MMLib.Alvo/Rules/Internal/PolicyEngine.cs"
+if python3 "$ROOT/scripts/mutation-shards" --root "$SHARD_ROOT" --check >/dev/null 2>&1; then
+  pass "--check stays green when a file's CONTENTS change (no weight depends on them)"
+else
+  fail "--check stays green when a file's CONTENTS change (no weight depends on them)" "exit 0" \
+    "$(python3 "$ROOT/scripts/mutation-shards" --root "$SHARD_ROOT" --check 2>&1 | head -3)"
+fi
+
+printf 'namespace MMLib.Alvo.Rules.Internal;\ninternal static class AddedTomorrow { }\n' \
+  > "$SHARD_ROOT/src/MMLib.Alvo/Rules/Internal/AddedTomorrow.cs"
+if python3 "$ROOT/scripts/mutation-shards" --root "$SHARD_ROOT" --check >/dev/null 2>&1; then
+  fail "--check catches a NEW file in a long leg's area" "exit 1 (stale shards)" "exit 0"
+else
+  pass "--check catches a NEW file in a long leg's area"
+fi
+
+# --resolve is what the `since` legs intersect the merge's diff with: repo-relative paths.
+resolved="$(python3 "$ROOT/scripts/mutation-shards" --resolve stryker-config.data-ef-core.json)"
+case "$resolved" in
+  *"src/MMLib.Alvo.Data.EntityFrameworkCore/Internal/EfAlvoData.cs"*) pass "--resolve prints the repo-relative files a config mutates" ;;
+  *) fail "--resolve prints the repo-relative files a config mutates" "src/.../Internal/EfAlvoData.cs among them" "$resolved" ;;
+esac
+
+if python3 "$ROOT/scripts/mutation-shards" --chek >/dev/null 2>&1; then
+  fail "an unknown argument is refused, not read as 'write'" "exit 2" "exit 0"
+else
+  pass "an unknown argument is refused, not read as 'write'"
 fi
 
 # ============================================================================ total

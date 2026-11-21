@@ -468,15 +468,6 @@
       "projected-minutes": 49,
       "files": 1,
       "debug-log": true
-    },
-    {
-      "name": "data-ef-rest",
-      "config": "stryker-config.data-ef-rest.json",
-      "project": "src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj",
-      "mutants": 2950,
-      "suite": 1560,
-      "timeout": 250,
-      "concurrency": 4
     }
   ]
 }

@@ -3,7 +3,7 @@
 # its config asked for. Called by .github/workflows/mutation.yml after every shard;
 # runnable by hand over a saved log, which is the point (see "Verifying this" below).
 #
-# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <expected-tests> <shard-name> [canary]
+# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <expected-tests> <shard-name> [canary|since|since-changed]
 #
 # WHY THIS EXISTS. A mutation gate has two ways to be green, and only one of them is
 # honest. This repository has already shipped the dishonest one twice: once as a
@@ -95,7 +95,7 @@ config="${2:?missing stryker config path}"
 expected_mutants="${3:?missing expected mutant count}"
 expected_tests="${4:?missing expected test count}"
 shard="${5:?missing shard name}"
-# Optional 6th argument, the MODE: absent, literally `canary`, or literally `since`.
+# Optional 6th argument, the MODE: absent, or literally `canary`, `since` or `since-changed`.
 # Anything else is refused rather than ignored: a typo that silently turned check 5 off
 # would leave the one check that can detect a lying runner quietly absent, which is the
 # defect class it exists for.
@@ -108,12 +108,20 @@ shard="${5:?missing shard name}"
 # other check (the test projects, the suite floor, the timeout and error shares) still holds:
 # a diff run that substituted its suite or spent its mutants on timeouts is as wrong as a
 # full one.
+#
+# `since-changed` is the same run when the merge DID change a file this leg mutates — the
+# caller (.github/actions/stryker-leg) intersects the diff with the leg's resolved file set
+# (scripts/mutation-shards --resolve). Then zero mutants is not "nothing to do", it is a diff
+# Stryker failed to see, a false green; so that mode waives check 3's floor only, and check 1
+# applies in full.
 canary="${6:-}"
 since=false
+since_allows_zero=false
 case "$canary" in
     ''|canary) ;;
-    since) since=true; canary='' ;;
-    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary', the word 'since', or absent, got '$canary'."; exit 1 ;;
+    since) since=true; since_allows_zero=true; canary='' ;;
+    since-changed) since=true; canary='' ;;
+    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary', 'since' or 'since-changed', or absent, got '$canary'."; exit 1 ;;
 esac
 
 fail() {
@@ -197,8 +205,9 @@ tr '\r' '\n' < "$log" | command sed -E 's/\x1B\[[0-9;?]*[A-Za-z]//g' > "$norm"
 # alternative was dead.
 # ---------------------------------------------------------------------------
 vacuous='(^|[^0-9])0[[:space:]]+total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0([^0-9]|$)'
-# In `since` mode zero mutants is a merge that touched nothing here; an empty SUITE is still vacuous.
-[ "$since" = true ] && vacuous='Number of tests found: 0([^0-9]|$)'
+# In `since` mode zero mutants is a merge that touched nothing here; an empty SUITE is still
+# vacuous. In `since-changed` mode the merge touched this leg, so zero mutants is vacuous too.
+[ "$since_allows_zero" = true ] && vacuous='Number of tests found: 0([^0-9]|$)'
 if command grep -qE "$vacuous" "$norm"; then
     fail "tested zero mutants (vacuous run) — see the log above. Failing the gate instead of a false green (stryker-net#3094)."
 fi

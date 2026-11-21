@@ -98,12 +98,33 @@ runs:
         # the diff: with coverage-analysis off Stryker cannot tell which mutants a changed test
         # covers, so it would treat every mutant as changed and turn each push into a full run.
         # The weekly sweep is what judges a weakened test.
+        #
+        # And it decides whether ZERO mutants is an acceptable answer. A merge that changed none
+        # of this leg's files must test nothing and pass (assert mode `since`); a merge that DID
+        # change one and still tests nothing is a diff Stryker failed to see — a false green — so
+        # then the assert runs in mode `since-changed`, which refuses zero. "This leg's files" is
+        # the config's own `mutate` set as scripts/mutation-shards resolves it, the same resolver
+        # the weekly shards are cut with.
         if [ "$MODE" = since ]; then
+          if [ -z "$SINCE" ]; then
+            echo "::error::Mutation run ($SHARD): mode 'since' needs the commit to diff against, and none was given. Refusing to run a full leg under a diff-run's floors."
+            exit 1
+          fi
           jq --arg target "$SINCE" \
-            '.["stryker-config"].since = {"target": $target, "ignore-changes-in": ["**/test/**", "test/**", "**/*.md"]}' \
+            '.["stryker-config"].since = {"target": $target, "ignore-changes-in": ["**/test/**", "**/*.md"]}' \
             "$CONFIG" > stryker-since-config.json
+          leg_config="${CONFIG#../}"
           CONFIG=stryker-since-config.json
-          echo "[mutation] $SHARD: since $SINCE"
+          changed="$(git -C .. diff --name-only "$SINCE" HEAD -- 'src/*.cs' | sort)"
+          mutated="$(python3 ../scripts/mutation-shards --resolve "$leg_config" | sort)"
+          touched="$(comm -12 <(printf '%s\n' "$changed") <(printf '%s\n' "$mutated") | sed '/^$/d')"
+          if [ -n "$touched" ]; then
+            MODE=since-changed
+            echo "[mutation] $SHARD: since $SINCE — the merge changed $(printf '%s\n' "$touched" | wc -l | tr -d ' ') of this leg's files, so zero mutants would be a false green:"
+            printf '  %s\n' $touched
+          else
+            echo "[mutation] $SHARD: since $SINCE — the merge changed none of this leg's files; zero mutants is the expected answer."
+          fi
         fi
 
         set +e
