@@ -2205,7 +2205,7 @@
             }
           },
           "404": {
-            "description": "`not-found`: no such tenant, or the person is no member of it — one answer for both. `feature-disabled`: the descriptor does not declare `auth.accessTokens`, or the requested kind is off; `descriptorKey` names which (`auth.accessTokens`, `auth.accessTokens.personal` or `auth.accessTokens.service`).",
+            "description": "`not-found`: no such tenant, or the person is no member of it — one answer for both. `feature-disabled`: the descriptor does not declare `auth.apiTokens`, or the requested kind is off; `descriptorKey` names which (`auth.apiTokens`, `auth.apiTokens.personal` or `auth.apiTokens.service`).",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2262,7 +2262,7 @@
             }
           },
           "422": {
-            "description": "`validation`: `name`, `kind`, `scopes` or `expiresAt` is missing or out of bounds; `tenantId` is missing for a service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most `auth.accessTokens.maxLifetimeDays` away; or the body carries another property.",
+            "description": "`validation`: `name`, `kind`, `scopes` or `expiresAt` is missing or out of bounds; `tenantId` is missing for a service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body carries another property.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2388,7 +2388,7 @@
             }
           },
           "404": {
-            "description": "`feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it.",
+            "description": "`feature-disabled`: the descriptor does not declare `auth.apiTokens`; `descriptorKey` names it.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2491,7 +2491,7 @@
             }
           },
           "404": {
-            "description": "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it.",
+            "description": "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the descriptor does not declare `auth.apiTokens`; `descriptorKey` names it.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -3617,7 +3617,7 @@
           },
           "expiresAt": {
             "type": "string",
-            "description": "When the token expires: RFC 3339 with an offset, in the future, at most `auth.accessTokens.maxLifetimeDays` days away. A token always expires.",
+            "description": "When the token expires: RFC 3339 with an offset, in the future, at most `auth.apiTokens.maxLifetimeDays` days away. A token always expires.",
             "format": "date-time"
           }
         },

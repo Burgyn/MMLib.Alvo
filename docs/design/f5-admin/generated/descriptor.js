@@ -38,7 +38,7 @@ export const APPLIED_DESCRIPTOR = {
     "signUp": {
       "mode": "open"
     },
-    "accessTokens": {
+    "apiTokens": {
       "personal": true,
       "service": true
     }

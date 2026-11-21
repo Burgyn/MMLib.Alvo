@@ -123,7 +123,7 @@ public sealed class PolicyCatalog
     /// </remarks>
     internal SelfServicePolicy SelfService { get; init; } = SelfServicePolicy.None;
 
-    /// <summary>Gets what the descriptor's <c>auth.accessTokens</c> says: which app tokens are on, and their longest lifetime.</summary>
+    /// <summary>Gets what the descriptor's <c>auth.apiTokens</c> says: which app tokens are on, and their longest lifetime.</summary>
     /// <remarks>
     /// <see langword="internal"/> for the reason <see cref="SignIn"/> is; consumers read it as
     /// <c>IPolicyCatalogProvider.Current?.AppTokens ?? AppTokenPolicy.None</c>, so a descriptor that turns a kind off

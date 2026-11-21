@@ -59,7 +59,7 @@ internal static partial class AccountsDocumentation
             }))),
         PersonUnauthenticated(document),
         NotAPerson(document),
-        Disabled(document, "`feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it."));
+        Disabled(document, "`feature-disabled`: the descriptor does not declare `auth.apiTokens`; `descriptorKey` names it."));
 
     private static OpenApiResponses RevokeTokenResponses(OpenApiDocument document) => Answers(
         document,
@@ -69,7 +69,7 @@ internal static partial class AccountsDocumentation
         Disabled(
             document,
             "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the "
-            + "descriptor does not declare `auth.accessTokens`; `descriptorKey` names it."));
+            + "descriptor does not declare `auth.apiTokens`; `descriptorKey` names it."));
 
     private static OpenApiResponses CreateTokenResponses(OpenApiDocument document) => Answers(
         document,
@@ -86,8 +86,8 @@ internal static partial class AccountsDocumentation
         Disabled(
             document,
             "`not-found`: no such tenant, or the person is no member of it — one answer for both. `feature-disabled`: the "
-            + "descriptor does not declare `auth.accessTokens`, or the requested kind is off; `descriptorKey` names which "
-            + "(`auth.accessTokens`, `auth.accessTokens.personal` or `auth.accessTokens.service`)."),
+            + "descriptor does not declare `auth.apiTokens`, or the requested kind is off; `descriptorKey` names which "
+            + "(`auth.apiTokens`, `auth.apiTokens.personal` or `auth.apiTokens.service`)."),
         TenantRefusal(
             "409",
             "`conflict`: a service token was asked for a personal tenant, or the person already has 100 live tokens.",
@@ -99,7 +99,7 @@ internal static partial class AccountsDocumentation
             + "service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or "
             + "names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a "
             + "scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 "
-            + "instant with an offset, in the future and at most `auth.accessTokens.maxLifetimeDays` away; or the body "
+            + "instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body "
             + "carries another property.",
             document),
         TokenRateLimited(document));

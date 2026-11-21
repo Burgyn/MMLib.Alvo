@@ -106,11 +106,11 @@ public sealed record Auth
     public AuthSignUp? SignUp { get; init; }
 
     /// <summary>Which self-service tokens for integrators people may mint; <see langword="null"/> mints none.</summary>
-    public AuthAccessTokens? AccessTokens { get; init; }
+    public AuthApiTokens? ApiTokens { get; init; }
 }
 
-/// <summary>Self-service tokens for integrators (schema <c>auth.accessTokens</c>).</summary>
-public sealed record AuthAccessTokens
+/// <summary>Self-service tokens for integrators (schema <c>auth.apiTokens</c>).</summary>
+public sealed record AuthApiTokens
 {
     /// <summary>Whether a person may mint tokens that act as them; <see langword="null"/> means <see langword="false"/>.</summary>
     public bool? Personal { get; init; }

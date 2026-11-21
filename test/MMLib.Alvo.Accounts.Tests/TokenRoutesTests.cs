@@ -204,35 +204,35 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
-    public async Task Without_access_tokens_every_route_is_404_naming_its_key()
+    public async Task Without_api_tokens_every_route_is_404_naming_its_key()
     {
         await using var team = await TeamAsync();
-        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("accessTokens"));
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("apiTokens"));
 
         using var response = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
 
-        await TenantRoutesTests.FeatureDisabledAsync(response, "auth.accessTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(response, "auth.apiTokens");
     }
 
     [Fact]
     public async Task A_kind_switched_off_is_404_naming_its_key()
     {
         await using var team = await TeamAsync();
-        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!["accessTokens"]!["service"] = false);
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!["apiTokens"]!["service"] = false);
 
         using var service = await team.World.MintAsync(team.Ada, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
         using var personal = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
         await team.World.ReapplyAsync(descriptor =>
         {
-            descriptor["auth"]!["accessTokens"]!["service"] = true;
-            descriptor["auth"]!["accessTokens"]!["personal"] = false;
+            descriptor["auth"]!["apiTokens"]!["service"] = true;
+            descriptor["auth"]!["apiTokens"]!["personal"] = false;
         });
         using var offPersonal = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
         using var onService = await team.World.MintAsync(team.Ada, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
 
-        await TenantRoutesTests.FeatureDisabledAsync(service, "auth.accessTokens.service");
+        await TenantRoutesTests.FeatureDisabledAsync(service, "auth.apiTokens.service");
         personal.StatusCode.ShouldBe(HttpStatusCode.Created, await personal.ReadTextAsync());
-        await TenantRoutesTests.FeatureDisabledAsync(offPersonal, "auth.accessTokens.personal");
+        await TenantRoutesTests.FeatureDisabledAsync(offPersonal, "auth.apiTokens.personal");
         onService.StatusCode.ShouldBe(HttpStatusCode.Created, await onService.ReadTextAsync());
     }
 
@@ -484,7 +484,7 @@ public sealed class TokenRoutesTests
         await team.World.ReapplyAsync(descriptor =>
         {
             descriptor["tenancy"]!["selfService"] = selfService;
-            descriptor["auth"]!["accessTokens"]!["service"] = true;
+            descriptor["auth"]!["apiTokens"]!["service"] = true;
         });
         var (list, _) = await ListAsync(team, team.Ada);
 
@@ -508,16 +508,16 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
-    public async Task Without_access_tokens_list_and_revoke_are_404_naming_its_key()
+    public async Task Without_api_tokens_list_and_revoke_are_404_naming_its_key()
     {
         await using var team = await TeamAsync();
-        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("accessTokens"));
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("apiTokens"));
 
         using var list = await team.World.AsPersonAsync(HttpMethod.Get, Tokens, team.Ada);
         using var revoke = await RevokeAsync(team, team.Ada, "alvo_pat_whatever");
 
-        await TenantRoutesTests.FeatureDisabledAsync(list, "auth.accessTokens");
-        await TenantRoutesTests.FeatureDisabledAsync(revoke, "auth.accessTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(list, "auth.apiTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(revoke, "auth.apiTokens");
     }
 
     [Fact]

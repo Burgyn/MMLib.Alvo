@@ -15,9 +15,9 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <remarks>
 /// <para>
 /// <b>The order of the gates is the self-service contract</b> (S3 plan Task 7): the person (a token — any key — presented as
-/// an API key is 403, never a token minting a token), then <c>auth.accessTokens</c>, then the body, then the kind's own
+/// an API key is 403, never a token minting a token), then <c>auth.apiTokens</c>, then the body, then the kind's own
 /// feature, then the person's membership (a personal token naming a tenant), and only then the registry. Right after
-/// <c>auth.accessTokens</c>, minting also asks whether this host would ever resolve the token (<see cref="AppTokenReach"/>).
+/// <c>auth.apiTokens</c>, minting also asks whether this host would ever resolve the token (<see cref="AppTokenReach"/>).
 /// </para>
 /// <para>
 /// <b>The secret is made here and only its hash goes down</b>: the registry stores what it is given and never sees the

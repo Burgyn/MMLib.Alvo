@@ -15,13 +15,13 @@ namespace MMLib.Alvo.Tenants.SelfService;
 internal static class AppTokenProblems
 {
     /// <summary>The descriptor key that enables every token route.</summary>
-    internal const string AccessTokensKey = "auth.accessTokens";
+    internal const string ApiTokensKey = "auth.apiTokens";
 
     /// <summary>The descriptor key that enables personal tokens.</summary>
-    internal const string PersonalKey = "auth.accessTokens.personal";
+    internal const string PersonalKey = "auth.apiTokens.personal";
 
     /// <summary>The descriptor key that enables service tokens.</summary>
-    internal const string ServiceKey = "auth.accessTokens.service";
+    internal const string ServiceKey = "auth.apiTokens.service";
 
     /// <summary>The most live tokens one account may have minted (S5 plan D13).</summary>
     internal const int MaxLive = 100;
@@ -38,7 +38,7 @@ internal static class AppTokenProblems
     internal static IResult? Off(AppTokenPolicy policy)
     {
         ArgumentNullException.ThrowIfNull(policy);
-        return policy.Any ? null : ProblemResultFactory.FeatureDisabled(AccessTokensKey);
+        return policy.Any ? null : ProblemResultFactory.FeatureDisabled(ApiTokensKey);
     }
 
     /// <summary>The 404 <c>feature-disabled</c> while <paramref name="policy"/> leaves <paramref name="kind"/> off, else <see langword="null"/>.</summary>
