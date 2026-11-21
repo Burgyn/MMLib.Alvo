@@ -182,8 +182,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget);
     its `eval-assistant` run is owed (#540).
   - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
-    by policy." and names no field (#538); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
-    hint to use `X-Alvo-Api-Key` (#539, since fixed: see *Changed*). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+    by policy." and names no field (#538, since fixed: see *Changed*); an app token sent as `Authorization: Bearer` is
+    `401 invalid_token` with no hint to use `X-Alvo-Api-Key` (#539, since fixed: see *Changed*). **Docs:**
+    `docs/architecture/accounts.md`, *The demo (S6)*.
 - **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
   - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
     transaction, every personal and service token the person minted and every invitation they created, in any tenant,
@@ -999,6 +1000,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   'Authorization: Bearer'."* The same answer on the Data API, commands, `.WithAlvoCaller()` endpoints, the self-service
   routes and `/auth/v1/user` and `/logout`, for every such token, and it repeats none of it. The OpenAPI Bearer scheme
   says so too. **Docs:** the tokens guide, `docs/architecture/accounts.md`.
+- **A create on a tenant-scoped entity no longer needs `tenant_id`** (#538). Left out of a `POST` (single, keyed or
+  batch) or a typed create, the row is placed in the tenant the call acts in, exactly as a `PUT` that creates already
+  did. A body may still name it, and the caller's own tenant keeps working unchanged; any other value, `null` included,
+  is refused with `403 forbidden` whose `detail` names the field and says to remove it
+  (`AlvoAuthorizationException.ForeignTenant`, new), where it used to be the bare "The write was rejected by policy.".
+  The refusal is decided from the payload and the caller alone and never repeats the value sent. The OpenAPI create
+  body of a scoped entity no longer lists `tenant_id` in `required`, and its description says what leaving it out
+  does. Both `IAlvoData` implementations place the row through one shared rule. **Docs:** the multi-tenancy, tenants
+  and tokens guides, `docs/architecture/data-api.md`.
 - **`AlvoConstraintKind.Transition`** (HX-18) is appended: an exhaustive `switch` over `AlvoConstraintKind` gains a case.
 - **`IAlvoScheduler` refuses keys starting `alvo:`** (HX-18): `ScheduleAsync` and `CancelAsync` reserve the prefix for
   declarative timers. `ITimerStore` does not refuse it.

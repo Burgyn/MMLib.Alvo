@@ -394,11 +394,22 @@ internal sealed class SchemaComponentBuilder(
         Required = Mandatory(isUpdate: true),
     };
 
-    private static string BodyDescription(bool isUpdate) => isUpdate
-        ? "The fields to change. A field this object does not mention keeps its stored value, so nothing here "
-        + "is mandatory — that is what makes the verb PATCH rather than PUT."
-        : "The row to create. A field declared `required` by the descriptor must be present; the row's `id` "
-        + "and the framework's own columns are assigned by Alvo and are refused if supplied.";
+    private string BodyDescription(bool isUpdate)
+    {
+        if (isUpdate)
+        {
+            return "The fields to change. A field this object does not mention keeps its stored value, so nothing "
+                + "here is mandatory — that is what makes the verb PATCH rather than PUT.";
+        }
+
+        return _managed.Contains(AlvoManagedColumns.TenantId)
+            ? "The row to create. A field declared `required` by the descriptor must be present; the row's `id` "
+                + "and the framework's other columns are assigned by Alvo and are refused if supplied. `tenant_id` is "
+                + "optional: left out, the row is placed in the caller's own tenant, and a value naming any other "
+                + "tenant is refused with 403."
+            : "The row to create. A field declared `required` by the descriptor must be present; the row's `id` "
+                + "and the framework's own columns are assigned by Alvo and are refused if supplied.";
+    }
 
     /// <summary>
     /// The page envelope: the rows, the cursor for the page after this one, and the total the caller opted
@@ -532,12 +543,19 @@ internal sealed class SchemaComponentBuilder(
 
     /// <summary>
     /// The names a create must carry: the fields the descriptor declared <c>required</c> that a caller may
-    /// actually supply.
+    /// actually supply, less the framework's own columns.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Filtered through <see cref="Belongs"/> rather than read straight off the schema, because a required
     /// field the caller may not write — <c>id</c>, or a required field marked <c>readOnly</c> — is the
     /// framework's to fill, and demanding it would document a create nobody can perform.
+    /// </para>
+    /// <para>
+    /// <b>A framework column is never mandatory, even the one a caller may send.</b> <c>tenant_id</c> is required
+    /// on the row and caller-writable on a create, but the framework fills it with the caller's own tenant when it is
+    /// left out (#538) — so it is offered among the properties and absent from this list.
+    /// </para>
     /// </remarks>
     /// <param name="isUpdate">
     /// Which write rules decide membership. <b>It must match the properties the body actually carries</b>:
@@ -548,7 +566,7 @@ internal sealed class SchemaComponentBuilder(
     private HashSet<string>? Mandatory(bool isUpdate)
     {
         var required = entity.Fields
-            .Where(field => field.Required && Belongs(field, readable: false, isUpdate))
+            .Where(field => field.Required && !_managed.Contains(field.Name) && Belongs(field, readable: false, isUpdate))
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
 

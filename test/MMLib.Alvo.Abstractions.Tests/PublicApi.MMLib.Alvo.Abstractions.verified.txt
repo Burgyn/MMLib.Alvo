@@ -364,6 +364,9 @@ namespace MMLib.Alvo.Data
     }
     public sealed class AlvoAuthorizationException : System.Exception
     {
+        public const string ForeignTenant = "Field \'tenant_id\' names a tenant other than the one this call acts in, and a row " +
+            "can only be created in the caller\'s own tenant. Remove it from the payload: a cr" +
+            "eated row is placed in the caller\'s tenant.";
         public const string QueryFieldUnavailable = "The query references a field that is not available to this caller.";
         public const string RowNamedTwice = "The batch names this row more than once.";
         public const string RowUnavailable = "The row is not available to this caller.";

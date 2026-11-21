@@ -65,18 +65,17 @@ tenant is a membership they hold ([Tenants people create](#tenants-people-create
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[0]} />
 
-2. Acme files a ticket. A `POST` to a scoped entity must carry the caller's own `tenant_id`: Alvo checks the value
-   against the key's tenant rather than filling it in.
+2. Acme files a ticket. The body carries no `tenant_id`: a `POST` to a scoped entity places the row in the caller's
+   own tenant, the key's here. Sending the key's own tenant as `tenant_id` works too.
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[1]} />
 
-3. Leave `tenant_id` out, or name another tenant, and the write is refused. The refusal names no field
-   ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)):
+3. Name another tenant as `tenant_id`, and the write is refused. The `detail` names the field and the fix, and does
+   not repeat the tenant you sent:
 
    <Exchange name="multi-tenancy/01-tenancy" wrap steps={[2]} />
 
-   A `PUT` that creates a row is the other way round: it must not send `tenant_id`, and the new row lands in the
-   caller's tenant.
+   A `PUT` that creates a row must not send `tenant_id` at all, and the new row lands in the caller's tenant too.
 
 4. Globex lists tickets and sees none of Acme's, and asking for Acme's ticket by id is a 404, the same answer as for
    an id that does not exist:
@@ -168,7 +167,7 @@ grant is tracked in [#42](https://github.com/Burgyn/MMLib.Alvo/issues/42).
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 403 | [`forbidden`](/reference/problem-types/#forbidden) | A `POST` left out `tenant_id` or named another tenant; an update or a `PUT` sent `tenant_id`; the key has no tenant and the entity is scoped. | Echo the key's tenant on a `POST`, never send `tenant_id` otherwise, and use a key issued for a tenant. | every host |
+| 403 | [`forbidden`](/reference/problem-types/#forbidden) | A `POST` named another tenant as `tenant_id`; an update or a `PUT` sent `tenant_id`; the key has no tenant and the entity is scoped. | Leave `tenant_id` out of every write (a `POST` places the row in the key's tenant), and use a key issued for a tenant. | every host |
 | 404 | [`not-found`](/reference/problem-types/#not-found) | The row belongs to another tenant, or does not exist. | Use a key of the tenant that owns the row. | every host |
 | 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | `X-Alvo-Tenant` names a tenant other than the key's own, or is not a valid id. | Drop the header, or send the key's own tenant. | every host |
 | 422 | [`validation`](/reference/problem-types/#validation) | A `ref` points at a row in another tenant (code `unresolved-reference`). | Reference a row of your own tenant, or a global entity. | every host |

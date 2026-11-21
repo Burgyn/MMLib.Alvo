@@ -282,16 +282,16 @@ tenant of their own — their *personal tenant* — and every request they send 
 }
 ```
 
-The host code is level 1's, unchanged. The client reads the personal tenant's id once from `GET /auth/v1/user` and
-sends it as the row's `tenant_id` — a scoped create always echoes its tenant (the Data API's contract); no header is
-needed, because a person who names none acts in their personal tenant (spec D8):
+The host code is level 1's, unchanged. The client sends no tenant at all: no header is needed, because a person who
+names none acts in their personal tenant (spec D8), and a scoped create that leaves `tenant_id` out is placed in the
+tenant the request acts in (#538). `GET /auth/v1/user` still answers the personal tenant's id:
 
 ```http
 GET  /auth/v1/user            Authorization: Bearer eyJ…
 → 200 { …, "memberships": [ { "tenantId": "9f…", "name": "Ada Lovelace", "kind": "personal",
                               "roles": [], "isOwner": true } ] }
 
-POST /api/time_entries        Authorization: Bearer eyJ…      { "minutes": 30, "tenant_id": "9f…" }   → 201
+POST /api/time_entries        Authorization: Bearer eyJ…      { "minutes": 30 }   → 201, tenant_id = 9f…
 ```
 
 **Level 3: teams.** Let people create *shared* tenants, own them, and give the other members tenant roles. `jobs` is
@@ -326,7 +326,7 @@ POST  /auth/v1/tenants                             { "name": "Acme" }
 → 201 Location: /auth/v1/tenants/3c…   { "tenantId": "3c…", "name": "Acme", "kind": "shared",
                                          "roles": ["dispatcher"], "isOwner": true }
 
-POST  /api/jobs        X-Alvo-Tenant: 3c…          { "title": "Boiler service", "tenant_id": "3c…" }   → 201
+POST  /api/jobs        X-Alvo-Tenant: 3c…          { "title": "Boiler service" }   → 201, tenant_id = 3c…
 
 GET   /auth/v1/tenants/3c…/members                                       → 200 [ { "userId", "name", "avatarUrl", "roles", "isOwner" } ]
 PATCH /auth/v1/tenants/3c…/members/{userId}        { "roles": ["technician"] }   → 200, counts on their next request
@@ -790,7 +790,7 @@ curl -X POST https://api.example.com/auth/v1/tokens \
 
 `token` is in this answer and in no other, ever: store it in the script's secret store now — below it is `$TOKEN`.
 `header` names the header to send it in (`Alvo:Auth:HeaderName`). The tenant is fixed at mint, so the script sends no
-`X-Alvo-Tenant`; a scoped create still echoes its `tenant_id`, as every scoped write does:
+`X-Alvo-Tenant`, and a scoped create needs no `tenant_id` — the row lands in the token's tenant:
 
 ```sh
 curl https://api.example.com/api/jobs -H "X-Alvo-Api-Key: $TOKEN"
@@ -798,8 +798,8 @@ curl https://api.example.com/api/jobs -H "X-Alvo-Api-Key: $TOKEN"
 
 curl -X POST https://api.example.com/api/jobs \
   -H "X-Alvo-Api-Key: $TOKEN" -H "Content-Type: application/json" \
-  -d '{ "title": "Boiler service", "tenant_id": "3c…" }'
-# 201, created_by = Ada
+  -d '{ "title": "Boiler service" }'
+# 201, tenant_id = 3c…, created_by = Ada
 ```
 
 An owner mints the billing system's token the same way, with `"kind": "service"` and the roles it acts with:
@@ -1117,7 +1117,7 @@ it set up:
 |---|---|
 | `001-sign-in` | The three people sign in. Each sign-in is an RFC 8693 token exchange that answers a 15-minute access token and a rotating refresh token, never cached. A token signed by a key the issuer never published is refused, a replayed ID token starts no second session, and a new person has an account and no membership. The admin key creates a region for the run. |
 | `002-invite-and-accept` | Dana creates *Acme Repairs* and is its owner and a `dispatcher`. She invites Theo as a `technician`: the code is answered once, the anonymous preview shows only the tenant, the inviter and the roles, and accepting twice changes nothing. Acme then has exactly two members, and the invitation list never carries a code. |
-| `003-assigned-work` | Dana creates a customer and two jobs, one assigned to Theo. A create without `tenant_id` in the body is refused (see D11 below). In Acme, Theo lists exactly his own job; naming no tenant, he is refused by the tenant guard. He cannot place a job or create a customer, and he walks his job through the state machine to `completed` with his tenant role. |
+| `003-assigned-work` | Dana creates a customer and two jobs, one assigned to Theo. The customer's create carries no `tenant_id` and lands in Acme; the same create naming another tenant is refused with a detail that says to remove the field (#538, which resolved D11 below). In Acme, Theo lists exactly his own job; naming no tenant, he is refused by the tenant guard. He cannot place a job or create a customer, and he walks his job through the state machine to `completed` with his tenant role. |
 | `004-billing-token` | Dana mints a `billing` service token (`dispatcher`, `work_orders:read`). It reads exactly Acme's completed job and cannot write (`403 out-of-scope`), whatever its role would allow. Theo's personal token reads only his job. Dana's token list carries no secret. |
 | `005-member-removed` | Dana removes Theo. His next request in Acme is `401 invalid_token`, and his personal token died with his membership. He stays signed in, and the billing token, which is Dana's, keeps reading. |
 | `006-foreign-tenant` | Olga naming Acme is refused outright (`401`); naming no tenant she meets the tenant guard (`403`). She still reads global data — the run's region. |
@@ -1131,8 +1131,9 @@ it set up:
 Every item of §12's list maps to a row: the story is `001`–`005`, and the adversarial half is `005` (a personal token
 dying with its owner's membership), `006` (a header naming a tenant you are not in), `007` (a role from one tenant absent
 in another and on `regions`, and a self-made dispatcher refused there), `009` (dead invitations answering alike) and
-`010` (a token minting a token, and a personal token refused by Management). Every scoped create carries both
-`X-Alvo-Tenant` and `tenant_id`, as a real client has to today.
+`010` (a token minting a token, and a personal token refused by Management). The scoped creates carry
+`X-Alvo-Tenant`; most also carry `tenant_id`, the shape the suite was written in before #538 made it optional, and
+`003`'s customer create shows the shorter one.
 
 The two waits — an invitation's expiry and the grace window — are polls (`## RETRY-UNTIL-TEST-PASS`, at most 30 × 1 s),
 never sleeps, so a slow runner waits longer instead of failing. Measured: about 16 s and 11 s.
@@ -1273,7 +1274,9 @@ From the plan (`2026-11-13-accounts-s6-demo-docs.md`, D1–D16), one line each:
   **Deviation from the plan's expected answer:** a scoped create without `tenant_id` is `403 forbidden`, *"The write
   was rejected by policy."*, with no `violations` — not a `422` at `/tenant_id`. A candidate with no tenant fails the
   synthesized tenant scope's `WITH CHECK`. `170-SelfService/003` pins the real answer and the guides quote it, as a
-  current limitation.
+  current limitation. **Resolved by [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538):** a scoped create that
+  leaves `tenant_id` out now lands in the caller's tenant, and one naming another tenant (`null` included) is `403`
+  with a detail naming the field and the fix; `003` pins both.
 - **D12** — the guides' exchanges are hand-written and held three ways (above).
 - **D13** — the reference publishes the sign-in routes from OpenAPI.
 - **D14** — a tenth descriptor skill. **Beyond the plan:** the skill list's new line did not fit the always-on budget
@@ -1296,9 +1299,10 @@ And where the product answered differently from the plan's first wording (each p
 
 ### Not in S6, and owed
 
-- **A scoped create's missing `tenant_id` names no field.** The `403` is correct but unhelpful to an agent: Alvo could
-  fill the column from the tenant the request acts in, or answer a structured violation at `/tenant_id`. A DX
-  follow-up: [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538).
+- ~~**A scoped create's missing `tenant_id` names no field.**~~ **Done in
+  [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538):** Alvo fills the column from the tenant the request acts
+  in, and a `tenant_id` naming any other tenant is refused with a `403` whose detail says to remove it (option 1 of the
+  issue; the structured `422` of option 2 was not needed once the column is filled).
 - ~~**A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.**~~ **Done in
   [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).** `CallerResolution.Read` reads a well-formed Bearer with a
   reserved prefix (`AppTokenSecret.IsAppTokenId`, the one test of it) as its own channel and drops its value, so no

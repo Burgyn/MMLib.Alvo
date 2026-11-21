@@ -107,6 +107,28 @@ public sealed class AlvoAuthorizationException : Exception
     /// </remarks>
     public const string RowNamedTwice = "The batch names this row more than once.";
 
+    /// <summary>
+    /// The refusal for a create on a tenant-scoped entity whose <c>tenant_id</c> is not the caller's own tenant — an
+    /// explicit <see langword="null"/> included (#538).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one refusal on this type that carries its fix, because it is the one with exactly one fix.</b> A row can
+    /// only ever be created in the tenant the call acts in, and a create that leaves <c>tenant_id</c> out is placed
+    /// there, so "remove it" is always the answer. It is decided from the payload and the caller alone, before any row
+    /// is read, so it says nothing about stored data.
+    /// </para>
+    /// <para>
+    /// It never repeats the value the caller sent, and it does not say "header": this port does not know how a tenant
+    /// was named, only that the call acts in one. On the port, for the reason <see cref="WriteRejectedByPolicy"/> is —
+    /// the inherited contract suite asserts on it, so an implementation outside this repository has to be able to say
+    /// it word for word.
+    /// </para>
+    /// </remarks>
+    public const string ForeignTenant =
+        "Field 'tenant_id' names a tenant other than the one this call acts in, and a row can only be created in "
+        + "the caller's own tenant. Remove it from the payload: a created row is placed in the caller's tenant.";
+
     /// <summary>Initializes a new instance of the <see cref="AlvoAuthorizationException"/> class.</summary>
     public AlvoAuthorizationException()
         : base(DefaultMessage)
