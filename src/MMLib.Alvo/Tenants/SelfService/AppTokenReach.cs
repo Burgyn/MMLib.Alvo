@@ -16,11 +16,11 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// resolves. Alvo's routing store (<see cref="ApiKeyStores"/>) answers <see cref="ApiKeyStores.ReachProbeKeyId"/> with
 /// <see cref="ApiKeyStores.ReachProbe"/> while it has a token registry. A host that <em>decorates</em> it passes that
 /// record through, and keeps minting; a host that <em>replaced</em> it — or a host with no registry — answers anything
-/// else, and the route refuses with the <c>feature-disabled</c> 404 naming <c>auth.accessTokens</c> and the cause.
+/// else, and the route refuses with the <c>feature-disabled</c> 404 naming <c>auth.apiTokens</c> and the cause.
 /// </para>
 /// <para>
 /// <b>Not a boot refusal:</b> the descriptor is not known at boot, and a host that replaces the store and never turns
-/// <c>auth.accessTokens</c> on is legitimate. One probe per mint, answered in memory by Alvo's store.
+/// <c>auth.apiTokens</c> on is legitimate. One probe per mint, answered in memory by Alvo's store.
 /// </para>
 /// </remarks>
 internal static class AppTokenReach
@@ -28,7 +28,7 @@ internal static class AppTokenReach
     private const string Unreachable =
         "This host does not resolve personal or service tokens: its API-key store (IApiKeyStore) was replaced by one that "
         + "never asks Alvo's token registry, or no registry is registered. A token minted here could never be used. "
-        + "Decorate Alvo's IApiKeyStore instead of replacing it, or remove auth.accessTokens from the descriptor.";
+        + "Decorate Alvo's IApiKeyStore instead of replacing it, or remove auth.apiTokens from the descriptor.";
 
     /// <summary>The refusal when a token minted on this host could never resolve; otherwise <see langword="null"/>.</summary>
     /// <param name="http">The request, whose services hold the resolved key store.</param>
@@ -40,6 +40,6 @@ internal static class AppTokenReach
         var answer = await store.FindAsync(ApiKeyStores.ReachProbeKeyId, ct).ConfigureAwait(false);
         return Equals(answer, ApiKeyStores.ReachProbe)
             ? null
-            : ProblemResultFactory.FeatureDisabled(AppTokenProblems.AccessTokensKey, Unreachable);
+            : ProblemResultFactory.FeatureDisabled(AppTokenProblems.ApiTokensKey, Unreachable);
     }
 }

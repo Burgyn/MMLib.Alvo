@@ -6,7 +6,7 @@ sidebar:
 ---
 
 import { Code, Steps } from '@astrojs/starlight/components';
-import accessTokens from '../../../snippets/tokens/01-access-tokens.alvo.json?raw';
+import apiTokens from '../../../snippets/tokens/01-api-tokens.alvo.json?raw';
 
 :::tip[What you will build]
 Two credentials for Acme Repairs. A **service token** lets the billing system read Acme's completed jobs and nothing
@@ -47,13 +47,13 @@ answers are the same.
 
 1. **Turn tokens on.** One line in `auth`:
 
-   <Code code={accessTokens} lang="json" title="acme-repairs.alvo.json" ins={[9]} />
+   <Code code={apiTokens} lang="json" title="acme-repairs.alvo.json" ins={[9]} />
 
-   [`personal`](/reference/descriptor/auth/#auth.accessTokens.personal) and
-   [`service`](/reference/descriptor/auth/#auth.accessTokens.service) are off unless you say so.
-   [`maxLifetimeDays`](/reference/descriptor/auth/#auth.accessTokens.maxLifetimeDays) (1–365, default 90) is the
+   [`personal`](/reference/descriptor/auth/#auth.apiTokens.personal) and
+   [`service`](/reference/descriptor/auth/#auth.apiTokens.service) are off unless you say so.
+   [`maxLifetimeDays`](/reference/descriptor/auth/#auth.apiTokens.maxLifetimeDays) (1–365, default 90) is the
    furthest ahead a token's expiry may be. Every token expires. A service token acts as a shared tenant, so the apply
-   refuses `"service": true` without `tenancy.selfService.createTenants`, at `/auth/accessTokens/service`.
+   refuses `"service": true` without `tenancy.selfService.createTenants`, at `/auth/apiTokens/service`.
 
 2. **Mint them.** Dana mints the billing system's token. It acts in Acme with the `dispatcher` role, and its scope
    lets it read jobs only:
@@ -284,8 +284,12 @@ Tokens are for reaching data. They never manage anything:
 
 - **Expiry**: at most `maxLifetimeDays` ahead, 90 by default and 365 at most. Lowering it bounds new tokens only.
 - **100 live tokens per account.** The next mint is `409`.
-- **Minting is rate-limited** with tenant creation: 10 a minute per client address together
-  (`Alvo:Api:RateLimits:Create`), then `429`.
+- **A lost mint answer is not retried with a key.** `POST /auth/v1/tokens` refuses `Idempotency-Key` with `422
+  malformed-query`: the secret is kept only as a hash, so no retry could show it again, and Alvo will not pretend it
+  did. List your tokens, revoke the one whose secret you never received (it is there by its name and `createdAt`), and
+  mint again. A secret nobody holds is then never left live.
+- **Minting is rate-limited**: 10 a minute per client address (`Alvo:Api:RateLimits:ApiTokens`), then `429`. Creating a
+  tenant has a budget of its own.
 - **Scopes are entity × read/write.** Nothing finer, such as a field, an operation or "only my own rows".
 - **No IP allow-list per token**, and no OAuth client credentials: a service token is an API key, not an OAuth client.
 - **No events or audit trail** for minting and revoking yet.
@@ -298,7 +302,7 @@ Tokens are for reaching data. They never manage anything:
   carries.
 - [Authentication and API keys](/guides/authentication/): configured keys, and the answers a credential can get.
 - [The sign-in API reference](/reference/accounts-api/): `POST`, `GET` and `DELETE` on `/auth/v1/tokens`.
-- Descriptor keys: [`auth.accessTokens`](/reference/descriptor/auth/#auth.accessTokens).
+- Descriptor keys: [`auth.apiTokens`](/reference/descriptor/auth/#auth.apiTokens).
 - Problem types: [`out-of-scope`](/reference/problem-types/#out-of-scope),
   [`unauthenticated`](/reference/problem-types/#unauthenticated),
   [`forbidden`](/reference/problem-types/#forbidden).

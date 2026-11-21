@@ -22,8 +22,9 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <para>
 /// <b>Every route carries the core's CORS filter first, then <c>Cache-Control: no-store</c></b> — each answer is about a
 /// person — so a refusal is readable from an allowed origin and never cached; creating a tenant is charged the
-/// <see cref="AlvoRateLimit.Create"/> budget after both — minting a token is charged the same one (S5 plan D15) — and every
-/// invitation route the one <see cref="AlvoRateLimit.Invitations"/> budget (S4 plan D13).
+/// <see cref="AlvoRateLimit.Tenants"/> budget after both, minting a token its own <see cref="AlvoRateLimit.ApiTokens"/>
+/// budget (#542 item 3, which split S5 plan D15's shared one), and every invitation route the one
+/// <see cref="AlvoRateLimit.Invitations"/> budget (S4 plan D13).
 /// </para>
 /// </remarks>
 internal static class SelfServiceEndpoints
@@ -103,8 +104,8 @@ internal static class SelfServiceEndpoints
     /// <param name="group">The sign-in group, mapped at the auth prefix.</param>
     /// <param name="cors">The CORS filter each route carries first.</param>
     /// <param name="limits">
-    /// The per-client budgets: creating a tenant is charged <see cref="AlvoRateLimit.Create"/>, every invitation route
-    /// <see cref="AlvoRateLimit.Invitations"/>.
+    /// The per-client budgets: creating a tenant is charged <see cref="AlvoRateLimit.Tenants"/>, minting a token
+    /// <see cref="AlvoRateLimit.ApiTokens"/>, every invitation route <see cref="AlvoRateLimit.Invitations"/>.
     /// </param>
     internal static void Map(RouteGroupBuilder group, AlvoCors cors, AlvoRateLimits limits)
     {
@@ -113,7 +114,7 @@ internal static class SelfServiceEndpoints
         ArgumentNullException.ThrowIfNull(limits);
         Protect(group.MapGet(Collection, (Func<HttpContext, Task<IResult>>)TenantRoutes.ListAsync), cors, ListOperationId);
         Protect(group.MapPost(Collection, (Func<HttpContext, Task<IResult>>)TenantRoutes.CreateAsync), cors, CreateOperationId)
-            .AddEndpointFilter(limits.For(AlvoRateLimit.Create));
+            .AddEndpointFilter(limits.For(AlvoRateLimit.Tenants));
         Protect(
             group.MapPatch(Tenant, static (HttpContext http, Guid tenantId) => TenantRoutes.RenameAsync(http, tenantId)),
             cors,
@@ -126,7 +127,7 @@ internal static class SelfServiceEndpoints
     private static void MapTokens(RouteGroupBuilder group, AlvoCors cors, AlvoRateLimits limits)
     {
         Protect(group.MapPost(Tokens, (Func<HttpContext, Task<IResult>>)TokenRoutes.CreateAsync), cors, CreateTokenOperationId, TokensTag)
-            .AddEndpointFilter(limits.For(AlvoRateLimit.Create));
+            .AddEndpointFilter(limits.For(AlvoRateLimit.ApiTokens));
         Protect(group.MapGet(Tokens, (Func<HttpContext, Task<IResult>>)TokenRoutes.ListAsync), cors, ListTokensOperationId, TokensTag);
         Protect(
             group.MapDelete(Token, static (HttpContext http, string keyId) => TokenRoutes.RevokeAsync(http, keyId)),

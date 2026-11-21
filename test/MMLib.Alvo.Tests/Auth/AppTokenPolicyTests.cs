@@ -7,7 +7,7 @@ using MMLib.Alvo.Rules;
 namespace MMLib.Alvo.Tests.Auth;
 
 /// <summary>
-/// The app-token policy rides on the compiled catalog (S5 plan D11): absent <c>auth.accessTokens</c> is no token of
+/// The app-token policy rides on the compiled catalog (S5 plan D11): absent <c>auth.apiTokens</c> is no token of
 /// either kind, the lifetime bound defaults to 90 days, and a service token needs a shared tenant to act as.
 /// </summary>
 public sealed class AppTokenPolicyTests
@@ -16,7 +16,7 @@ public sealed class AppTokenPolicyTests
         { "enabled": true, "selfService": { "createTenants": { "creatorRoles": ["dispatcher"] }, "assignableRoles": ["dispatcher"] } }
         """;
 
-    private static AlvoDescriptor Descriptor(string? accessTokens, string? tenancy = null) =>
+    private static AlvoDescriptor Descriptor(string? apiTokens, string? tenancy = null) =>
         AlvoDescriptor.Parse($$"""
             {
               "apiVersion": "alvo.dev/v1",
@@ -25,7 +25,7 @@ public sealed class AppTokenPolicyTests
                 "providers": ["google"],
                 "roles": ["dispatcher"],
                 "signUp": { "mode": "open" }
-                {{(accessTokens is null ? string.Empty : $", \"accessTokens\": {accessTokens}")}}
+                {{(apiTokens is null ? string.Empty : $", \"apiTokens\": {apiTokens}")}}
               },
               {{(tenancy is null ? string.Empty : $"\"tenancy\": {tenancy},")}}
               "entities": { "jobs": { "fields": { "title": { "type": "string" } } } }
@@ -38,7 +38,7 @@ public sealed class AppTokenPolicyTests
     [Fact]
     public void Absent_is_none()
     {
-        var policy = Compile(Descriptor(accessTokens: null));
+        var policy = Compile(Descriptor(apiTokens: null));
 
         policy.ShouldBe(AppTokenPolicy.None);
         policy.Personal.ShouldBeFalse();
@@ -61,7 +61,7 @@ public sealed class AppTokenPolicyTests
     public void A_declared_max_lifetime_carries_through() =>
         Compile(Descriptor("""{ "personal": true, "maxLifetimeDays": 365 }""")).MaxLifetimeDays.ShouldBe(365);
 
-    /// <summary>Built from a descriptor <c>AccessTokensCheck</c> refuses: the policy still never admits the kind.</summary>
+    /// <summary>Built from a descriptor <c>ApiTokensCheck</c> refuses: the policy still never admits the kind.</summary>
     [Fact]
     public void Service_is_off_without_create_tenants_even_if_declared()
     {

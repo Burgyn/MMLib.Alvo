@@ -15,8 +15,8 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// </summary>
 /// <remarks>
 /// Every route carries the core's CORS filter first (spec §7.3, S2 D3), and the group answers preflights when origins are
-/// configured; the token endpoint is charged the <see cref="AlvoRateLimit.Token"/> budget after <see cref="NoStore"/>, so a
-/// 429 is uncacheable and readable from an allowed origin.
+/// configured; the token endpoint is charged the <see cref="AlvoRateLimit.TokenEndpoint"/> budget after
+/// <see cref="NoStore"/>, so a 429 is uncacheable and readable from an allowed origin.
 /// </remarks>
 internal static class AccountsEndpoints
 {
@@ -47,7 +47,7 @@ internal static class AccountsEndpoints
         group.MapPost("/token", static (HttpContext http, TokenEndpoint token) => token.HandleAsync(http))
             .AddEndpointFilter(cors.Filter)
             .AddEndpointFilter(NoStore)
-            .AddEndpointFilter(limits.For(AlvoRateLimit.Token))
+            .AddEndpointFilter(limits.For(AlvoRateLimit.TokenEndpoint))
             .WithName(TokenOperationId);
         UserEndpoints.Map(group, cors);
         SelfServiceEndpoints.Map(group, cors, limits);

@@ -9,7 +9,7 @@ using System.Text.Json;
 namespace MMLib.Alvo.Tenants.SelfService;
 
 /// <summary>What a token request is judged against: the applied descriptor's token and self-service policy, its entities, and now.</summary>
-/// <param name="Tokens">The applied <c>auth.accessTokens</c>, for the longest expiry.</param>
+/// <param name="Tokens">The applied <c>auth.apiTokens</c>, for the longest expiry.</param>
 /// <param name="SelfService">The applied self-service policy, whose <c>assignableRoles</c> a service token's roles come from.</param>
 /// <param name="Entities">The applied schema's entity names, which every scope names one of.</param>
 /// <param name="Now">The instant the request acts at.</param>

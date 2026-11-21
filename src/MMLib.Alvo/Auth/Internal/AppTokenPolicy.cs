@@ -3,14 +3,14 @@
 namespace MMLib.Alvo.Auth.Internal;
 
 /// <summary>
-/// What the applied descriptor's <c>auth.accessTokens</c> says: which app tokens (personal, service) people may mint
+/// What the applied descriptor's <c>auth.apiTokens</c> says: which app tokens (personal, service) people may mint
 /// and present, and the longest expiry a mint may ask for — compiled with the rest of the policy, so minting and
 /// resolution read the descriptor that is applied (S5 plan D11, default-deny).
 /// </summary>
 /// <remarks>
 /// Consumers read it as <c>IPolicyCatalogProvider.Current?.AppTokens ?? AppTokenPolicy.None</c>.
 /// <see cref="Service"/> is on only when the descriptor also declares <c>tenancy.selfService.createTenants</c> — belt
-/// and braces to <c>AccessTokensCheck</c>'s refusal, so a catalog built from a descriptor that skipped the apply still
+/// and braces to <c>ApiTokensCheck</c>'s refusal, so a catalog built from a descriptor that skipped the apply still
 /// never admits a service token without a shared tenant to act as.
 /// </remarks>
 /// <param name="Personal">Whether personal tokens are on.</param>
@@ -21,7 +21,7 @@ internal sealed record AppTokenPolicy(bool Personal, bool Service, int MaxLifeti
     /// <summary>The expiry bound when the descriptor declares none (spec §3.1).</summary>
     internal const int DefaultMaxLifetimeDays = 90;
 
-    /// <summary>The policy of no <c>auth.accessTokens</c>: no app token of either kind.</summary>
+    /// <summary>The policy of no <c>auth.apiTokens</c>: no app token of either kind.</summary>
     internal static AppTokenPolicy None { get; } = new(false, false, DefaultMaxLifetimeDays);
 
     /// <summary>Gets whether either kind is on — the token routes answer at all only then.</summary>
@@ -45,7 +45,7 @@ internal sealed record AppTokenPolicy(bool Personal, bool Service, int MaxLifeti
     internal static AppTokenPolicy From(AlvoDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        if (descriptor.Auth?.AccessTokens is not { } declared)
+        if (descriptor.Auth?.ApiTokens is not { } declared)
         {
             return None;
         }

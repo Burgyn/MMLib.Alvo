@@ -7,11 +7,14 @@ namespace MMLib.Alvo.Api.Internal;
 /// <summary>The routes Alvo charges a per-client budget on (spec §7.3).</summary>
 internal enum AlvoRateLimit
 {
-    /// <summary>The token endpoint, <c>POST {prefix}/token</c>: <see cref="AlvoRateLimitOptions.Token"/> per minute.</summary>
-    Token,
+    /// <summary>The token endpoint, <c>POST {prefix}/token</c>: <see cref="AlvoRateLimitOptions.TokenEndpoint"/> per minute.</summary>
+    TokenEndpoint,
 
-    /// <summary>Tenant creation, <c>POST {prefix}/tenants</c>: <see cref="AlvoRateLimitOptions.Create"/> per minute.</summary>
-    Create,
+    /// <summary>Tenant creation, <c>POST {prefix}/tenants</c>: <see cref="AlvoRateLimitOptions.Tenants"/> per minute.</summary>
+    Tenants,
+
+    /// <summary>Minting an API token, <c>POST {prefix}/tokens</c>: <see cref="AlvoRateLimitOptions.ApiTokens"/> per minute.</summary>
+    ApiTokens,
 
     /// <summary>Every invitation route, one budget for all five: <see cref="AlvoRateLimitOptions.Invitations"/> per minute.</summary>
     Invitations,
@@ -47,8 +50,9 @@ internal sealed class AlvoRateLimits : IDisposable
         var budgets = options.Value.RateLimits;
         _limits = new()
         {
-            [AlvoRateLimit.Token] = new Charged(FixedWindows(budgets?.Token ?? 0)),
-            [AlvoRateLimit.Create] = new Charged(FixedWindows(budgets?.Create ?? 0)),
+            [AlvoRateLimit.TokenEndpoint] = new Charged(FixedWindows(budgets?.TokenEndpoint ?? 0)),
+            [AlvoRateLimit.Tenants] = new Charged(FixedWindows(budgets?.Tenants ?? 0)),
+            [AlvoRateLimit.ApiTokens] = new Charged(FixedWindows(budgets?.ApiTokens ?? 0)),
             [AlvoRateLimit.Invitations] = new Charged(FixedWindows(budgets?.Invitations ?? 0)),
         };
     }

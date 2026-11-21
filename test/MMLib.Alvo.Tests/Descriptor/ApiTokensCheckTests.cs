@@ -4,10 +4,10 @@ using MMLib.Alvo.Descriptor.Internal;
 namespace MMLib.Alvo.Tests.Descriptor;
 
 /// <summary>
-/// <c>auth.accessTokens</c>'s apply refusal (spec §3.1, S5 plan D8): a service token acts as a shared tenant, so it needs
+/// <c>auth.apiTokens</c>'s apply refusal (spec §3.1, S5 plan D8): a service token acts as a shared tenant, so it needs
 /// <c>tenancy.selfService.createTenants</c>; a personal token needs nothing else.
 /// </summary>
-public sealed class AccessTokensCheckTests
+public sealed class ApiTokensCheckTests
 {
     private const string LevelThreeTenancy = """
         {
@@ -20,10 +20,10 @@ public sealed class AccessTokensCheckTests
         }
         """;
 
-    private static AlvoDescriptor Descriptor(string accessTokens, string? tenancy) =>
-        AlvoDescriptor.Parse(Json(accessTokens, tenancy));
+    private static AlvoDescriptor Descriptor(string apiTokens, string? tenancy) =>
+        AlvoDescriptor.Parse(Json(apiTokens, tenancy));
 
-    private static string Json(string accessTokens, string? tenancy) =>
+    private static string Json(string apiTokens, string? tenancy) =>
         $$"""
             {
               "apiVersion": "alvo.dev/v1",
@@ -32,7 +32,7 @@ public sealed class AccessTokensCheckTests
                 "providers": ["google"],
                 "roles": ["dispatcher", "technician"],
                 "signUp": { "mode": "open" },
-                "accessTokens": {{accessTokens}}
+                "apiTokens": {{apiTokens}}
               },
               {{(tenancy is null ? string.Empty : $"\"tenancy\": {tenancy},")}}
               "entities": { "jobs": { "fields": { "title": { "type": "string" } } } }
@@ -42,9 +42,9 @@ public sealed class AccessTokensCheckTests
     [Fact]
     public void Service_tokens_without_self_service_are_refused()
     {
-        var error = AccessTokensCheck.Check(Descriptor("""{ "service": true }""", """{ "enabled": true }""")).ShouldHaveSingleItem();
+        var error = ApiTokensCheck.Check(Descriptor("""{ "service": true }""", """{ "enabled": true }""")).ShouldHaveSingleItem();
 
-        error.Path.ShouldBe("/auth/accessTokens/service");
+        error.Path.ShouldBe("/auth/apiTokens/service");
         error.Severity.ShouldBe(DescriptorValidationSeverity.Error);
         error.Message.ShouldBe(
             "Service tokens act as a shared tenant, and without tenancy.selfService no tenant has an owner to mint one.");
@@ -55,11 +55,11 @@ public sealed class AccessTokensCheckTests
     [Fact]
     public void Service_tokens_without_create_tenants_are_refused()
     {
-        var error = AccessTokensCheck.Check(Descriptor(
+        var error = ApiTokensCheck.Check(Descriptor(
             """{ "personal": true, "service": true }""",
             """{ "enabled": true, "selfService": { "personalTenant": { "roles": [] } } }""")).ShouldHaveSingleItem();
 
-        error.Path.ShouldBe("/auth/accessTokens/service");
+        error.Path.ShouldBe("/auth/apiTokens/service");
         error.Message.ShouldBe("Service tokens act as a shared tenant, and without createTenants no shared tenant can exist.");
         error.FixSuggestion.ShouldBe("Add \"createTenants\": { \"creatorRoles\": [ … ] } to tenancy.selfService, or set service to false.");
     }
@@ -67,25 +67,25 @@ public sealed class AccessTokensCheckTests
     [Theory]
     [InlineData("""{ "service": false }""")]
     [InlineData("""{}""")]
-    public void Service_tokens_declined_need_nothing(string accessTokens) =>
-        AccessTokensCheck.Check(Descriptor(accessTokens, tenancy: null)).ShouldBeEmpty();
+    public void Service_tokens_declined_need_nothing(string apiTokens) =>
+        ApiTokensCheck.Check(Descriptor(apiTokens, tenancy: null)).ShouldBeEmpty();
 
     [Fact]
     public void Personal_tokens_need_nothing_else() =>
-        AccessTokensCheck.Check(Descriptor("""{ "personal": true, "maxLifetimeDays": 30 }""", tenancy: null)).ShouldBeEmpty();
+        ApiTokensCheck.Check(Descriptor("""{ "personal": true, "maxLifetimeDays": 30 }""", tenancy: null)).ShouldBeEmpty();
 
     [Fact]
     public void The_spec_level_three_descriptor_is_accepted()
     {
-        const string accessTokens = """{ "personal": true, "service": true }""";
+        const string apiTokens = """{ "personal": true, "service": true }""";
 
-        AccessTokensCheck.Check(Descriptor(accessTokens, LevelThreeTenancy)).ShouldBeEmpty();
-        new DescriptorValidator().Validate(Json(accessTokens, LevelThreeTenancy)).Errors
-            .ShouldNotContain(error => error.Path.StartsWith("/auth/accessTokens", StringComparison.Ordinal));
+        ApiTokensCheck.Check(Descriptor(apiTokens, LevelThreeTenancy)).ShouldBeEmpty();
+        new DescriptorValidator().Validate(Json(apiTokens, LevelThreeTenancy)).Errors
+            .ShouldNotContain(error => error.Path.StartsWith("/auth/apiTokens", StringComparison.Ordinal));
     }
 
     [Fact]
     public void The_validator_reports_the_refusal_once() =>
         new DescriptorValidator().Validate(Json("""{ "service": true }""", tenancy: null)).Errors
-            .Count(error => error.Path == "/auth/accessTokens/service").ShouldBe(1);
+            .Count(error => error.Path == "/auth/apiTokens/service").ShouldBe(1);
 }

@@ -11,7 +11,7 @@ namespace MMLib.Alvo.Accounts.Tests;
 
 /// <summary>
 /// A token is minted only where it would resolve (S5 Task 9 fix round 1): a host that <em>replaced</em> Alvo's
-/// <see cref="IApiKeyStore"/> gets the <c>feature-disabled</c> 404 naming <c>auth.accessTokens</c> and the cause, never a
+/// <see cref="IApiKeyStore"/> gets the <c>feature-disabled</c> 404 naming <c>auth.apiTokens</c> and the cause, never a
 /// credential nothing accepts; a host that <em>decorates</em> it keeps minting, and the token works.
 /// </summary>
 public sealed class AppTokenReachTests
@@ -32,7 +32,7 @@ public sealed class AppTokenReachTests
 
         using var response = await world.MintAsync(ada, Personal(world));
 
-        await TenantRoutesTests.FeatureDisabledAsync(response, "auth.accessTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(response, "auth.apiTokens");
         (await response.ReadProblemDetailAsync()).ShouldContain("IApiKeyStore");
         (await world.CountAsync("_api_keys")).ShouldBe(0, "nothing is minted that could never be used");
     }
