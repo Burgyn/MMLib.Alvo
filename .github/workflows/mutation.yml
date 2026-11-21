@@ -366,6 +366,25 @@ name: Mutation
 # is the gate weakening, so the commit message carries the log or report it was
 # recomputed from.
 #
+# data-postgresql WENT RED ON TWO FEATURES, NOT ON DRIFT, AND WAS RE-CUT 2026-11-21. It last
+# passed on 4b0f25d7 (run 43226956170: 68 mutants, 64 K, 94.12 %). #477's BtreeGistComparison
+# took it to 110 mutants / 85.45 %, the scoped-setNull version check to 122 / 77.87 % (run
+# 44834820709, 27 survivors) — both landed tested on the paths they were written for and not
+# on the rest. Tests for 18 of the 27, plus moving one refusal out of a static initializer
+# (which the MTP runner executes once per test host, with no mutant active), measured on run
+# 44850064624: 115 K / 7 S / 0 T of 122, 94.26 %. The 7 are equivalent: ConfigureAwait(false)
+# -> true (6), and `installed && v >= min` -> `||` on a path reached only when one of the two
+# already decided (1). break = 94.26 − max(2 pp, 2 mutants = 1.64 pp) = 92.26 -> 92 (was 90),
+# `low` 94 (was 95, the Killed-only floor), `high` 100. REAL SLACK 115 − ceil(0.92 × 122) = 3.
+# Note the cleartext table's "survived" column: it counts Ignored mutants too, so it read
+# 110 for a leg with 27 survivors, and 36 for AlvoPostgreSqlBuilderExtensions.cs, whose
+# exclusion works (all 34 of its mutants are "Removed by mutate filter"). Read the json report.
+#
+# data-sqlite RE-CUT THE SAME DAY, upward and without ceremony: 113 K / 9 S / 0 T of 122 on
+# both runs 44834820709 and 44850064624, 92.62 %. break = 92.62 − max(2 pp, 1.64 pp) = 90.62
+# -> 90 (was 81, cut on 44 mutants at 86.36 %), `low` 92, `high` 95 (was 90, now passed).
+# REAL SLACK 113 − ceil(0.90 × 122) = 3.
+#
 # WHY `rules, auth, rest` IS THE ONE LEG UNDER 80, AS ARITHMETIC RATHER THAN AS AN EXCUSE.
 # 1707 tested, 988 killed, 719 survivors. Classifying each survivor by whether the mutated
 # string literal is message PROSE (a sentence carrying no contract — bucket 3 of the design
@@ -639,6 +658,28 @@ name: Mutation
 # cancelled at their budgets). Only the counts are re-probed here; the budgets those legs
 # need are a measurement this change did not take, so their `timeout:` values are left
 # as they were and the shortfall is stated rather than guessed at.
+#
+# RE-PROBED 2026-11-21, from CI's own logs: run 44834820709 (main 1512d5eb, after the accounts
+# stack) and the on-demand run 44850064624 (branch debt/mutation-legs, which adds only tests,
+# config fixes and two ProjectReferences). Three legs were cancelled at their budgets on the
+# first, which is the trigger the rule above names; the counts come from the discovery lines a
+# cancelled leg's uploaded log still carries (see the upload step).
+#
+#   shard                     mutants: declared -> now    suite: declared -> now   outcome
+#   canary                           13 ->   13                 194 ->  230    0 K, honest
+#   expressions                    1949 -> 2591                3825 -> 5330    cancelled at 180
+#   rules, auth, rest              5715 -> 9557                3825 -> 5330    cancelled at 120
+#   data-ef-rest                   1816 -> 2950                1286 -> 1560    cancelled at 120
+#   data-sqlite                      65 ->  122                 870 -> 1352    92.62 %, 52-56 min
+#   data-postgresql                  33 ->  122                 180 ->  262    94.26 %, 1.5 min
+#
+# THE THREE CANCELLED BUDGETS ARE NOT RE-SIZED HERE, for the 2026-10-30 reason: a cancelled
+# leg has no wall clock to double, only a lower bound. What the counts do say is that the
+# 360-minute ceiling is now the binding constraint, not the budget. rules/auth/rest at its last
+# measured cost (~6.2 s of runner time per mutant, against a suite 4.5x smaller) is ~990 min
+# for 9557 mutants; no budget fits that, and the lever is the re-shard #143 and #245 already
+# describe, or `mutation-level: Basic` (see TWO ONE-LINE LEVERS) — a decision, not a number.
+# data-sqlite was 4 min short of its 60 on both runs and is now 120.
 #
 # THE MODEL THAT ACTUALLY PREDICTS THE COST IS NOT mutants x test COUNT. Measured on
 # run 33593316805 — the last data-ef leg that SUCCEEDED: 888 mutants, mutation loop
@@ -933,7 +974,7 @@ jobs:
             config: stryker-config.canary.json
             project: src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj
             mutants: 13
-            suite: 194     # probed 2026-10-30 (was 142)
+            suite: 230     # run 44834820709, 2026-11-20 (was 194)
             timeout: 10     # measured ~20 s warm; the margin is cold checkout, setup-dotnet,
                             # `dotnet tool restore` and Stryker's own build, none of which this
                             # workflow caches. A timed-out job is CANCELLED, which writes no report
@@ -947,9 +988,10 @@ jobs:
           - name: security core (expressions)
             config: stryker-config.expressions.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 1949   # probed 2026-10-30 (was 900)
-            suite: 3825     # probed 2026-10-30 (was 1188); same test project as the leg below, so the two must be equal
-            timeout: 180    # measured 27, 31 and 26 min on three runs, but 68 of its 900 mutants were
+            mutants: 2591   # run 44834820709's own log, 2026-11-20 (was 1949) — see RE-PROBED 2026-11-21
+            suite: 5330     # same run (was 3825); same test project as the leg below, so the two must be equal
+            timeout: 180    # CANCELLED AT THIS BUDGET on run 44834820709 — not re-sized, see RE-PROBED
+                            # 2026-11-21 in the header. Previously: measured 27, 31 and 26 min on three runs, but 68 of its 900 mutants were
                             # timing out and `additional-timeout` lets each run to the new ceiling: worst
                             # case 110 min (see THE MODEL in the header). This is the ONE leg whose
                             # timeouts may genuinely be endless loops — it mutates an expression evaluator
@@ -958,12 +1000,10 @@ jobs:
           - name: security core (rules, auth, rest)
             config: stryker-config.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 5715   # probed 2026-10-30 (was 1713), after the HTTP glue moved to the leg below.
-                            # Unchanged by accounts S3 on purpose: the self-service route files it now
-                            # excludes postdate that probe, so excluding them removes nothing it counted
-                            # (the data-ef-rest precedent). Not re-probed — no Stryker run.
-            suite: 3825     # probed 2026-10-30 (was 1188)
-            timeout: 120    # measured 28 min on run 34828632562, at 36 of 1713 timing out (2.1 %).
+            mutants: 9557   # run 44834820709's own log, 2026-11-20 (was 5715) — see RE-PROBED 2026-11-21
+            suite: 5330     # same run (was 3825)
+            timeout: 120    # CANCELLED AT THIS BUDGET on run 44834820709 — not re-sized, see RE-PROBED
+                            # 2026-11-21 in the header. Previously: measured 28 min on run 34828632562, at 36 of 1713 timing out (2.1 %).
                             # Worst case with the raised timeout is 72 min, inside the existing budget,
                             # so this one is left alone — see THE MODEL in the header.
           # The security-relevant HTTP glue of commands, inbound webhooks and the caller
@@ -1016,30 +1056,28 @@ jobs:
           - name: data-ef-rest
             config: stryker-config.data-ef-rest.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 1816  # probed 2026-10-30 (was 649). Unchanged by accounts S2 and S3 on purpose: the
-                           # account-store and tenant-registry files postdate that probe, so excluding them
-                           # (they sit on the accounts-store leg) removes nothing it counted. Not re-probed —
-                           # no Stryker run.
-            suite: 1286    # probed 2026-10-30 (was 554); one test project
-            timeout: 120   # measured 2 min for 565 mutants on CI with ZERO timeouts — one fast
+            mutants: 2950  # run 44834820709's own log, 2026-11-20 (was 1816) — see RE-PROBED 2026-11-21
+            suite: 1560    # same run (was 1286); one test project
+            timeout: 120   # CANCELLED AT THIS BUDGET on run 44834820709 — not re-sized, see RE-PROBED
+                           # 2026-11-21 in the header. Previously: measured 2 min for 565 mutants on CI with ZERO timeouts — one fast
                            # assembly, so `additional-timeout` changes nothing here. The budget is
                            # left at 120 rather than cut to match: this is the leg the test debt
                            # will be paid on, so it is the one most likely to grow.
           - name: data-sqlite
             config: stryker-config.data-sqlite.json
             project: src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj
-            mutants: 65     # probed 2026-10-30 (was 44)
-            suite: 870      # probed 2026-10-30 (was 581)
-            timeout: 60     # measured 5.5 min, but 22 of its 44 mutants were being cut off at the
-                            # timeout (100.00 % reported on 22 killed / 0 survived / 22 timeout).
-                            # Those 22 now run to completion, and this leg stands up real databases
-                            # per test, so double the budget and let the next run measure it.
+            mutants: 122    # runs 44834820709 and 44850064624, 2026-11-20/21 (was 65)
+            suite: 1352     # run 44850064624 (1343 on 44834820709; was 870)
+            timeout: 120    # 2x measured: Stryker ran 56 min on run 44834820709 and 52 min on
+                            # 44850064624, 0 timeouts both times — against a budget of 60, which a
+                            # few more mutants would have cancelled. (Was 60, sized before any run
+                            # had let its 22 old timeouts run to completion.)
           - name: data-postgresql
             config: stryker-config.data-postgresql.json
             project: src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj
-            mutants: 33     # probed 2026-10-30 (was 20)
-            suite: 180      # probed 2026-10-30 (was 110)
-            timeout: 30     # measured 2 min
+            mutants: 122    # run 44850064624, 2026-11-21 (was 33; 68 by 2026-11-07, 110 by 11-12, unreported)
+            suite: 262      # run 44850064624, 2026-11-21 (was 180)
+            timeout: 30     # measured 2 min (1 min 31 s of Stryker on run 44850064624)
           # THE ACCOUNTS LEGS — UNMEASURED. Every number on the three legs below is an estimate,
           # and so are their configs' thresholds; "THE ACCOUNTS LEGS" in the header says how each
           # was derived and what the first real run must replace it with.
