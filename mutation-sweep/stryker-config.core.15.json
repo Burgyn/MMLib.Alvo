@@ -1,0 +1,38 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Extensions/Internal/ExtensionStats.cs",
+      "Extensions/Internal/HandledEventType.cs",
+      "Extensions/Internal/HandlerBinding.cs",
+      "Extensions/Internal/HandlerDescription.cs",
+      "Extensions/Internal/HandlerInvoker.cs",
+      "Extensions/Internal/HandlerSources.cs",
+      "Extensions/Internal/InvokerCalls.cs",
+      "Extensions/Internal/LatencyHistogram.cs",
+      "Extensions/Internal/TypedHandler.cs",
+      "Extensions/Setup.cs",
+      "Functions/AlvoFunctionContext.cs",
+      "Functions/AlvoFunctionSkippedException.cs",
+      "Functions/IAlvoFunction.cs",
+      "Functions/Internal/FunctionDescription.cs",
+      "Functions/Internal/FunctionInputCheck.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

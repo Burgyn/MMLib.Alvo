@@ -1,0 +1,48 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj",
+      "MMLib.Alvo.Accounts.Tests/MMLib.Alvo.Accounts.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "EfCoreAccountStore.cs",
+      "EfCoreAccountStore.Sessions.cs",
+      "EfCoreAccountStore.Keys.cs",
+      "Internal/AuthTables.cs",
+      "EfCoreTenantStore.cs",
+      "EfCoreTenantStore.Members.cs",
+      "Internal/TenantTables.cs",
+      "EfCoreTenantStore.Invitations.cs",
+      "Internal/InvitationTables.cs",
+      "Internal/InvitationAcceptance.cs",
+      "EfCoreAppTokenStore.cs",
+      "Internal/AppTokenTables.cs",
+      "!EfCoreAccountStore.Keys.cs",
+      "!EfCoreAccountStore.Sessions.cs",
+      "!EfCoreAccountStore.cs",
+      "!EfCoreAppTokenStore.cs",
+      "!EfCoreTenantStore.Invitations.cs",
+      "!EfCoreTenantStore.Members.cs",
+      "!EfCoreTenantStore.cs",
+      "!Internal/AppTokenTables.cs",
+      "!Internal/AuthTables.cs",
+      "!Internal/InvitationAcceptance.cs",
+      "!Internal/InvitationTables.cs",
+      "!Internal/TenantTables.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 40,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

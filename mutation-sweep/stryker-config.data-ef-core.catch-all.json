@@ -1,0 +1,46 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Data.EntityFrameworkCore.Tests/MMLib.Alvo.Data.EntityFrameworkCore.Tests.csproj",
+      "MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Internal/EfAlvoData.cs",
+      "Internal/EfAlvoData.Units.cs",
+      "Internal/UpdateSetterFactory.cs",
+      "Internal/WritePropertyBag.cs",
+      "Internal/BatchWrite.cs",
+      "Internal/ConstraintViolationTranslator.cs",
+      "Internal/WholeRowGuard.cs",
+      "EfCoreOutboxStore.cs",
+      "Internal/OutboxTable.cs",
+      "Internal/EfAlvoData.Hooks.cs",
+      "Internal/UnitRun.cs",
+      "!EfCoreOutboxStore.cs",
+      "!Internal/BatchWrite.cs",
+      "!Internal/ConstraintViolationTranslator.cs",
+      "!Internal/EfAlvoData.Hooks.cs",
+      "!Internal/EfAlvoData.Units.cs",
+      "!Internal/EfAlvoData.cs",
+      "!Internal/OutboxTable.cs",
+      "!Internal/UnitRun.cs",
+      "!Internal/UpdateSetterFactory.cs",
+      "!Internal/WholeRowGuard.cs",
+      "!Internal/WritePropertyBag.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 79,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}
