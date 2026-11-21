@@ -133,8 +133,14 @@ transaction" is one port member. The caller passes in every id and instant, so t
 clock. Its contract facts are `test/_shared/ef/AccountStoreFacts.cs`, run by `SqliteAccountStoreTests` and
 `PostgreSqlAccountStoreTests`.
 
-A refresh token's value is `alvo_rt_<id>_<HMAC-SHA256(key, id)>` (D6). The row stores only the id, and the server
-re-derives the child's value instead of storing it. That is what lets the grace window answer the *same* child twice.
+A refresh token's value is `alvo_rt_<session>_<id>_<HMAC-SHA256(key, session_id)>` (D6; the session since #527). The
+row stores only the id, and the server re-derives the child's value instead of storing it. That is what lets the grace
+window answer the *same* child twice. **The session is in the value so the sweep can delete rotated ancestors without
+blinding reuse detection** (RFC 9700 §4.14.2): a value the MAC proves genuine whose row is gone but whose session is
+live can only be a swept ancestor, so it is answered as a reuse after the window and ends the session
+(`AccountStoreFacts.A_swept_ancestor_presented_again_kills_its_live_session`, both engines); one naming a dead session is
+only refused (`…A_swept_ancestor_of_a_dead_session_is_only_refused`). The session is inside the MAC, so a value cannot
+be moved to another session (`RefreshTokenFormatTests`).
 
 ## How a request becomes a person
 

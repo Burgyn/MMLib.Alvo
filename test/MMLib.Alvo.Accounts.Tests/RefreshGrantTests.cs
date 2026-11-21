@@ -175,7 +175,7 @@ public sealed class RefreshGrantTests
         await using var world = await AccountsWorld.StartAsync(_engine);
         var (access, refresh) = await world.SignInAsync("sub-1");
         var key = await world.Api.Services.GetRequiredService<AccountKeys>().RefreshMacKeyAsync(Ct);
-        using var reference = await world.RefreshAsync(RefreshTokenFormat.Format(Guid.NewGuid(), key));
+        using var reference = await world.RefreshAsync(RefreshTokenFormat.Format(Guid.NewGuid(), Guid.NewGuid(), key));
 
         var dead = await KillAsync(world, death, access, refresh);
         using var response = await world.RefreshAsync(dead);
@@ -192,7 +192,7 @@ public sealed class RefreshGrantTests
         {
             case "an unknown id under a valid MAC":
                 var key = await world.Api.Services.GetRequiredService<AccountKeys>().RefreshMacKeyAsync(Ct);
-                return RefreshTokenFormat.Format(Guid.NewGuid(), key);
+                return RefreshTokenFormat.Format(Guid.NewGuid(), Guid.NewGuid(), key);
             case "a bad MAC":
                 return refresh[..^2] + (refresh[^2] == 'A' ? 'B' : 'A') + refresh[^1];
             case "a session revoked by logout":

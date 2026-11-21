@@ -255,6 +255,16 @@ internal sealed class AuthTables(string schemaPrefix)
          WHERE id = @session_id AND account_id = @account_id AND revoked_at IS NULL AND expires_at > @now
         """;
 
+    /// <summary>
+    /// Gets the statement reading one live session's account and start, by the session's id alone — whatever the session's
+    /// refresh tokens still have rows (#527: a swept ancestor's value names its session).
+    /// </summary>
+    internal string LiveSessionByIdSql =>
+        $"""
+        SELECT s.account_id, s.created_at FROM {Sessions} s JOIN {Accounts} a ON a.id = s.account_id
+         WHERE s.id = @session_id AND s.revoked_at IS NULL AND s.expires_at > @now AND a.disabled_at IS NULL
+        """;
+
     /// <summary>Gets the statement revoking every live session of one account.</summary>
     internal string RevokeAccountSessionsSql =>
         $"UPDATE {Sessions} SET revoked_at = @now, revoked_reason = @reason WHERE account_id = @account_id AND revoked_at IS NULL";

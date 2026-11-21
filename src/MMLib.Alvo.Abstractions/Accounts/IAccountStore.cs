@@ -212,8 +212,14 @@ internal sealed record AccountView(
 /// <param name="Grace">How long after its rotation a token still answers its child; zero refuses any reuse.</param>
 /// <param name="Idle">How long an unrotated token stays usable after it was issued.</param>
 /// <param name="PersonalTenant">The personal tenant to ensure, or <see langword="null"/> when the descriptor gives none.</param>
+/// <param name="Session">
+/// The session the presented value names, inside its verified HMAC (#527). When the token's row is gone — a rotated
+/// ancestor the sweep deleted — a live session here makes the presentation a reuse after the window, exactly as if the
+/// row were still there; <see cref="Guid.Empty"/> names no session and such a presentation is only refused.
+/// </param>
 internal sealed record RefreshRequest(
-    Guid TokenId, Guid ChildId, DateTimeOffset Now, TimeSpan Grace, TimeSpan Idle, PersonalTenantRequest? PersonalTenant);
+    Guid TokenId, Guid ChildId, DateTimeOffset Now, TimeSpan Grace, TimeSpan Idle, PersonalTenantRequest? PersonalTenant,
+    Guid Session = default);
 
 /// <summary>What one caller read asks (S3 plan D4).</summary>
 /// <param name="Account">The account the access token names.</param>

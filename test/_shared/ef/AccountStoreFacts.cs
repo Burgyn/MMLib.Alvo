@@ -761,6 +761,50 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         (await IsLiveAsync(store, account, session.SessionId, rotated.Now)).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// #527: the sweep deletes rotated ancestors, and reuse detection must survive it (RFC 9700 §4.14.2). A presentation
+    /// whose row is gone but whose value names a live session is a reuse after the window — the session dies, and what was
+    /// minted since it started with it — exactly as when the row was still there. Red before the value named its session.
+    /// </summary>
+    [Fact]
+    public async Task A_swept_ancestor_presented_again_kills_its_live_session()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        await ScalarAsync(
+            services,
+            $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE id = '{session.RefreshTokenId:D}'");
+
+        var reuse = await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(2)) with { Session = session.SessionId }, Ct);
+
+        reuse.Status.ShouldBe(RefreshStatus.Reused);
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Reuse);
+        (await IsLiveAsync(store, account, session.SessionId, _now.AddMinutes(2))).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The other side (#527): a genuine value whose row is gone and whose session is dead — or that names no session — is
+    /// only refused; nothing is revoked, because nothing is left to revoke.
+    /// </summary>
+    [Fact]
+    public async Task A_swept_ancestor_of_a_dead_session_is_only_refused()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var (other, otherSession) = await SignedInAsync(store);
+        (await store.RevokeSessionAsync(session.SessionId, SessionRevocations.Logout, _now.AddMinutes(1), Ct)).ShouldBeTrue();
+
+        var dead = await store.RefreshAsync(Refresh(Guid.NewGuid(), _now.AddMinutes(2)) with { Session = session.SessionId }, Ct);
+        var unnamed = await store.RefreshAsync(Refresh(Guid.NewGuid(), _now.AddMinutes(2)), Ct);
+
+        dead.Status.ShouldBe(RefreshStatus.Refused);
+        unnamed.Status.ShouldBe(RefreshStatus.Refused);
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Logout, "the first reason is kept");
+        (await IsLiveAsync(store, other, otherSession.SessionId, _now.AddMinutes(2))).ShouldBeTrue();
+        account.ShouldNotBe(other);
+    }
+
     [Fact]
     public async Task Two_concurrent_refreshes_of_one_token_get_the_same_child()
     {

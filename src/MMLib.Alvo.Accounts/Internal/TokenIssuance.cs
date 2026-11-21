@@ -29,7 +29,7 @@ internal sealed class TokenIssuance(AccessTokens tokens, AccountKeys keys, IOpti
         var settings = options.Value;
         var access = await tokens.MintAsync(
             subject, AccountsIssuer.IssuerFor(request, settings), AccountsIssuer.AudienceFor(settings, policy), ct).ConfigureAwait(false);
-        var refresh = RefreshTokenFormat.Format(refreshTokenId, await keys.RefreshMacKeyAsync(ct).ConfigureAwait(false));
+        var refresh = RefreshTokenFormat.Format(subject.Session, refreshTokenId, await keys.RefreshMacKeyAsync(ct).ConfigureAwait(false));
 
         return new TokenResponse(
             access,
