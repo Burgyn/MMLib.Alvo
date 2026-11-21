@@ -116,8 +116,8 @@ internal static partial class ManagementEndpoints
             group.MapGet(
                 "/projects/{project}/users",
                 (string project, string? search, int? limit, string? after,
-                    IAlvoUserAdministration users, CancellationToken ct) =>
-                        Answer(() => users.ListAsync(
+                    ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                        AnswerAdmitted(gate, project, () => users.ListAsync(
                             new AlvoUserQuery(search, limit ?? 50, after), ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.ListAsync), ManagementOperation.ManageUsers));
 
@@ -125,24 +125,24 @@ internal static partial class ManagementEndpoints
             group.MapPost(
                 "/projects/{project}/users",
                 (string project, AlvoUserCreation creation,
-                    IAlvoUserAdministration users, CancellationToken ct) =>
-                        Answer(() => users.CreateAsync(creation, ct))),
+                    ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                        AnswerAdmitted(gate, project, () => users.CreateAsync(creation, ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.CreateAsync), ManagementOperation.ManageUsers));
 
         Gate(
             group.MapPut(
                 "/projects/{project}/users/{user:guid}/roles",
                 (string project, Guid user, ManagementRoleAssignment body,
-                    IAlvoUserAdministration users, CancellationToken ct) =>
-                        Answer(() => users.SetRolesAsync(new UserId(user), body.RoleNames, ct))),
+                    ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                        AnswerAdmitted(gate, project, () => users.SetRolesAsync(new UserId(user), body.RoleNames, ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.SetRolesAsync), ManagementOperation.ManageUsers));
 
         Gate(
             group.MapPut(
                 "/projects/{project}/users/{user:guid}/tenant",
                 (string project, Guid user, ManagementTenantGrant body,
-                    IAlvoUserAdministration users, CancellationToken ct) =>
-                        Answer(() => users.SetTenantAsync(
+                    ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                        AnswerAdmitted(gate, project, () => users.SetTenantAsync(
                             new UserId(user), body.Tenant is { } tenant ? new TenantId(tenant) : null, ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.SetTenantAsync), ManagementOperation.ManageUsers));
 
@@ -158,16 +158,16 @@ internal static partial class ManagementEndpoints
         Gate(
             group.MapPut(
                 "/projects/{project}/users/{user:guid}/disabled",
-                (string project, Guid user, ManagementDisabledFlag body,
-                    IAlvoUserAdministration users, CancellationToken ct) =>
-                        Answer(() => users.SetDisabledAsync(new UserId(user), body.Disabled, ct))),
+                (string project, Guid user, ManagementDisabledFlag? body,
+                    ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                        Rendered(() => SetUserDisabledAsync(project, user, body, gate, users, ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.SetDisabledAsync), ManagementOperation.ManageUsers));
 
         Gate(
             group.MapPost(
                 "/projects/{project}/users/{user:guid}/credential-reset",
-                (string project, Guid user, IAlvoUserAdministration users, CancellationToken ct) =>
-                    Answer(() => users.IssueCredentialTokenAsync(new UserId(user), ct))),
+                (string project, Guid user, ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                    AnswerAdmitted(gate, project, () => users.IssueCredentialTokenAsync(new UserId(user), ct))),
             new ManagementRoute(
                 nameof(IAlvoUserAdministration.IssueCredentialTokenAsync), ManagementOperation.ManageUsers));
 
@@ -176,9 +176,46 @@ internal static partial class ManagementEndpoints
         Gate(
             group.MapDelete(
                 "/projects/{project}/users/{user:guid}/lockout",
-                (string project, Guid user, IAlvoUserAdministration users, CancellationToken ct) =>
-                    Answer(() => users.ClearLockoutAsync(new UserId(user), ct))),
+                (string project, Guid user, ManagementGate gate, IAlvoUserAdministration users, CancellationToken ct) =>
+                    AnswerAdmitted(gate, project, () => users.ClearLockoutAsync(new UserId(user), ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.ClearLockoutAsync), ManagementOperation.ManageUsers));
+    }
+
+    /// <summary>Admits the caller to <paramref name="project"/> for <c>ManageUsers</c>, then answers as <see cref="Answer{T}"/> does.</summary>
+    /// <remarks>
+    /// The membership store is the deployment's, not a project's, so nothing past the gate would notice a project this
+    /// build does not serve: <see cref="ManagementGate.Admit"/> is what answers it with the named 404 (#526).
+    /// </remarks>
+    /// <typeparam name="T">What the member answers with.</typeparam>
+    /// <param name="gate">The gate to admit through.</param>
+    /// <param name="project">The project the route names.</param>
+    /// <param name="operation">The member to run once admitted.</param>
+    private static Task<IResult> AnswerAdmitted<T>(ManagementGate gate, string project, Func<Task<T>> operation) =>
+        Answer(() =>
+        {
+            gate.Admit(ManagementOperation.ManageUsers, project);
+            return operation();
+        });
+
+    /// <summary>
+    /// Admits the caller to the project, then disables or enables the person — or refuses a body that does not say which,
+    /// <see cref="SetAccountDisabledAsync"/>'s shape.
+    /// </summary>
+    private static async Task<IResult> SetUserDisabledAsync(
+        string project,
+        Guid user,
+        ManagementDisabledFlag? body,
+        ManagementGate gate,
+        IAlvoUserAdministration users,
+        CancellationToken ct)
+    {
+        gate.Admit(ManagementOperation.ManageUsers, project);
+        if (body?.Disabled is not { } disabled)
+        {
+            return ProblemResultFactory.ManagementValidation(UserDisabledRequired);
+        }
+
+        return Results.Ok(await users.SetDisabledAsync(new UserId(user), disabled, ct).ConfigureAwait(false));
     }
 
     /// <summary><c>GET {prefix}/info</c> — <see cref="IAlvoManagement.GetInfoAsync"/>.</summary>
@@ -667,6 +704,11 @@ internal static partial class ManagementEndpoints
     private const string DryRunUnreadable =
         "'dryRun' takes 'true' or 'false'. It is refused rather than assumed, because reading an "
         + "unrecognised value as 'false' would apply the change a caller asked to preview.";
+
+    /// <summary>What a caller whose <c>disabled</c> body did not say which way has to send.</summary>
+    private const string UserDisabledRequired =
+        "Send whether the person should be disabled: {\"disabled\": true} bars them from signing in, "
+        + "{\"disabled\": false} lets them sign in again.";
 
     /// <summary>What a caller who sent no descriptor has to do.</summary>
     private const string BodyRequired =

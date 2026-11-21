@@ -58,7 +58,7 @@ public sealed class UserLockoutRouteTests : IAsyncLifetime
     {
         var id = await CreateAsync("disabled@alvo.test");
         using (var disabled = await World.SendAsync(
-            HttpMethod.Put, $"/management/projects/host/users/{id}/disabled", JsonNode.Parse("""{"disabled":true}""")))
+            HttpMethod.Put, $"/management/projects/host-user-admin/users/{id}/disabled", JsonNode.Parse("""{"disabled":true}""")))
         {
             disabled.StatusCode.ShouldBe(HttpStatusCode.OK, await disabled.ReadTextAsync());
         }
@@ -67,17 +67,17 @@ public sealed class UserLockoutRouteTests : IAsyncLifetime
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await response.ReadTextAsync());
         (await response.ReadTextAsync()).ShouldContain("Let them back in instead");
-        using var list = await World.GetAsync("/management/projects/host/users?search=disabled@alvo.test");
+        using var list = await World.GetAsync("/management/projects/host-user-admin/users?search=disabled@alvo.test");
         JsonNode.Parse(await list.ReadTextAsync())!["users"]![0]!["isDisabled"]!.GetValue<bool>()
             .ShouldBeTrue("a refused unlock left the person disabled");
     }
 
-    private static string Lockout(Guid id) => $"/management/projects/host/users/{id}/lockout";
+    private static string Lockout(Guid id) => $"/management/projects/host-user-admin/users/{id}/lockout";
 
     private async Task<Guid> CreateAsync(string email)
     {
         using var response = await World.SendAsync(
-            HttpMethod.Post, "/management/projects/host/users", new JsonObject { ["email"] = email, ["roleNames"] = new JsonArray() });
+            HttpMethod.Post, "/management/projects/host-user-admin/users", new JsonObject { ["email"] = email, ["roleNames"] = new JsonArray() });
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
         return JsonNode.Parse(await response.ReadTextAsync())!["id"]!.GetValue<Guid>();
     }
