@@ -171,8 +171,8 @@ Five, differing only in role and tenant, so any difference in what they can see 
 | `dispatcher-south` | `dispatcher` | south | Identical rights to `dispatcher-north`, other tenant. Anything it cannot see is tenancy, not policy. |
 | `admin` | `admin` | north | The only caller the descriptor lets create a `region` or delete a `customer`. |
 
-Tenant ids and user ids live in `demo-identities.env` and are **not** secrets: a create on a scoped
-entity has to carry `tenant_id`, and `assigned_to` names a technician by user id, so no test can be
+Tenant ids and user ids live in `demo-identities.env` and are **not** secrets: a test asserts which
+tenant a row landed in, and `assigned_to` names a technician by user id, so no test can be
 written without them. The five key secrets are credentials and are never committed.
 
 ## Self-service: people sign in, found a company and invite their team
@@ -240,17 +240,15 @@ Your page uses *Sign in with Google* and sends the `credential` it receives (the
 **The dev keys keep working beside sign-in.** The other suites drive the stack through them unchanged. A person and
 a key are two credentials over the same rules.
 
-**A scoped create still echoes its tenant.** A person names the tenant she acts in with `X-Alvo-Tenant`, and a
-create on a scoped entity carries the same id as `tenant_id` in its body. Alvo checks the column, it does not fill
-it in. Leave it out and the answer is `403 The write was rejected by policy.`, which names no field
-(`170-SelfService/003` pins it; [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538) tracks the fix).
+**A scoped create lands in the tenant the call acts in.** A person names the tenant she acts in with
+`X-Alvo-Tenant`, and a create on a scoped entity needs no `tenant_id` in its body: the row is placed in that tenant.
+A body naming another tenant is `403`, with a detail that says to remove the field (`170-SelfService/003` pins both).
 
 ## Worth knowing before you write against this
 
-- **A create on a tenant-scoped entity must carry `tenant_id` explicitly.** Nothing stamps it from the
-  caller's context; the synthesized tenant scope's `WITH CHECK` then judges the value. Omit it and the
-  answer is `403 The write was rejected by policy.` — correct, but it names no field
-  ([#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)).
+- **A create on a tenant-scoped entity takes the caller's tenant.** Leave `tenant_id` out and the row lands in
+  the tenant the key or the person acts in; send it and it must be that tenant, or the answer is `403` with a
+  detail naming the field and the fix. Many requests in the TeaPie suites still send it: that shape keeps working.
 - **`job_number` and `on_site_minutes` are Alvo's to write.** A create or update that sends either is
   refused `403`, with a detail that says why; read them back from the response.
 - **The dashboard's field rename does not carry everything yet.** Renaming a field a transition's `when`, a timer,

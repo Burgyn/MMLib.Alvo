@@ -44,8 +44,8 @@ give them a role through `creatorRoles`.
 
 - Sign-in is host configuration: `Alvo:Accounts:Providers` on the standalone host, `AddAlvoAccounts` in an embedded
   one. A host without it only warns at boot that nobody can sign in with Google; the apply still succeeds.
-- A scoped create still echoes `tenant_id` in its body, and names the tenant in `X-Alvo-Tenant` unless it acts in
-  the person's personal tenant; without `tenant_id` it is 403 "The write was rejected by policy.", with no violations.
+- A scoped create needs no `tenant_id` in its body: it lands in the tenant `X-Alvo-Tenant` names, or the person's
+  personal tenant without the header. A `tenant_id` naming any other tenant is 403, with the fix in `detail`.
 - An app token (`alvo_pat_…` personal, `alvo_svc_…` service) is sent as `X-Alvo-Api-Key`; as `Authorization: Bearer`
   it is 401. The Management API refuses app tokens.
 

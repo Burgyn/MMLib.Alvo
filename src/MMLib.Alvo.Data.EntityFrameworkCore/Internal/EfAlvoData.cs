@@ -506,11 +506,10 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
+        AlvoTenantPlacement.EnsurePlaceable(values, schema, context);
         EnsureFacetsFit(schema, values, decision.Unnameable);
 
-        var candidate = Candidate(
-            db.Rows(entity).EntityType,
-            Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
+        var candidate = Candidate(db.Rows(entity).EntityType, CreatedRow(schema, values, context, now));
         if (!(deferRelations && ProbesRelations(decision)))
         {
             await EnsureWriteAllowedAsync(db, schema, decision, Unmasked(candidate), previous: null, context, cancellationToken).ConfigureAwait(false);
@@ -1891,33 +1890,29 @@ internal sealed partial class EfAlvoData : IAlvoData
     {
         var candidate = WritePropertyBag.For(
             db.Rows(schema.Name).EntityType,
-            WholeRowGuard.WholeRow(
-                Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false), schema, decision));
+            WholeRowGuard.WholeRow(CreatedRow(schema, values, context, now), schema, decision));
         candidate[AlvoDataContext.IdColumn] = id;
-        StampTenant(candidate, schema, context);
 
         return candidate;
     }
 
-    /// <summary>Places a created row in the caller's own tenant, on an entity that is scoped at all.</summary>
+    /// <summary>
+    /// The row a create composes from the caller's payload, on every create path — single, keyed, batch and a
+    /// replace's create branch: the declared defaults, the caller's own tenant, then the audit stamp.
+    /// </summary>
     /// <remarks>
     /// <b>The tenant scope checks a candidate's tenant; it never produces one</b>, and
-    /// <see cref="AlvoAuditStamp"/> deliberately never touches this column. With the payload guard refusing
-    /// <c>tenant_id</c> on both branches, nothing else would supply it — the candidate would carry no tenant
-    /// and its own scope would refuse it, so the route would not work on any scoped entity. A caller
-    /// creating into <em>another</em> tenant uses <see cref="CreateAsync"/>, which still takes the column.
+    /// <see cref="AlvoAuditStamp"/> deliberately never touches this column, so <see cref="AlvoTenantPlacement"/>
+    /// is what supplies it. Every path that reaches here has already refused a payload naming a tenant other
+    /// than the caller's (#538) — or, on a replace, any <c>tenant_id</c> at all.
     /// </remarks>
-    /// <param name="candidate">The candidate row being built.</param>
     /// <param name="schema">The entity being written.</param>
+    /// <param name="values">The caller's own payload, already refused if it named what a caller may not write.</param>
     /// <param name="context">The caller the write is performed as.</param>
-    private static void StampTenant(
-        Dictionary<string, object> candidate, EntitySchema schema, AlvoContext context)
-    {
-        if (AlvoManagedColumns.For(schema).Contains(AlvoManagedColumns.TenantId) && context.Tenant is { } tenant)
-        {
-            candidate[AlvoManagedColumns.TenantId] = tenant.Value;
-        }
-    }
+    /// <param name="now">The write's own instant.</param>
+    private static IReadOnlyDictionary<string, object?> CreatedRow(
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values, AlvoContext context, DateTimeOffset now) =>
+        Stamped(schema, AlvoTenantPlacement.Placed(WholeRowValues(schema, values), schema, context), context, now, isUpdate: false);
 
     /// <summary>The entity a create-or-replace may write, with the guards both branches share applied.</summary>
     /// <remarks>
@@ -3071,7 +3066,8 @@ internal sealed partial class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, PolicyDecision decision, AlvoContext context,
         IReadOnlyDictionary<string, object?> values, DateTimeOffset now, int index, CancellationToken cancellationToken)
     {
-        if (WritePayloadGuard.PayloadRefusal(values, schema, decision, isUpdate: false) is { } unwritable)
+        if ((WritePayloadGuard.PayloadRefusal(values, schema, decision, isUpdate: false)
+            ?? AlvoTenantPlacement.Refusal(values, schema, context)) is { } unwritable)
         {
             return (null, Forbidden(index, unwritable));
         }
@@ -3081,9 +3077,7 @@ internal sealed partial class EfAlvoData : IAlvoData
             return (null, unfit);
         }
 
-        var candidate = Candidate(
-            db.Rows(schema.Name).EntityType,
-            Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
+        var candidate = Candidate(db.Rows(schema.Name).EntityType, CreatedRow(schema, values, context, now));
 
         return await RowRefusalAsync(db, schema, decision, Unmasked(candidate), previous: null, context, index, cancellationToken).ConfigureAwait(false) is { } rejected
             ? (null, rejected)

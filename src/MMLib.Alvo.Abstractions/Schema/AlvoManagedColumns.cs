@@ -159,9 +159,10 @@ public static class AlvoManagedColumns
     /// <param name="column">A column name, managed or not.</param>
     /// <param name="isUpdate">Whether the write is an update rather than a create.</param>
     /// <remarks>
-    /// <c>tenant_id</c> on a create is the one exception, and it is deliberate: a create legitimately
-    /// places a row in a tenant, and the synthesized tenant scope evaluated over the candidate row is
-    /// what decides whether that tenant is allowed. Every other managed column is the framework's to
+    /// <c>tenant_id</c> on a create is the one exception, and it is deliberate: a create places a row in a
+    /// tenant, which may only ever be the caller's own — <see cref="AlvoTenantPlacement"/> fills an omitted
+    /// value with it and refuses any other, and the synthesized tenant scope evaluated over the candidate
+    /// row still judges the row that is stored. Every other managed column is the framework's to
     /// write on every path — an audit trail a caller can author is not an audit trail.
     /// </remarks>
     public static bool IsCallerWritable(string column, bool isUpdate)

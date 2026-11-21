@@ -22,8 +22,8 @@ An entity is `scoped` when it says `"tenancy": "scoped"`, or when the project en
 shared reference data every tenant sees.
 
 - A scoped row belongs to one tenant, and a caller only ever sees its own tenant's rows.
-- A `POST` create on a scoped entity must **echo** the caller's `tenant_id` in the body: the server checks it
-  rather than filling it in. A replace, an upsert or an update must not send it; the upsert fills it in.
+- A `POST` create on a scoped entity may leave `tenant_id` out: the row lands in the caller's own tenant. A value
+  it does send must be that tenant, or the create is 403. A replace, an upsert or an update must not send it.
 - A `unique` field or unique index on a scoped entity is unique per tenant: two tenants may hold the same value.
 - Signed-in people running tenants of their own, and the tenant roles they hold there, are `tenancy.selfService`:
   load `alvo-descriptor-accounts`.
