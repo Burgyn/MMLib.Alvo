@@ -128,10 +128,94 @@ public sealed class TenantRoutesTests
         (await world.MembershipsAsync(access)).Count.ShouldBe(3, "the personal tenant and the two shared ones");
     }
 
+    /// <summary>
+    /// #542 item 5: a retried create with the same <c>Idempotency-Key</c> answers the tenant the first one made — the same
+    /// 201 and <c>Location</c> — and spends no <c>maxPerAccount</c> slot, which a tenant that cannot be deleted never
+    /// gives back.
+    /// </summary>
+    [Fact]
+    public async Task A_keyed_retry_answers_the_same_tenant_and_spends_no_slot()
+    {
+        await using var world = await TeamAsync();
+        var (access, _) = await world.SignInAsync("ada");
+
+        using var first = await KeyedCreateAsync(world, access, "Acme", "acme-1");
+        using var retry = await KeyedCreateAsync(world, access, "Acme", "acme-1");
+
+        first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.ReadTextAsync());
+        retry.StatusCode.ShouldBe(HttpStatusCode.Created, await retry.ReadTextAsync());
+        retry.Headers.Location.ShouldBe(first.Headers.Location);
+        (await retry.ReadTextAsync()).ShouldBe(await first.ReadTextAsync());
+        (await world.MembershipsAsync(access)).Count(membership => membership!["kind"]!.GetValue<string>() == "shared").ShouldBe(1);
+    }
+
+    /// <summary>The same key with another body is 409 <c>idempotency-conflict</c>, never the first tenant and never a second.</summary>
+    [Fact]
+    public async Task The_same_key_for_another_name_is_an_idempotency_conflict()
+    {
+        await using var world = await TeamAsync();
+        var (access, _) = await world.SignInAsync("ada");
+        (await KeyedCreateAsync(world, access, "Acme", "k")).Dispose();
+
+        using var other = await KeyedCreateAsync(world, access, "Globex", "k");
+
+        other.StatusCode.ShouldBe(HttpStatusCode.Conflict, await other.ReadTextAsync());
+        (await other.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
+        (await world.MembershipsAsync(access)).Count(membership => membership!["kind"]!.GetValue<string>() == "shared").ShouldBe(1);
+    }
+
+    /// <summary>A key the record cannot hold is refused at 422 before anything is written — repeated, blank or too long.</summary>
+    [Theory]
+    [InlineData("repeated")]
+    [InlineData("blank")]
+    [InlineData("long")]
+    public async Task A_key_that_cannot_be_recorded_is_422_and_creates_nothing(string shape)
+    {
+        await using var world = await TeamAsync();
+        var (access, _) = await world.SignInAsync("ada");
+        KeyValuePair<string, string>[] keys = shape switch
+        {
+            "repeated" => [new(IdempotencyKey, "a"), new(IdempotencyKey, "b")],
+            "blank" => [new(IdempotencyKey, " ")],
+            _ => [new(IdempotencyKey, new string('k', 256))],
+        };
+
+        using var refused = await world.Api.SendAsync(
+            HttpMethod.Post, Tenants, body: new JsonObject { ["name"] = "Acme" }, headers: [new("Authorization", $"Bearer {access}"), .. keys]);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery, "the Data API's answer for the same header");
+        (await world.MembershipsAsync(access)).ShouldNotContain(membership => membership!["kind"]!.GetValue<string>() == "shared");
+    }
+
+    /// <summary>
+    /// A replay by a creator who has since left the tenant still answers the create, with the id alone — the id the first
+    /// 201 already gave them — rather than a 404 that would invite a duplicate under a fresh key (the Data API's id-only
+    /// replay).
+    /// </summary>
+    [Fact]
+    public async Task A_replay_after_the_creator_left_answers_the_id_alone()
+    {
+        await using var world = await TeamAsync();
+        var (ada, _) = await world.SignInAsync("ada");
+        var (bob, _) = await world.SignInAsync("bob", email: "bob@gmail.com");
+        using var first = await KeyedCreateAsync(world, ada, "Acme", "acme-1");
+        var tenant = (await first.ReadJsonObjectAsync())["tenantId"]!.GetValue<Guid>();
+        await world.AddMemberAsync(new TenantId(tenant), await world.UserIdAsync(bob), ["dispatcher"], isOwner: true);
+        using var left = await world.AsPersonAsync(HttpMethod.Delete, $"{Tenants}/{tenant:D}/members/{(await world.UserIdAsync(ada)).Value:D}", ada);
+        left.StatusCode.ShouldBe(HttpStatusCode.NoContent, await left.ReadTextAsync());
+
+        using var replay = await KeyedCreateAsync(world, ada, "Acme", "acme-1");
+
+        replay.StatusCode.ShouldBe(HttpStatusCode.Created, await replay.ReadTextAsync());
+        replay.Headers.Location.ShouldBe(first.Headers.Location);
+        (await replay.ReadTextAsync()).ShouldBe($"{{\"tenantId\":\"{tenant:D}\"}}");
+    }
+
     [Fact]
     public async Task Tenant_creation_answers_429_after_its_limit()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Create = 2);
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Tenants = 2);
         var (access, _) = await world.SignInAsync("ada");
 
         using var first = await CreateAsync(world, access, "One");
@@ -407,6 +491,15 @@ public sealed class TenantRoutesTests
             Context = new AlvoContext { User = person.Context.User, Roles = person.Context.Roles, ActorKind = AlvoActorKind.ApiKey },
         };
     }
+
+    private const string IdempotencyKey = "Idempotency-Key";
+
+    private static Task<HttpResponseMessage> KeyedCreateAsync(AccountsWorld world, string access, string name, string key)
+        => world.Api.SendAsync(
+            HttpMethod.Post,
+            Tenants,
+            body: new JsonObject { ["name"] = name },
+            headers: [new("Authorization", $"Bearer {access}"), new(IdempotencyKey, key)]);
 
     private static Task<HttpResponseMessage> CreateAsync(AccountsWorld world, string access, string name)
         => world.AsPersonAsync(HttpMethod.Post, Tenants, access, new JsonObject { ["name"] = name });

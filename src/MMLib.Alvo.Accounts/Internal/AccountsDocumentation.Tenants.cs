@@ -58,11 +58,17 @@ internal static partial class AccountsDocumentation
         operations[SelfServiceEndpoints.CreateOperationId] = new(
             "Create a shared tenant",
             "Creates a tenant others can join, with an id the server chooses. The person becomes its owner, holding "
-            + "`createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.",
+            + "`createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.\n\n"
+            + "**Send `Idempotency-Key` to make a retry safe.** A tenant cannot be deleted, so a retried create without a key "
+            + "spends a `maxPerAccount` slot for good. With one, a retry carrying the same key and the same name answers the "
+            + "tenant the first create made — the same 201 and `Location`, the person's membership as it reads now (the id "
+            + "alone if they have left it) — and creates nothing; the same key with another name is 409 "
+            + "`idempotency-conflict`.",
             Bearer: true,
             document => Body("application/json", AccountsSchemas.TenantNameId, "The new tenant's name.", document),
             CreateResponses,
-            SelfServiceEndpoints.Tag);
+            SelfServiceEndpoints.Tag,
+            IdempotencyKey: true);
         operations[SelfServiceEndpoints.RenameOperationId] = new(
             "Rename a tenant",
             "Renames a tenant the person owns, a personal one included. Answers the person's membership in it.",
@@ -167,10 +173,11 @@ internal static partial class AccountsDocumentation
                 + "`descriptorKey` names which."),
             TenantRefusal(
                 "409",
-                "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap).",
+                "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap). "
+                + "`idempotency-conflict`: the person already spent this `Idempotency-Key` on a creation with another name.",
                 document),
             Unsupported(document),
-            Invalid(document),
+            Invalid(document, keyed: true),
             CreateRateLimited(document));
     }
 
@@ -213,14 +220,19 @@ internal static partial class AccountsDocumentation
     private static (string, OpenApiResponse) Unsupported(OpenApiDocument document)
         => TenantRefusal("415", "`unsupported-media-type`: the body is not `application/json`.", document);
 
-    private static (string, OpenApiResponse) Invalid(OpenApiDocument document) => TenantRefusal(
-        "422", "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.", document);
+    private static (string, OpenApiResponse) Invalid(OpenApiDocument document, bool keyed = false) => TenantRefusal(
+        "422",
+        "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`."
+        + (keyed
+            ? " `malformed-query`: `Idempotency-Key` is sent twice, blank or too long — the Data API's answer for the same header."
+            : string.Empty),
+        document);
 
     private static (string, OpenApiResponse) CreateRateLimited(OpenApiDocument document)
     {
         var (status, response) = TenantRefusal(
             "429",
-            "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Create` allows. Wait for "
+            "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Tenants` allows. Wait for "
             + "`Retry-After`, then send the request again.",
             document);
         response.Headers!["Retry-After"] = Header("Whole seconds until the window admits this client again.", "60");

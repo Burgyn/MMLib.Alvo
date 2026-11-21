@@ -16,7 +16,10 @@ internal static partial class AccountsDocumentation
             "Invite someone into a tenant",
             "An owner of a shared tenant creates an invitation: the tenant roles it grants (each from "
             + "`tenancy.selfService.assignableRoles`), whether it makes an owner, an optional email it is bound to, how many "
-            + "people may accept it and when it expires. The answer carries its `code` — shown this once, never again.",
+            + "people may accept it and when it expires. The answer carries its `code` — shown this once, never again.\n\n"
+            + "**`Idempotency-Key` is refused here (422 `malformed-query`):** the code is kept only as a hash, so no retry "
+            + "could return it. If an answer is lost, list the tenant's invitations, revoke the one you cannot account for and "
+            + "create a new one.",
             Bearer: true,
             document => Body("application/json", AccountsSchemas.InvitationRequestId, "The invitation.", document),
             CreateInvitationResponses,
@@ -106,7 +109,8 @@ internal static partial class AccountsDocumentation
             "`validation`: `roles` is missing or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` or is "
             + "named twice; `maxUses` is not 1–100; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at "
             + "most 30 days away; `email` is not one address; an owner-making invitation admits more than one person or lives "
-            + "longer than 7 days; or the body carries another property.",
+            + "longer than 7 days; or the body carries another property. `malformed-query`: `Idempotency-Key` was sent, which "
+            + "creating an invitation does not honour.",
             document),
         InvitationsRateLimited(document));
 

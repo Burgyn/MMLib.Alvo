@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using MMLib.Alvo.Api.Internal;
+using System.Text.Json.Serialization;
 
 namespace MMLib.Alvo.Tenants.SelfService;
 
@@ -48,16 +49,24 @@ internal static class TenantRoutes
             return refusal!;
         }
 
+        var (key, unusable) = TenantCreationKey.Read(call);
+        if (unusable is not null)
+        {
+            return unusable;
+        }
+
         var (name, invalid) = await call.ReadAsync(TenantName.ReadAsync).ConfigureAwait(false);
         if (name is null)
         {
             return invalid!;
         }
 
-        var outcome = await call.Store.CreateSharedAsync(Creation(call, name), call.Ct).ConfigureAwait(false);
+        var outcome = await call.Store.CreateSharedAsync(Creation(call, name, key), call.Ct).ConfigureAwait(false);
         return outcome.Status switch
         {
             CreateTenantStatus.Created => Created(call, outcome.Membership!),
+            CreateTenantStatus.Replayed => await ReplayedAsync(call, outcome.Replayed!.Value).ConfigureAwait(false),
+            CreateTenantStatus.IdempotencyConflict => ProblemResultFactory.IdempotencyKeySpent(),
             CreateTenantStatus.LimitReached => ProblemResultFactory.TenantLimit(call.Policy.MaxPerAccount),
             CreateTenantStatus.NoAccount => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
             _ => throw new InvalidOperationException(
@@ -94,21 +103,39 @@ internal static class TenantRoutes
             : SelfServiceProblems.Refused(status);
     }
 
-    private static CreateTenantRequest Creation(SelfServiceCall call, string name) => new(
+    private static CreateTenantRequest Creation(SelfServiceCall call, string name, string? key) => new(
         TenantId.New(),
         name,
         call.Person,
         [.. call.Policy.CreatorRoles!.Select(role => role.Name).Order(StringComparer.Ordinal)],
         call.Policy.MaxPerAccount,
-        call.Now);
+        call.Now,
+        key is null ? null : TenantCreationKey.Token(key, name));
 
-    private static IResult Created(SelfServiceCall call, StoredMembership membership)
+    private static IResult Created(SelfServiceCall call, StoredMembership membership) =>
+        CreatedAt(call, membership.Tenant, SelfServiceMemberships.Response(membership, call.Policy));
+
+    /// <summary>
+    /// A keyed retry's answer (#542 item 5): the creator's membership in the tenant the first create made, re-read now —
+    /// the Data API's "replay the state, never a stored rendering" — with the first answer's 201 and <c>Location</c>; or,
+    /// for a creator no longer in it, the id alone, which the first 201 already gave them.
+    /// </summary>
+    private static async Task<IResult> ReplayedAsync(SelfServiceCall call, TenantId tenant) =>
+        await call.MembershipAsync(tenant).ConfigureAwait(false) is { } membership
+            ? Created(call, membership)
+            : CreatedAt(call, tenant, new CreatedTenantId(tenant.Value));
+
+    private static IResult CreatedAt(SelfServiceCall call, TenantId tenant, object body)
     {
         var request = call.Http.Request;
         var collection = request.PathBase.Add(request.Path).Value!.TrimEnd('/');
-        call.Http.Response.Headers.Location = $"{collection}/{membership.Tenant.Value:D}";
-        return SelfServiceCall.Json(SelfServiceMemberships.Response(membership, call.Policy), StatusCodes.Status201Created);
+        call.Http.Response.Headers.Location = $"{collection}/{tenant.Value:D}";
+        return SelfServiceCall.Json(body, StatusCodes.Status201Created);
     }
+
+    /// <summary>A replayed creation's answer for a creator who has left the tenant: its id, and nothing they no longer see.</summary>
+    /// <param name="TenantId">The tenant the first create made.</param>
+    private sealed record CreatedTenantId([property: JsonPropertyName("tenantId")] Guid TenantId);
 
     private static async Task<IResult> MembershipAsync(SelfServiceCall call, TenantId tenant) =>
         await call.Store.FindMembershipAsync(call.Person, tenant, call.Ct).ConfigureAwait(false) is { } membership

@@ -130,9 +130,9 @@ The end-to-end suite changes none of these for its own sake:
   descriptor's `access` grants the `admin` role.
 - There is no debug route, no shortened constant and no clock control.
 
-A before-write hook has a 250 ms wall-clock budget, and that budget includes the first run's JIT. On a heavily loaded
-machine, the first write after a cold start can exceed it (#519). The hooks here are kept cheap for that reason: a read
-by id, and a time zone loaded at start.
+A before-write hook has a 250 ms wall-clock budget. Its cold runs — its first run, and its first run that reads or writes
+through `write.Transaction` — get ten times that, at most 5 s, because they also pay for JIT compilation and first
+queries (#519). The hooks here are kept cheap anyway: a read by id, and a time zone loaded at start.
 
 ## The sink, and the egress guard
 
