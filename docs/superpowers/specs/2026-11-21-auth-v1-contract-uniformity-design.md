@@ -179,6 +179,11 @@ tenant object to align it with. Introducing one here would create the very incon
 
 ## 3. Item 2 — one answer for the wrong kind of credential
 
+> **Implemented** (slice 1, accepted as recommended). One reading, `CallerResolution.PersonBearer`, serves
+> `UserEndpoints` and `SelfServicePerson`; its refusal switch is private and names every channel. Held by
+> `PersonBearerTests` (the reading, row by row), `TokenRoutesTests.An_api_key_of_any_kind_is_one_bare_bearer_challenge_on_every_person_only_route`
+> (16 routes × 6 keys → one answer) and `TenantRoutesTests.A_bearer_a_host_resolves_to_no_person_is_403_naming_no_route`.
+
 ### 3.1 Current state, after #539
 
 #539 moved the arms the person-only sites share into one helper, `CallerResolution.PersonOnlyRefusal`

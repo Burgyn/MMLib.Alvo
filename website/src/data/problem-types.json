@@ -133,7 +133,8 @@
   "unauthenticated": {
     "causes": [
       "A credential was presented and cannot be used: an unknown, revoked or expired key, a wrong secret, or a key not issued for the requested tenant.",
-      "A request with no credential at all is not refused with this slug: it runs as an anonymous caller, and the rules decide."
+      "A request with no credential at all is not refused with this slug: it runs as an anonymous caller, and the rules decide.",
+      "On a route only a signed-in person reaches (`/auth/v1/user`, `/logout`, and every tenant, member, invitation and token route but the invitation preview), anything but a person's access token is refused with this slug and a bare `Bearer` challenge: no credential, or an API key, a personal token or a service token."
     ],
     "fix": "Send a valid key in the header the `WWW-Authenticate` challenge names, `X-Alvo-Api-Key` by default.",
     "violationCodes": [],

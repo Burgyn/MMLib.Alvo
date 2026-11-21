@@ -669,6 +669,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **An API key on a person-only `/auth/v1` route is `401`, not `403`** (#542 item 2). Every route only a signed-in
+  person reaches — the tenant, member and token routes, managing and accepting invitations (not the anonymous preview),
+  and `/user` and `/logout` — authenticates with a person's Bearer token alone. Any `X-Alvo-Api-Key` there — a
+  configured key, a personal or a service token, live or not — is now the answer no credential gets: `401`
+  `unauthenticated` with a bare `WWW-Authenticate: Bearer` (RFC 6750 §3.1) and the detail *"This route answers a
+  signed-in person only. Present the access token sign-in issued as 'Authorization: Bearer <token>'; an API key, a
+  personal token or a service token does not reach it."* The self-service routes answered `403 forbidden` *"Only a
+  signed-in person manages tenants. …"*, the token routes included; `/user` and `/logout` were already `401` and change
+  only that detail's last clause. A key beside a Bearer stays `401` `Bearer error="invalid_request"`, with a detail
+  that now names both and asks for the Bearer alone. `403 forbidden` stays for a Bearer token a host's own person
+  resolver resolves to a caller who is not a person, with a sentence that names no route. **Docs:** the tokens and
+  tenants guides, `docs/architecture/accounts.md`, the design
+  `docs/superpowers/specs/2026-11-21-auth-v1-contract-uniformity-design.md` §3.
 - **A descriptor that lists `google` must say who may sign up** (accounts slice S2). `auth.providers` naming `google`
   without `auth.signUp` was applied with an unhonoured-subsystem warning; it is now refused at `/auth/signUp`, on every
   host, whether or not it adds accounts. Add `"signUp": { "mode": "open" }` or `{ "mode": "invitationOnly" }`.

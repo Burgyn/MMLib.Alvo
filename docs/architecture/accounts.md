@@ -402,8 +402,9 @@ A personal membership is honoured only while `personalTenant` is applied, and on
 
 All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
 other auth routes. The gates run in this order, so a stranger learns nothing about the descriptor: the person
-(an API key → 403 `forbidden`; none → 401 `Bearer`; malformed or ambiguous → 401 `invalid_request`; unusable → 401
-`invalid_token`), then the feature (404 `feature-disabled` with `descriptorKey`), then the body (415, then 422
+(none, or an API key of any kind → 401 with the bare `Bearer` challenge, since Bearer is these routes' only scheme (#542);
+malformed or ambiguous → 401 `invalid_request`; unusable → 401 `invalid_token`; a Bearer a host's own resolver
+resolves to a non-person → 403 `forbidden`), then the feature (404 `feature-disabled` with `descriptorKey`), then the body (415, then 422
 `validation`), then the caller's own membership (404 `not-found` when it is not one the descriptor honours), then the
 registry.
 
@@ -436,7 +437,7 @@ A name is trimmed, 1–100 code points, no control character — the display nam
 | Two devices signing a new person in at once: one account, one personal tenant, one owner (Review Focus 4) | `AccountStoreFacts.Two_concurrent_first_sign_ins_create_one_personal_tenant` |
 | Nobody changes their own membership (AC4); a personal tenant has exactly one member | `MemberRoutesTests.Nobody_patches_their_own_membership`; `TenancyEngineFacts.A_personal_tenant_takes_no_members`; `TenantStoreFacts.A_personal_tenant_refuses_every_member_change` |
 | A non-member gets the unknown id's 404 on every route; a membership the descriptor does not honour is managed by no route | `MemberRoutesTests.A_non_member_gets_404_on_every_member_route`, `…An_unhonoured_personal_membership_is_managed_by_no_route`; `TenantRoutesTests.A_non_member_and_an_unknown_tenant_get_the_same_404` |
-| Person only: an API key is 403, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_403_and_no_credential_is_a_bearer_challenge`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
+| Person only: an API key is the bare Bearer challenge no credential gets, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_the_same_bearer_challenge_as_no_credential`, `…A_bearer_a_host_resolves_to_no_person_is_403_naming_no_route`, `TokenRoutesTests.An_api_key_of_any_kind_is_one_bare_bearer_challenge_on_every_person_only_route`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
 | `feature-disabled` names its key on all six routes; creating is rate-limited and only creating | `TenantRoutesTests.Without_self_service_every_route_is_404_feature_disabled`, `…Without_create_tenants_creating_is_404_naming_its_key`, `…Tenant_creation_answers_429_after_its_limit` |
 | An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10); a banned person holds none while banned (stack review B-M1) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests`; `TenantStoreFacts.A_banned_person_s_memberships_are_not_found_until_the_account_is_enabled` (both engines; red on both without the account condition) |
 | The registry is the tenant list only under `selfService` and only when the host registers none (D13) | `TenantCatalogsTests` |
@@ -457,8 +458,10 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   never stored.
 - **D6** — the personal tenant is created in the sign-in and refresh transactions; a Bearer request in the gap after
   `personalTenant` is applied (at most one access-token lifetime) has none.
-- **D7** — only a person calls the routes (an API key is 403); a non-member is 404 like an unknown id; nobody changes
-  their own membership.
+- **D7** — only a person calls the routes; a non-member is 404 like an unknown id; nobody changes their own membership.
+  **Revised by #542 item 2:** an API key was 403 here and 401 on `/user`; every person-only route now answers it the
+  401 with the bare `Bearer` challenge (RFC 6750 §3.1's "unsupported authentication method"), through one reading,
+  `CallerResolution.PersonBearer`. 403 stays for a credential of the route's own scheme that is insufficient.
 - **D8** — three new problem types: `feature-disabled` (404, `descriptorKey`), `last-owner` (409), `tenant-limit` (409,
   `maxPerAccount`); a personal tenant's membership change is 409 `conflict`.
 - **D9** — `maxPerAccount` counts the shared tenants the account *created*, for its lifetime: tenants cannot be deleted
@@ -638,7 +641,7 @@ after CORS and no-store and before any other gate. While `tenancy.selfService.in
 | `GET /tenants/{id}/invitations` | an owner | 200, newest first, never a `code`; `status` is `revoked` > `usedUp` > `expired` > `active` |
 | `DELETE /tenants/{id}/invitations/{invitationId}` | any owner of the tenant | 204, also the second time (the first `revoked_at` is kept); 404 for another tenant's id |
 | `POST /invitations/preview` `{code}` | anyone, no credential read | 200 `{tenantName, inviterName, roles, isOwner, expiresAt, emailBound}`; the dead 404 |
-| `POST /invitations/accept` `{code}` | a person (an API key → 403; none → 401 `Bearer`) | 200 the person's membership, for `Joined` and `AlreadyMember` alike; the dead 404 |
+| `POST /invitations/accept` `{code}` | a person (none, or any API key → 401 `Bearer`) | 200 the person's membership, for `Joined` and `AlreadyMember` alike; the dead 404 |
 | `POST /token` with `invitation_code` | the exchange | 200; 400 `invalid_grant` for a dead code; 400 `invalid_request` while invitations are off |
 
 For the owner routes, a member who is not an owner gets 403, and a non-member or an unknown tenant gets the same 404.
@@ -669,7 +672,7 @@ the code's hash.
 | An email-bound invitation admits only that address, only when trusted, in any case | `InvitationStoreFacts.An_email_bound_invitation_admits_only_that_trusted_email`; `InvitationAcceptTests.An_email_bound_invitation_admits_its_trusted_address_in_any_case`; `InvitationSignUpTests.An_email_bound_invitation_signs_up_only_its_trusted_address` |
 | An invitation grants only assignable roles, never `admin`; a role dropped from `assignableRoles` is gone on the next request (AC4) | `InvitationRoutesTests.A_role_outside_assignable_roles_is_refused_and_nothing_is_created`; `InvitationRequestTests`; `InvitationEngineFacts.An_invitation_grants_only_assignable_roles_and_never_admin` |
 | An invited tenant role never reaches a global entity or management | `InvitationEngineFacts.An_invited_tenant_role_never_reaches_a_global_entity_or_management` |
-| Only owners invite, list and revoke; a non-member's 404 equals an unknown tenant's; accept needs a person | `InvitationRoutesTests.A_member_who_is_not_an_owner_cannot_invite_list_or_revoke`, `…A_non_member_and_an_unknown_tenant_get_the_same_404`, `…An_api_key_is_403_and_no_credential_is_a_bearer_challenge`; `InvitationAcceptTests.Accept_needs_a_person` |
+| Only owners invite, list and revoke; a non-member's 404 equals an unknown tenant's; accept needs a person | `InvitationRoutesTests.A_member_who_is_not_an_owner_cannot_invite_list_or_revoke`, `…A_non_member_and_an_unknown_tenant_get_the_same_404`, `…An_api_key_is_the_same_bearer_challenge_as_no_credential`; `InvitationAcceptTests.Accept_needs_a_person` |
 | `invitationOnly` creates an account only with a live code, verified after the subject token; domains still apply | `SignUpDecisionTests`; `InvitationSignUpTests.Without_a_code_a_new_person_is_refused_as_before`, `…A_code_from_a_refused_subject_token_is_never_consumed`, `…Allowed_email_domains_refuse_an_invited_outsider`, `…An_existing_person_with_a_dead_code_is_refused` |
 | The code is 128 bits, stored as its hash, shown once, never in a URL, a log, a `ToString` or a refusal (AC6) | `InvitationCodeTests`; `InvitationRoutesTests.An_owner_invites_and_the_code_is_answered_once`; `AccountsOpenApiTests.No_invitation_route_takes_the_code_in_its_url`; `SecretsNeverLoggedTests.No_invitation_code_appears_in_any_log` (the code whole, its random part and its hash, at Trace), `…No_error_body_echoes_a_presented_token` |
 | `feature-disabled` names `tenancy.selfService.invitations` on all five routes; a code on the exchange while off is `invalid_request`; all five are rate-limited | `InvitationRoutesTests.Without_invitations_every_route_is_404_naming_its_key`, `…Invitation_routes_answer_429_after_their_limit`; `InvitationAcceptTests.Without_invitations_preview_and_accept_are_404_naming_its_key`, `…Preview_and_accept_are_charged_the_invitations_budget`; `InvitationSignUpTests.A_code_while_invitations_are_off_is_invalid_request` |
@@ -854,8 +857,9 @@ section as tests, on SQLite and on PostgreSQL.
   a salt adds nothing to a 256-bit random secret (S4 D2's reasoning). It is in the 201 and in no list, refusal, log,
   `ToString` or URL.
 - **A token is an app credential, never a manager.** It cannot mint, list or revoke a token or call any self-service
-  route — 403, those are a person's acts — and the Management API refuses it with 403 even when its roles would pass an
-  `access` level (D9, which closes S1 D8).
+  route — those take a person's Bearer token alone, so a token there is 401 with the bare `Bearer` challenge (#542) — and
+  the Management API, whose scheme it does use, refuses it with 403 even when its roles would pass an `access` level
+  (D9, which closes S1 D8).
 - **The descriptor decides on every request** (D11). Remove `accessTokens` or switch one kind off, and the next request
   of every token of that kind is 401. Remove `selfService` — apply then needs `service` off too (D8) — and so is every
   service token's and every personal token's in a tenant, since no membership counts any more, while a tenantless
@@ -936,8 +940,8 @@ deliveries keep the tenant roles recorded at the event, bounded by `assignableRo
 ### The routes
 
 All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
-other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (any `X-Alvo-Api-Key`, a
-token included → 403 `forbidden`; none → 401 `Bearer`; a key beside a Bearer → 401 ambiguous); `auth.accessTokens`
+other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (none, or any `X-Alvo-Api-Key`, a
+token included → 401 `Bearer`; a key beside a Bearer → 401 `invalid_request`); `auth.accessTokens`
 (404 `feature-disabled`); then, for `POST`, whether this host would ever resolve a token (the same 404, with a sentence
 naming a replaced `IApiKeyStore`), the JSON body (415, then 422), the kind's own switch (404
 `feature-disabled` naming `auth.accessTokens.personal` or `.service`), the person's membership of the named tenant, and

@@ -1029,7 +1029,8 @@ endpoints; `Management`), not three copies.
   personal or service token in the wrong header (#539). It is read as its own channel with its value dropped, so
   neither resolver is handed it, and answered 401 `Bearer error="invalid_token"` with one fixed detail naming the
   API-key header — identical for every such string, live, revoked or made up, and echoing none of it. The self-service
-  routes and the sign-in package's own routes answer it the same way, through `CallerResolution.PersonOnlyRefusal`.
+  routes and the sign-in package's own routes answer it the same way, through `CallerResolution.PersonBearer`, the one
+  reading every person-only route shares — which also answers any API key there with the bare `Bearer` challenge (#542).
 - "A person resolver is registered" is read once, from the container's keyed-service lookup; a container that cannot
   answer counts as *not registered*, which is today's behaviour. Only a registration under exactly the person-resolver
   key counts: one under `KeyedService.AnyKey` answers for every key, so the lookup is also asked of a key nobody can
