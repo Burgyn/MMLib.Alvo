@@ -727,8 +727,8 @@ name: Mutation
 # runner rather than the shard. rules/auth/rest keeps 120 against a measured 41-47 min:
 # it grew 149 % in mutants since its last calibration and is the next leg to run out.
 # A too-TIGHT budget has the worse failure mode, and that asymmetry is why nothing here
-# is cut below ~2x: a cancelled shard never reaches its log-upload step, so there is
-# neither a score nor a log to read.
+# is cut below ~2x: a cancelled shard writes no report, so there is no score to read —
+# only a console log cut off mid-run (see the upload step for what IS captured).
 #
 # THREE BUDGETS WENT UP ON 2026-09-14, AGAINST THE DIRECTION OF THAT RULE, and the
 # reason is worth stating because it is not budget creep. Raising `additional-timeout`
@@ -931,7 +931,7 @@ jobs:
             suite: 194     # probed 2026-10-30 (was 142)
             timeout: 10     # measured ~20 s warm; the margin is cold checkout, setup-dotnet,
                             # `dotnet tool restore` and Stryker's own build, none of which this
-                            # workflow caches. A timed-out job is CANCELLED, which uploads no log
+                            # workflow caches. A timed-out job is CANCELLED, which writes no report
                             # and still files a tracking issue, so the tight-budget rule the other
                             # legs follow is the wrong trade on the one leg that must be believed.
             canary: canary
@@ -1006,7 +1006,7 @@ jobs:
                            # where both were measured on the same machine (31 -> 63 min). 459
                            # mutants at that rate is ~100 min on a 4-vCPU runner; 240 covers the
                            # extrapolation with margin, because the asymmetry still holds — a
-                           # cancelled shard uploads no log and yields no verdict at all. The first
+                           # cancelled shard writes no report and yields no verdict at all. The first
                            # post-merge run is the measurement that replaces this estimate.
           - name: data-ef-rest
             config: stryker-config.data-ef-rest.json
@@ -1046,9 +1046,9 @@ jobs:
             timeout: 300    # MEASURING BUDGET for the first run that can start at all (the config
                             # refused `log-to-file` until 2026-11-21). The estimate was 120: one ~11 s
                             # assembly, up to ~765 mutants at concurrency 4 is ~45 min on a 10-core box,
-                            # ~60 on a 4-vCPU runner, and 2x that. Raised because a cancelled leg uploads
-                            # no debug log, and commands-http's TestHost suite spent ~6 min per mutant
-                            # erroring. Cut to 2x the first run's wall clock.
+                            # ~60 on a 4-vCPU runner, and 2x that. Raised because a cancelled leg writes
+                            # no report, so no score and no first measurement, and commands-http's TestHost
+                            # suite spent ~6 min per mutant erroring. Cut to 2x the first run's wall clock.
             debug-log: true
           - name: accounts-store
             config: stryker-config.accounts-store.json
@@ -1166,12 +1166,15 @@ jobs:
       # which is not linkable from an issue and is truncated for a long run — so upload it.
       # `always()` so it survives the shard failing, which is the only case anyone wants it.
       #
-      # WHAT THIS DOES NOT COVER, deliberately stated: a shard killed by `timeout-minutes`
-      # is CANCELLED, and a cancelled job does not run its remaining steps, `always()`
-      # included. So the one outcome with no verdict at all — #98's whole subject — is also
-      # the one whose log is not captured here. Nothing short of streaming the log
-      # elsewhere fixes that, and it is not worth it: a timeout needs the shard's budget
-      # looked at, not its log read.
+      # WHAT THIS DOES AND DOES NOT COVER ON A TIMEOUT. This comment used to say a shard
+      # killed by `timeout-minutes` runs none of its remaining steps, `always()` included.
+      # Run 44834820709 refutes it: rules/auth/rest and data-ef-rest were cancelled at their
+      # 120-minute budgets and this step still ran and uploaded `stryker-output.log` for
+      # both. What a cancelled shard does NOT have is `mutation-report.json` — Stryker writes
+      # it only at the end — and its console log holds the discovery counts ("Number of
+      # tests found", "N total mutants will be tested") but no progress, since the progress
+      # reporter does not survive `tee`. So the counts can be re-probed from a timed-out
+      # leg; its score and its share of mutants done cannot.
       - name: Upload the Stryker log
         if: always()
         uses: actions/upload-artifact@v7
