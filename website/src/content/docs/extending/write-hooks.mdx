@@ -122,6 +122,12 @@ return — it shares the write's connection — so a hook that ignores its token
 and on SQLite the database's one writer lock with it, past even the write's 30-second limit. Pass the token on. An
 exception escaping a hook fails the write with 500 `hook-failed`, reason `exception`; its message stays in your log.
 
+A hook's first run after the host starts is slower than every run after it: it also pays for JIT compilation, type loading and its
+first queries. So until that first run has ended, a hook's runs get **ten times** its limit — at most 5 s, never less than
+the limit itself (2.5 s for the 250 ms default). Once one run has ended, however it ended, every later run has the limit
+you set. A cold run admitted past its limit is logged at `Information`, so a slow first path stays visible. A timed-out
+run is never retried: that would run your code twice.
+
 A hook's `when` has a limit of its own: the [custom CEL functions](/guides/custom-cel-functions/) it calls share one
 budget, 250 ms by default (`Alvo:Extensions:CelFunctionBudget`), and one that runs past it fails the hook — 500
 `hook-failed`, reason `exception`. A built-in function in a validate or before-write `when` that refuses a field the

@@ -28,6 +28,9 @@ public abstract class WriteHookFacts
     private const string Bookings = "bookings";
     private static readonly TimeSpan _immediately = TimeSpan.FromSeconds(10);
 
+    /// <summary>Past the 2.5 s a 250 ms hook's first run gets as its cold-start allowance (#519), so a first run overruns too.</summary>
+    private static readonly TimeSpan _pastTheColdStartAllowance = TimeSpan.FromSeconds(3);
+
     protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     public static TheoryData<string, AlvoWriteRejectionKind, string> Stages => new()
@@ -184,7 +187,7 @@ public abstract class WriteHookFacts
         await using var alvo = await StartAsync(database, alvo => alvo.Entity(Bookings, b => b.BeforeWrite("slow", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
         {
             await write.Transaction.CreateAsync("audits", Audit(write.Caller, "before the overrun"), ct);
-            clock.Advance(TimeSpan.FromMilliseconds(300));
+            clock.Advance(_pastTheColdStartAllowance);
             try
             {
                 await write.Transaction.GetAsync(Bookings, Guid.NewGuid(), ct);

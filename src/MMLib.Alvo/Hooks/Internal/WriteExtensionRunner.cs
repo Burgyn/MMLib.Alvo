@@ -27,6 +27,8 @@ internal sealed class WriteExtensionRunner(
 {
     private static readonly IReadOnlyDictionary<string, object?> _none = new Dictionary<string, object?>(StringComparer.Ordinal);
 
+    private readonly HookColdStart _coldStart = new();
+
     public bool Validates(string entity, AlvoWriteOperation operation) => Registered(entity, operation, inTransaction: false);
 
     public bool RunsInTransaction(string entity, AlvoWriteOperation operation) => Registered(entity, operation, inTransaction: true);
@@ -213,7 +215,8 @@ internal sealed class WriteExtensionRunner(
     private async Task<HookRun> RunAsync(
         BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, CancellationToken cancellationToken)
     {
-        using var deadline = new CancellationTokenSource(hook.Registration.Settings.Timeout, time);
+        var budget = _coldStart.Budget(hook.Id, hook.Registration.Settings.Timeout);
+        using var deadline = new CancellationTokenSource(budget, time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         var run = NewRun(hook, invocation, stage, catalog, linked.Token);
         using var activity = HookTelemetry.Start(hook.Id, invocation, stage);
@@ -230,8 +233,29 @@ internal sealed class WriteExtensionRunner(
             HookTelemetry.Finish(activity, hook.Id, HookTelemetry.Failed, time.GetElapsedTime(started), run.Operations);
             throw Escaped(run, escaped, deadline.IsCancellationRequested, cancellationToken);
         }
+        finally
+        {
+            _coldStart.Ended(hook.Id);
+        }
 
-        return await ConcludedAsync(run, hook, catalog, activity, time.GetElapsedTime(started), deadline.IsCancellationRequested).ConfigureAwait(false);
+        var elapsed = time.GetElapsedTime(started);
+        return await ConcludedAsync(run, hook, catalog, activity, elapsed, Overran(hook, elapsed, budget, deadline.IsCancellationRequested)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether a run that returned overran the time it was given — its deadline fired, or it returned past it having ignored its
+    /// token. A cold run admitted past the hook's own timeout is logged, so a slow first path stays visible.
+    /// </summary>
+    private bool Overran(BoundWriteHook hook, TimeSpan elapsed, TimeSpan budget, bool deadlinePassed)
+    {
+        var overran = deadlinePassed || elapsed > budget;
+        var timeout = hook.Registration.Settings.Timeout;
+        if (!overran && elapsed > timeout)
+        {
+            HookLog.ColdRunAdmitted(logger, hook.Id, elapsed.TotalMilliseconds, timeout.TotalMilliseconds);
+        }
+
+        return overran;
     }
 
     /// <summary>What an exception escaping a hook becomes (Ruling 12): its run's own failure, depth or a nested hook's failure unchanged, a timeout, or <c>exception</c>.</summary>
@@ -243,11 +267,11 @@ internal sealed class WriteExtensionRunner(
         : Fail(run.Id, HookFailedException.Exception, escaped);
 
     private async Task<HookRun> ConcludedAsync(
-        HookRun run, BoundWriteHook hook, PolicyCatalog? catalog, Activity? activity, TimeSpan elapsed, bool deadlinePassed)
+        HookRun run, BoundWriteHook hook, PolicyCatalog? catalog, Activity? activity, TimeSpan elapsed, bool overran)
     {
         var rejection = run.Rejections.Winner();
         var failure = run.Failure
-            ?? (deadlinePassed || elapsed > hook.Registration.Settings.Timeout ? TimedOut(run) : null)
+            ?? (overran ? TimedOut(run) : null)
             ?? (rejection is null ? InvalidSet(run, catalog) : null);
         if (failure is not null)
         {

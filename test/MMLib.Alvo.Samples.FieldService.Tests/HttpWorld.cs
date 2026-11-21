@@ -27,9 +27,9 @@ internal sealed class HttpWorld : IAsyncDisposable
     private const string KeySecret = "s3cret-value-long-enough-for-the-floor";
 
     /// <summary>
-    /// Runs both service-hours hooks once per process on a fake clock before any host here serves a request. A before-write
-    /// hook's 250 ms budget is wall-clock and includes the first run's JIT, which a loaded test machine (ring0 runs every
-    /// module at once) can exceed — #519; once warm the hooks take a few milliseconds. The product's budget is unchanged.
+    /// Runs both service-hours hooks once per process on a fake clock before any host here serves a request, so the
+    /// process's JIT is paid before the first test. Since #519 the runner itself gives each hook's first run in a host a
+    /// cold-start allowance (ten times its 250 ms, at most 5 s); this warm-up predates that and only keeps first runs short.
     /// </summary>
     private static readonly Lazy<Task> _warmUp = new(WarmUpAsync);
 
