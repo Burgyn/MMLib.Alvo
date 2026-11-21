@@ -232,6 +232,9 @@ public sealed class UserEndpointsTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         response.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer error=\"invalid_request\"");
+        (await response.ReadProblemDetailAsync()).ShouldBe(
+            "The request presents both X-Alvo-Api-Key and a bearer token. This route answers a signed-in person: "
+            + "present only the bearer token.");
     }
 
     private static async Task<JsonObject> OkAsync(HttpResponseMessage response)

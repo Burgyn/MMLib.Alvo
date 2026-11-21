@@ -258,27 +258,42 @@ internal static class CallerResolution
     };
 
     /// <summary>
-    /// The 401 a route only a signed-in person reaches answers for every reading but a usable Bearer token or an API key:
-    /// a malformed or ambiguous Bearer, an app token in the wrong header, or nothing at all.
+    /// The Bearer token a route only a signed-in person reaches is asked with, or the 401 it answers instead — the one
+    /// reading the self-service routes and the sign-in package's own share (#542 item 2).
     /// </summary>
     /// <remarks>
-    /// One home for the arms the person-only sites — the self-service routes and the sign-in package's own — share, so an
-    /// app token sent as a Bearer is answered there exactly as <see cref="AdmitAsync"/> answers it everywhere else. What a
-    /// site answers an API key with, or does with a usable Bearer, stays the site's.
+    /// <para>
+    /// <b>Every reading but a usable Bearer is a 401</b>, each with a Bearer challenge: these routes authenticate with
+    /// Bearer alone, so an API key of any kind — configured, personal or service, live or not — is RFC 6750 §3.1's
+    /// "unsupported authentication method", never resolved and never told it is insufficient. An app token sent as a
+    /// Bearer is answered exactly as <see cref="AdmitAsync"/> answers it everywhere else (#539).
+    /// </para>
+    /// <para>What a site does with the token it returns — resolve it, judge the person — stays the site's.</para>
     /// </remarks>
-    /// <param name="channel">The channel <see cref="Read"/> decided.</param>
-    /// <param name="options">The API-key header name an app token's refusal names.</param>
-    internal static IResult PersonOnlyRefusal(CredentialChannel channel, AlvoAuthOptions options)
+    /// <param name="request">The request to read.</param>
+    /// <param name="options">The header names to read, and the one an app token's refusal names.</param>
+    /// <param name="personRegistered">Whether a person resolver is registered.</param>
+    /// <returns>Exactly one of the token and the refusal.</returns>
+    internal static (string? Token, IResult? Refusal) PersonBearer(
+        HttpRequest request, AlvoAuthOptions options, bool personRegistered)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        return channel switch
-        {
-            CredentialChannel.MalformedBearer or CredentialChannel.Ambiguous =>
-                ProblemResultFactory.BearerUnauthenticated(InvalidRequest),
-            CredentialChannel.AppTokenBearer => ProblemResultFactory.AppTokenAsBearer(options.HeaderName),
-            _ => ProblemResultFactory.BearerRequired(),
-        };
+        var credential = Read(request, options, CredentialSurface.Data, personRegistered);
+        return credential.Channel == CredentialChannel.Bearer
+            ? (credential.Value, null)
+            : (null, PersonOnlyRefusal(credential.Channel, options));
     }
+
+    /// <summary>The 401 a person-only route answers for <paramref name="channel"/>, any reading but a usable Bearer.</summary>
+    /// <param name="channel">The channel <see cref="Read"/> decided.</param>
+    /// <param name="options">The API-key header name the ambiguous and the app-token refusals name.</param>
+    private static IResult PersonOnlyRefusal(CredentialChannel channel, AlvoAuthOptions options) => channel switch
+    {
+        CredentialChannel.MalformedBearer => ProblemResultFactory.BearerUnauthenticated(InvalidRequest),
+        CredentialChannel.Ambiguous => ProblemResultFactory.PersonOnlyAmbiguous(options.HeaderName),
+        CredentialChannel.AppTokenBearer => ProblemResultFactory.AppTokenAsBearer(options.HeaderName),
+        CredentialChannel.ApiKey or CredentialChannel.None => ProblemResultFactory.BearerRequired(),
+        _ => throw new InvalidOperationException($"A person-only route has no answer for the {channel} reading."),
+    };
 
     /// <summary>Whether this surface, under these options, reads <c>Authorization</c> at all (D7).</summary>
     /// <param name="options">The API-key header name, which keeps <c>Authorization</c> when it names it.</param>

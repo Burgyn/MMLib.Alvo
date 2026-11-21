@@ -143,6 +143,7 @@ internal static class TokenRoutes
         }
 
         var header = call.Http.RequestServices.GetRequiredService<IOptions<AlvoAuthOptions>>().Value.HeaderName;
-        return SelfServiceCall.Json(AppTokenResponse.From(outcome.Token!, secret.Presented, header), StatusCodes.Status201Created);
+        return SelfServiceCall.Json(
+            AppTokenResponse.From(outcome.Token!, secret.Presented, header, call.Now), StatusCodes.Status201Created);
     }
 }

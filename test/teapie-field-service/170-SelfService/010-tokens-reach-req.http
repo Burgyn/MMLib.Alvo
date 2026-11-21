@@ -1,6 +1,7 @@
-### A token cannot mint a token: minting is something a signed-in person does
+### A token cannot mint a token: minting is something a signed-in person does, and a person-only route authenticates
+### with Bearer alone, so any API key there is the bare Bearer challenge (#542)
 # @name BillingMintsAToken
-## TEST-EXPECT-STATUS: [403]
+## TEST-EXPECT-STATUS: [401]
 POST {{fsBaseUrl}}/auth/v1/tokens
 X-Alvo-Api-Key: {{BillingToken}}
 Content-Type: application/json

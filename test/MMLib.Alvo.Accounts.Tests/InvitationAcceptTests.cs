@@ -51,7 +51,9 @@ public sealed class InvitationAcceptTests
         anonymous.StatusCode.ShouldBe(HttpStatusCode.OK, text);
         anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
         var expires = team.World.Clock.GetUtcNow().AddDays(7).AddMinutes(-1).ToString("yyyy-MM-ddTHH:mm:ss+00:00", CultureInfo.InvariantCulture);
-        text.ShouldBe($$"""{"tenantName":"Acme","inviterName":"Ada Lovelace","roles":["dispatcher","technician"],"isOwner":false,"expiresAt":"{{expires}}","emailBound":true}""");
+        text.ShouldBe($$"""{"tenantName":"Acme","createdBy":{"name":"Ada Lovelace"},"roles":["dispatcher","technician"],"isOwner":false,"expiresAt":"{{expires}}","emailBound":true}""");
+        var creator = JsonNode.Parse(text)!["createdBy"]!.AsObject();
+        creator.ContainsKey("id").ShouldBeFalse("an anonymous preview never names an account id (#542)");
         keyed.StatusCode.ShouldBe(HttpStatusCode.OK, await keyed.ReadTextAsync());
         (await keyed.ReadTextAsync()).ShouldBe(text);
     }
@@ -198,10 +200,8 @@ public sealed class InvitationAcceptTests
         using var anonymous = await team.World.Api.SendAsync(HttpMethod.Post, AcceptPath, body: Code(code));
         using var keyed = await team.World.Api.SendAsync(HttpMethod.Post, AcceptPath, integration, body: Code(code));
 
-        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await anonymous.ReadTextAsync());
-        anonymous.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
-        keyed.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await keyed.ReadTextAsync());
-        (await keyed.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+        await TenantRoutesTests.BearerChallengeAsync(anonymous);
+        await TenantRoutesTests.BearerChallengeAsync(keyed);
         using var preview = await PreviewAsync(team.World, code);
         preview.StatusCode.ShouldBe(HttpStatusCode.OK, "nothing was consumed");
     }

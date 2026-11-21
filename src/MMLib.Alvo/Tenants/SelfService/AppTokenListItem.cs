@@ -19,7 +19,7 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <param name="TenantId">The tenant it acts in, or <see langword="null"/> for a tenantless personal token.</param>
 /// <param name="Roles">A service token's tenant roles; empty for a personal one.</param>
 /// <param name="Scopes">What it may read and write.</param>
-/// <param name="MintedBy">The account that minted it.</param>
+/// <param name="CreatedBy">The person who minted it, under the one key every answer names a creator with (#542 item 1).</param>
 /// <param name="CreatedAt">When it was minted.</param>
 /// <param name="ExpiresAt">When it expires.</param>
 /// <param name="LastUsedAt">When it last authenticated a request, to the minute, or <see langword="null"/> if never.</param>
@@ -32,7 +32,7 @@ internal sealed record AppTokenListItem(
     [property: JsonPropertyName("tenantId")] Guid? TenantId,
     [property: JsonPropertyName("roles")] IReadOnlyList<string> Roles,
     [property: JsonPropertyName("scopes")] IReadOnlyList<string> Scopes,
-    [property: JsonPropertyName("mintedBy")] AppTokenMinter MintedBy,
+    [property: JsonPropertyName("createdBy")] PersonReference CreatedBy,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
     [property: JsonPropertyName("lastUsedAt")] DateTimeOffset? LastUsedAt,
@@ -61,7 +61,7 @@ internal sealed record AppTokenListItem(
             token.Tenant?.Value,
             token.Roles,
             token.Scopes,
-            new AppTokenMinter(token.MintedBy.Value, token.MinterName),
+            new PersonReference(token.MintedBy.Value, token.MinterName),
             token.CreatedAt,
             token.ExpiresAt,
             token.LastUsedAt,
@@ -72,10 +72,3 @@ internal sealed record AppTokenListItem(
     private static string StatusOf(AppTokenView token, DateTimeOffset now) =>
         token.RevokedAt is not null ? RevokedStatus : token.ExpiresAt <= now ? ExpiredStatus : ActiveStatus;
 }
-
-/// <summary>The account that minted an app token: its id and display name, never an email.</summary>
-/// <param name="Id">The account id.</param>
-/// <param name="DisplayName">The account's display name, or <see langword="null"/>.</param>
-internal sealed record AppTokenMinter(
-    [property: JsonPropertyName("id")] Guid Id,
-    [property: JsonPropertyName("displayName")] string? DisplayName);
