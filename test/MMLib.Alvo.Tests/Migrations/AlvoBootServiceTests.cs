@@ -377,10 +377,6 @@ public sealed class AlvoBootServiceTests
         world.PrimedEntities.ShouldBeEmpty();
     }
 
-    /// <summary>
-    /// A descriptor stage 0 refuses keeps its type and is tagged with the text an operator reads — the running build, the
-    /// validation's pointed text, and both fixes — which is also recorded for a probe and logged (#547).
-    /// </summary>
     [Fact]
     public async Task A_descriptor_stage_zero_refuses_is_tagged_with_the_refusal_an_operator_reads()
     {

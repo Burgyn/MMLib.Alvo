@@ -329,26 +329,6 @@ public class AlvoHostConfigurationRefusalTests
         captured.ToString().ShouldContain("Alvo__Admin__BootstrapPasswordFile");
     }
 
-    /// <summary>
-    /// A mounted descriptor stage 0 refuses is a sentence on stderr naming what is wrong, the running build and the two
-    /// fixes, and a deliberate <c>78</c> (#340, #547) — whether the schema validation refuses it (a key a newer Alvo
-    /// wrote) or the mapper does (a format nobody declared).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The failure the load gate's base arm met, reproduced.</b> An older image handed a newer descriptor refused it
-    /// in stage 0 with a <see cref="DescriptorValidationException"/>, which escaped <c>Main</c>, and the container
-    /// exited 139 — the crash-shaped code #132 removed for every other refusal. An unknown format escaped the same way,
-    /// as the mapper's <see cref="InvalidDataException"/>. Stage 0 now raises both as a validation refusal tagged with
-    /// the text an operator reads, which is what the host presents.
-    /// </para>
-    /// <para>
-    /// A file database of the fact's own, so the start cannot reach the image's <c>/alvo/data</c> default — and so the
-    /// identity package, whose own hosted service creates its tables before Alvo's boot runs, writes somewhere disposable.
-    /// </para>
-    /// </remarks>
-    /// <param name="fixture">The refused descriptor, under <c>descriptors/</c>.</param>
-    /// <param name="named">What the refusal must name.</param>
     [Theory]
     [InlineData("host-boot-from-a-newer-alvo.alvo.json", "/auth/passkeys")]
     [InlineData("host-boot-unknown-format.alvo.json", "no-such-format")]
@@ -374,11 +354,6 @@ public class AlvoHostConfigurationRefusalTests
         reported.ShouldContain("newer Alvo");
     }
 
-    /// <summary>
-    /// A validation refusal the boot raises from the apply — rows a new check would break, an overlap the database could
-    /// not count — carries no stage-0 tag and is not claimed as a misconfiguration: it depends on the database and can
-    /// be transient (#547). The tagged one is, and what is printed is the tag's text.
-    /// </summary>
     [Fact]
     public void Only_a_descriptor_refusal_the_boot_tagged_as_stage_zero_is_a_misconfiguration()
     {
@@ -391,7 +366,6 @@ public class AlvoHostConfigurationRefusalTests
         AlvoHostExit.Describe(tagged).ShouldBe("Alvo cannot start: the operator's text.");
     }
 
-    /// <summary>The host spells the tag's key itself, because it does not reference core internals; this pins the two.</summary>
     [Fact]
     public void The_host_reads_the_tag_under_the_key_the_boot_writes_it()
         => AlvoHostExit.StartupRefusalDataKey.ShouldBe(MMLib.Alvo.Migrations.Internal.DescriptorBootPlan.StartupRefusalDataKey);
@@ -399,7 +373,6 @@ public class AlvoHostConfigurationRefusalTests
     private static DescriptorValidationException RowsBreakACheck() => new(new DescriptorValidationResult(
         [new("/entities/orders/fields/total/validations/0", "3 rows break it.", FixSuggestion: null, DescriptorValidationSeverity.Error)]));
 
-    /// <summary>Runs the shipped entry point with stderr captured, restoring it whatever happens.</summary>
     private static async Task<int> RunCapturingStderrAsync(StringWriter captured, params string[] args)
     {
         var original = Console.Error;

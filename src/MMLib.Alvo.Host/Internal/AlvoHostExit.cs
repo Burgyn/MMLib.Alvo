@@ -127,7 +127,10 @@ internal static class AlvoHostExit
 
     private static string ParagraphBreak => Environment.NewLine + Environment.NewLine;
 
-    /// <summary>The text the boot tagged a stage-0 descriptor refusal with, or <see langword="null"/> when it is untagged.</summary>
+    /// <summary>
+    /// The operator's text, only when the tag is a string: anything else under the key — absent, or put there by code that
+    /// is not the boot — is not a refusal the boot wrote for an operator, and is not claimed as <c>EX_CONFIG</c>.
+    /// </summary>
     /// <param name="refused">The refusal.</param>
     private static string? OperatorRefusal(DescriptorValidationException refused) =>
         refused.Data[StartupRefusalDataKey] as string;

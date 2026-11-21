@@ -219,8 +219,8 @@ wrong shows up when the descriptor is applied, or in the log:
 | Apply | A condition or placeholder reads a field listed in `events.exclude`. | Stop reading it, or remove it from `events.exclude`. `changed(field)` is still allowed. |
 | Log | *failed to deliver … on attempt N* | Check the endpoint; a non-public address needs `Alvo:Events:WebhookAllowedNetworks`. |
 
-An apply refusal stops the container from coming back with exit code 78, and the reason is at the end of
-`docker compose logs alvo`.
+A refusal from the *Apply* rows above stops the container from coming back with exit code 78, and the reason is at
+the end of `docker compose logs alvo`.
 
 ## Reference
 

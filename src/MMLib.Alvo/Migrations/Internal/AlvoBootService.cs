@@ -549,7 +549,11 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         }
     }
 
-    /// <summary>Records a project-less stage-0 refusal for a probe and the log, before it propagates.</summary>
+    /// <summary>
+    /// Records a project-less stage-0 refusal for a probe and the log, and has to do it before the refusal propagates:
+    /// <see cref="StartingAsync"/> passes an <see cref="AlvoStartupRefusedException"/> and a tagged descriptor refusal
+    /// through untouched, so that it cannot overwrite a project-scoped failure — nothing records them after this.
+    /// </summary>
     /// <param name="refusal">What the operator reads.</param>
     private void RecordTheRefusal(string refusal)
     {

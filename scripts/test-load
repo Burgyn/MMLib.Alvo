@@ -255,7 +255,7 @@ build_hooks_image() {
 # The alvo service is recreated with another arm's image while PostgreSQL stays put; each arm serves
 # its own database and descriptor (docker-compose.load.yml says why), each as it shipped. While the PR
 # leaves seed.sql and the descriptor alone, both databases hold the same rows, because the seed is
-# ordinal-derived; a PR that changes either measures its own rows against the merge base's.
+# ordinal-derived; a PR that changes either measures its own rows against the baseline ref's.
 #   use_image IMAGE [DATABASE] [DESCRIPTOR]   — the last two default to the head arm's
 use_image() {
     local image="$1" database="${2:-$HEAD_DATABASE}" descriptor="${3:-$HEAD_DESCRIPTOR}"
@@ -268,7 +268,7 @@ use_image() {
         || stack_did_not_start "$image"
 }
 
-# The base arm: the merge base's image over its own database, serving its own descriptor.
+# The base arm: the --baseline-ref image over its own database, serving its own descriptor.
 use_base_arm() {
     use_image "$IMAGE_BASE" "$BASE_DATABASE" "$WORKTREE/examples/field-service/field-service.alvo.json"
 }

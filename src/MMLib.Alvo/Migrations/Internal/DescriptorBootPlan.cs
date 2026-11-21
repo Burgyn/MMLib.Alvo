@@ -111,7 +111,6 @@ internal sealed partial class DescriptorBootPlan
     /// </remarks>
     internal const string StartupRefusalDataKey = "MMLib.Alvo.StartupRefusal";
 
-    /// <summary>The running build of the framework that refused, as its assembly records it.</summary>
     private static string RunningVersion =>
         typeof(DescriptorBootPlan).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? "unknown";
