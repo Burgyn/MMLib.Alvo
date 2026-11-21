@@ -4,11 +4,12 @@ const string AppTokenRefusal =
     "Personal and service tokens are app credentials and never manage a project. "
     + "Use an operator session or a configured API key.";
 
-await tp.Test("A service token cannot mint a token.", async () =>
+await tp.Test("A service token cannot mint a token: the route asks for a person's Bearer token.", async () =>
 {
     var refused = tp.Responses["BillingMintsAToken"];
-    Equal("https://alvo.dev/errors/forbidden", await ProblemType(refused));
-    StartsWith("Only a signed-in person manages tenants.", (await BodyOf(refused)).GetProperty("detail").GetString());
+    Equal("https://alvo.dev/errors/unauthenticated", await ProblemType(refused));
+    Equal("Bearer", string.Join(", ", refused.Headers.WwwAuthenticate.Select(value => value.ToString())));
+    StartsWith("This route answers a signed-in person only.", (await BodyOf(refused)).GetProperty("detail").GetString());
     True(!(await refused.Content.ReadAsStringAsync()).Contains("alvo_svc_"), "BillingMintsAToken echoes no service secret");
 });
 
