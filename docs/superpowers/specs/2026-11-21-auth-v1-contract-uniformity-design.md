@@ -636,7 +636,7 @@ same child (S2 D6). None of this changes.
 > the Data API's slug for the same header — and the id-only replay); the refusal by `TokenRoutesTests` and
 > `InvitationRoutesTests.An_idempotency_key_is_refused_and_…`.
 
-#### `POST /tenants` — support, with the Data API's semantics
+#### `POST /tenants` — supported, with the Data API's semantics (built: 5a)
 
 - **What is recorded:** the tenant id, in `{prefix}_idempotency`, with scope `auth:tenants/<userId>`. The surface
   prefix follows the command ledger's `command:<name>/…`, so a Data API create and a tenant create holding the same
@@ -655,7 +655,12 @@ same child (S2 D6). None of this changes.
 - **Charged like the first request:** the replay spends a `Tenants` rate-budget unit, because the filter runs first.
   It spends **no** `maxPerAccount` slot, which is the point of the key.
 
-#### `POST /tokens` — support; a replay **rolls the secret of the same token**
+#### `POST /tokens` — **not supported: the key is refused** (built; option A, decided 2026-11-21)
+
+**As built:** a mint carrying `Idempotency-Key` is refused with 422 `malformed-query` and the fix — list, revoke the
+one you cannot account for, mint again — and writes nothing (`ShownOnceKey`). Refused rather than ignored, so a
+retried mint can never leave a second live secret while the client believes it replayed. The rest of this subsection
+is the analysis the decision was made on, kept as its record; **the roll it recommends was not built.**
 
 The secret is shown once and stored only as its SHA-256 (S5, spec §14 AC6), so a replay cannot repeat it. There are
 four ways to answer a replay:
@@ -667,12 +672,12 @@ four ways to answer a replay:
 | C — derive the secret (the refresh-token precedent, S2 D6: `alvo_rt_<id>_<HMAC(key, id)>`) | the identical body, re-derived | every token's secret becomes a function of one server key for its whole life (up to 365 days, not 10 s); a DB + key-file leak yields every live token |
 | **D — roll** (recommended) | `201`, the same `keyId`, `createdAt` and settings, and a **new** secret; the old hash is replaced in the same transaction, so the lost secret is dead | the replayed `token` differs from the first response's |
 
-**Recommendation: D.** It is the only option that stores no secret and leaves no live credential that nobody can
+**Recommendation (not taken): D.** It is the only option that stores no secret and leaves no live credential that nobody can
 account for. It is also the Data API's own philosophy: Alvo replays *the state now*, never a stored rendering
 (`AlvoIdempotency`'s remarks). It satisfies the draft's §2.6 "a response consistent with the request being completed".
 Exactly one token exists for the key, and the caller holds a secret that works for it.
 
-**The roll's rules:**
+**The roll's rules (as proposed, not built):**
 
 - **Same locks and the same session re-read as a mint.** The roll takes the account row, then the session, then the
   tenant: the A-I1 order (`accounts.md`, *The stack review's fixes*). A replay from a session a reuse has ended writes
@@ -691,7 +696,11 @@ Exactly one token exists for the key, and the caller holds a secret that works f
 - **Scope:** `auth:tokens/<userId>`. The fingerprint is the operation id plus the body as sent. Its `expiresAt` is
   absolute, so a body re-sent days later with a recomputed expiry is a different request (`409 idempotency-conflict`).
 
-#### `POST /tenants/{id}/invitations` — support; a replay rolls the code while it is unused
+#### `POST /tenants/{id}/invitations` — **not supported: the key is refused** (built; option A, decided 2026-11-21)
+
+**As built:** exactly as for a mint — 422 `malformed-query` with the fix (list the tenant's invitations, revoke the one
+you cannot account for, create a new one), nothing written. The proposal below, a roll while the code is unused, is
+kept as the record of what was weighed; **it was not built.**
 
 The same reasoning applies: a 128-bit code stored as its SHA-256 (S4 D2). The roll replaces `code_hash` on the same
 invitation under the tenant version bump and session lock the create already takes (S4 D6, A-I1):
@@ -708,17 +717,17 @@ UPDATE … SET code_hash = @new WHERE id = @id AND created_by = @me AND uses = 0
 - **Scope:** `auth:invitations/<userId>`. The fingerprint covers the path's tenant id, so the same key against
   another tenant is 409.
 
-#### Common to all three
+#### Common rules (as built, on `POST /tenants` — the one keyed route)
 
 | Rule | Value | Precedent |
 |---|---|---|
-| Key bounds | ≤ 255 UTF-8 bytes, non-blank, one header line; otherwise 422 | `AlvoIdempotency.EnsureUsableKey`, `AlvoApiOptions.MaxIdempotencyKeyBytes` |
-| Different fingerprint | `409 idempotency-conflict` | Data API, commands Ruling 7 |
+| Key bounds | ≤ 255 UTF-8 bytes, non-blank, one header line; otherwise 422 `malformed-query` | `AlvoIdempotency.EnsureUsableKey`, `AlvoApiOptions.MaxIdempotencyKeyBytes`, the Data API's slug |
+| Different fingerprint (operation + validated name) | `409 idempotency-conflict` | Data API, commands Ruling 7 |
 | Concurrent duplicate | waits on the route's existing lock, then replays | Data API ("the loser retries into a replay") |
 | Retention | that of the shared table, which has no sweep yet (#115); a record is honoured until #115 decides | the Data API's current behaviour |
-| Replay status / `Location` | as the first answer (201; `Location` only on `POST /tenants`, where it already exists) | Data API create replay |
+| Replay status / `Location` | as the first answer: 201 and the same `Location` | Data API create replay |
 | Replay marker | none | the Data API sends none; Management's `replayed: true` is a body member of its own shape |
-| OpenAPI | the header as an optional parameter on the three operations, each saying what a replay answers | the Data API's descriptions |
+| OpenAPI | the header as an optional parameter on `POST /tenants`; the mint and the invitation create document their 422 refusal | the Data API's descriptions |
 
 ### 6.4 Deviations
 
@@ -727,15 +736,15 @@ UPDATE … SET code_hash = @new WHERE id = @id AND created_by = @me AND uses = 0
 - **From the draft's §2.7 409 for a request in flight:** the duplicate waits on the account or tenant lock and is
   answered as a replay. The Data API does the same.
 - **From Stripe's "return the saved response":**
-  - `POST /tenants` re-reads, the Data API's recorded deviation;
-  - `POST /tokens` and `POST …/invitations` return a **rolled** secret, not the first one, because Alvo never stores a
-    shown-once secret (AC6).
+  - `POST /tenants` re-reads, the Data API's recorded deviation, which the draft's §2.6 permits;
+  - `POST /tokens` and `POST …/invitations` do not honour a key at all and refuse one (422), because Alvo never stores
+    a shown-once secret (AC6) and so could not replay it.
 
-  The draft's §2.6 permits both. Neither stored the response.
+  Nothing stores a response.
 - **From the draft's §2.3 "SHOULD define [an] expiration policy and publish it":** inherited from the Data API's open
   #115. The guides say "kept until a retention policy lands".
-- **New beyond the draft:** the replay of a creating request may answer `409 conflict` when the thing it created has
-  since died. The draft has no case for "completed, then destroyed".
+- **New beyond the draft:** a replay of a tenant creation whose creator has since left answers the id alone. The
+  proposed `409 conflict` for a replay of a dead token or invitation was not built: those routes take no key.
 
 ### 6.5 Wire
 
@@ -751,55 +760,38 @@ POST /auth/v1/tenants   Idempotency-Key: 7c9e…   { "name": "Acme Ltd" }
 ```
 
 ```http
-POST /auth/v1/tokens   Idempotency-Key: 51aa…   { "name": "billing", "kind": "service", … }   (first; the 201 is lost)
-201 { "keyId": "alvo_svc_7f…", "token": "alvo_svc_7f….Lw…", … }
-
-POST /auth/v1/tokens   Idempotency-Key: 51aa…   (identical body)                              (retry)
-201 { "keyId": "alvo_svc_7f…", "token": "alvo_svc_7f….Q2…", …, "lastUsedAt": null, "status": "active" }
-    — the same token; "….Lw…" is now refused 401 like any revoked secret
-
-POST /auth/v1/tokens   Idempotency-Key: 51aa…   (identical body, after the token was revoked)
-409 { "type": "https://alvo.dev/errors/conflict", "keyId": "alvo_svc_7f…",
-      "detail": "The token this Idempotency-Key minted is no longer active, so its secret cannot be issued again. Mint a new token with a new key." }
+POST /auth/v1/tokens   Idempotency-Key: 51aa…   { "name": "billing", "kind": "service", … }   (as built)
+422 { "type": "https://alvo.dev/errors/malformed-query",
+      "detail": "The 'Idempotency-Key' header is not honoured when minting a token: its secret is shown once and kept only as a hash, so a retry could not return it. Send the mint without the header. If an answer was lost, list your tokens, revoke the one you cannot account for, and mint again." }
 ```
 
-### 6.6 Blast radius
+`POST …/invitations` answers the same 422 with its own sentence (`ShownOnceKey.InvitationsDetail`).
 
-- **Abstractions (internal ports).**
-  - `CreateTenantRequest`, `MintTokenRequest` and `CreateInvitationRequest` each gain an optional
-    `(Key, Scope, Fingerprint)`.
-  - `CreateTenantStatus`, `MintTokenStatus` and `MemberChangeStatus` gain `Replayed`, `IdempotencyConflict` and
-    `ReplayDead`.
-  - The outcomes carry the replayed id.
-- **No public API change.**
-- **EF adapter.**
-  - `EfCoreTenantStore` (create and invitations) and `EfCoreAppTokenStore` (mint) read and insert through
-    `IdempotencyTable`'s SQL inside their transactions.
-  - The roll statements go in `AppTokenTables.cs` and `InvitationTables.cs`, one text for both engines.
-  - No new table, no `AlvoFrameworkTables` change.
-- **Routes.** `TenantRoutes.CreateAsync` (`:43-66`), `TokenRoutes.CreateAsync`/`MintedAsync` (`:33`, `:122-139`) and
-  `InvitationRoutes.CreateAsync`/`CreatedAsync` (`:37`, `:171-178`). They read the key with the Data API's bounds and
-  fingerprint the body as read. `SelfServiceCall` keeps the raw body bytes it already reads.
-- **OpenAPI.** The `Idempotency-Key` parameter and the 409 `idempotency-conflict` / `conflict` responses on three
-  operations in `AccountsDocumentation.*.cs`, plus the snapshot.
-- **Tests.**
-  - Store facts, both engines:
-    - `TenantStoreFacts.A_replayed_create_returns_the_same_tenant_and_spends_no_slot`, plus a 20-iteration concurrent
-      variant at the cap;
-    - `AppTokenStoreFacts.A_replayed_mint_rolls_the_same_token_s_secret`, `…A_replay_of_a_dead_token_writes_nothing`,
-      `…A_replay_racing_a_reuse_of_its_session_never_outlives_it`;
-    - `InvitationStoreFacts.A_replay_rolls_an_unused_code_and_never_a_used_one`.
-  - Route tests: a mismatch is 409, a malformed key is 422, and the old secret or code is dead after a roll.
-  - `SecretsNeverLoggedTests` extends to the rolled secret and the idempotency key, which is caller text and is never
-    logged.
-- **TeaPie.** One new case, `013-retries`, after `012`: Dana replays a tenant create and a mint, and shows that the
-  first secret is 401 after the roll. The existing cases are unchanged.
-- **Guides.**
-  - `tenants-and-invitations.mdx` and `tokens.mdx` each gain a short "Retrying safely" paragraph, including the
-    one-sentence warning in §6.3.
-  - `sign-in.mdx` is unchanged: `/token` is not keyed.
-- **Docs.** `accounts.md` (S3, S4 and S5 route tables and recorded deviations), `data-api.md` (the table's second
-  family of writers), `concepts/security-model.md` (the shown-once secret now "or rolled on a keyed retry").
+### 6.6 Blast radius (as built)
+
+- **Abstractions (internal port).** `CreateTenantRequest` gains an optional `AlvoIdempotency? Idempotency` and
+  `IdempotencyScopeOf(creator)` (`auth:tenants/<userId>`); `CreateTenantStatus` gains `Replayed` and
+  `IdempotencyConflict`; `CreateTenantOutcome` carries the replayed tenant id. `MintTokenRequest` and
+  `CreateInvitationRequest` are unchanged.
+- **No public API change** from item 5.
+- **EF adapter.** `EfCoreTenantStore.RecordedAsync`/`RecordAsync` read and insert through `IdempotencyTable`'s SQL inside
+  the creation's transaction; the store ensures the shared table. No roll statements, no new table, no
+  `AlvoFrameworkTables` change.
+- **Routes.** `TenantRoutes.CreateAsync`/`ReplayedAsync` with `TenantCreationKey` (the Data API's key bounds, the
+  operation + validated-name fingerprint); `TokenRoutes.CreateAsync` and `InvitationRoutes.CreateAsync` refuse the header
+  through `ShownOnceKey`. `ProblemResultFactory.ManagementIdempotencyConflict` was renamed `IdempotencyKeySpent`, shared
+  by Management and tenant creation.
+- **OpenAPI.** The `Idempotency-Key` parameter and the 409 `idempotency-conflict` / 422 `malformed-query` lines on
+  `POST /tenants`; the mint's and invitation create's descriptions and 422s document the refusal; the snapshot.
+- **Tests.** `TenantStoreFacts` (replay, conflict, two people's keys, five concurrent creates with one key — both
+  engines); `TenantRoutesTests` (201 replay, 409, 422 `malformed-query` ×3, the id-only replay);
+  `TokenRoutesTests.An_idempotency_key_is_refused_and_mints_nothing`,
+  `InvitationRoutesTests.An_idempotency_key_is_refused_and_creates_nothing`.
+- **TeaPie:** no new case (not asked for).
+- **Guides.** `tenants-and-invitations.mdx` (retrying a create; creating an invitation refuses a key) and `tokens.mdx` (a
+  lost mint answer). `sign-in.mdx` is unchanged: `/token` is not keyed.
+- **Docs.** `accounts.md` (the S3 route note, the S4 and S5 recorded deviations), `data-api.md` (the table's third
+  writer). `concepts/security-model.md` is unchanged: nothing is rolled.
 - **Skills, admin, assistant:** none.
 
 ## 7. How the items interact
@@ -822,14 +814,14 @@ POST /auth/v1/tokens   Idempotency-Key: 51aa…   (identical body, after the tok
   (tenants, members, invitations, accept, tokens) is now `401` with `WWW-Authenticate: Bearer`, not `403 forbidden`.
   `/user` and `/logout` answered 401 already; only their detail's last clause changes. A Bearer a host's resolver
   resolves to a non-person stays `403`, with a new sentence.
-- **Item 3.** `Alvo:Api:RateLimits:Token` → `:TokenEndpoint`; `:Create` → `:Tenants` and `:<AppTokens|ApiTokens>`,
+- **Item 3.** `Alvo:Api:RateLimits:Token` → `:TokenEndpoint`; `:Create` → `:Tenants` and `:ApiTokens`,
   10 each. The two no longer share a budget. `AlvoRateLimitOptions.Token`/`.Create` are renamed in the public API.
-- **Item 4.** `auth.accessTokens` → `auth.<noun>`, and `Auth.AccessTokens`/`AuthAccessTokens` →
-  `Auth.<Noun>`/`Auth<Noun>`. `feature-disabled`'s `descriptorKey` values change with it, and a stored descriptor using
+- **Item 4.** `auth.accessTokens` → `auth.apiTokens`, and `Auth.AccessTokens`/`AuthAccessTokens` →
+  `Auth.ApiTokens`/`AuthApiTokens`. `feature-disabled`'s `descriptorKey` values change with it, and a stored descriptor using
   the old key is refused on its next apply.
-- **Item 5.** `Idempotency-Key` is honoured on `POST /auth/v1/tenants`, `POST /auth/v1/tenants/{id}/invitations` and
-  `POST /auth/v1/tokens`. A keyed retry of the two secret-issuing routes answers the same token or invitation with a
-  **new** secret and kills the first.
+- **Item 5 (as built).** `Idempotency-Key` is honoured on `POST /auth/v1/tenants`: a keyed retry answers the tenant the
+  first create made and spends no slot. `POST /auth/v1/tokens` and `POST /auth/v1/tenants/{id}/invitations` refuse the
+  header with 422 `malformed-query`; after a lost answer, list, revoke and create again.
 
 ## 9. Slices — each independently mergeable, in order
 

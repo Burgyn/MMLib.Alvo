@@ -260,13 +260,14 @@ public sealed class TokenRoutesTests
 
     /// <summary>
     /// #542 item 3: minting is charged its own budget, <c>Alvo:Api:RateLimits:ApiTokens</c>, no longer the one tenant
-    /// creation draws on — a mint at its limit leaves creating a tenant open, and the other way round.
+    /// creation draws on: a tenant created first takes nothing from it, and a mint at its limit leaves creating a tenant
+    /// open.
     /// </summary>
     [Fact]
     public async Task Minting_answers_429_after_its_own_budget_and_shares_none_with_tenant_creation()
     {
         await using var world = await AccountsWorld.StartAsync(
-            _engine, descriptor: TeamTracker, api: api => (api.RateLimits.ApiTokens, api.RateLimits.Tenants) = (2, 1));
+            _engine, descriptor: TeamTracker, api: api => (api.RateLimits.ApiTokens, api.RateLimits.Tenants) = (2, 2));
         var (ada, _) = await world.SignInAsync("ada");
         await TenantRoutesTests.CreatedAsync(world, ada, "Acme");
         var body = new JsonObject
@@ -280,13 +281,17 @@ public sealed class TokenRoutesTests
         using var first = await world.MintAsync(ada, body);
         using var second = await world.MintAsync(ada, body);
         using var third = await world.MintAsync(ada, body);
-        using var tenantPastItsBudget = await world.AsPersonAsync(
+        using var tenantWhileMintingIsSpent = await world.AsPersonAsync(
             HttpMethod.Post, "/auth/v1/tenants", ada, new JsonObject { ["name"] = "Globex" });
+        using var tenantPastItsBudget = await world.AsPersonAsync(
+            HttpMethod.Post, "/auth/v1/tenants", ada, new JsonObject { ["name"] = "Initech" });
 
         first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.ReadTextAsync());
         second.StatusCode.ShouldBe(HttpStatusCode.Created, "the tenant created before took nothing from the minting budget");
         third.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, await third.ReadTextAsync());
-        tenantPastItsBudget.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "tenant creation keeps its own budget of one");
+        tenantWhileMintingIsSpent.StatusCode.ShouldBe(
+            HttpStatusCode.Created, "a spent minting budget leaves tenant creation open: " + await tenantWhileMintingIsSpent.ReadTextAsync());
+        tenantPastItsBudget.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "tenant creation keeps its own budget of two");
         (await third.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.RateLimited);
         int.Parse(third.Headers.GetValues("Retry-After").ShouldHaveSingleItem(), CultureInfo.InvariantCulture).ShouldBeInRange(1, 60);
         third.Headers.CacheControl!.NoStore.ShouldBeTrue();

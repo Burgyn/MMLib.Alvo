@@ -322,8 +322,9 @@ internal static class ProblemResultFactory
     /// <remarks>
     /// <b>The slug is <see cref="AlvoProblemTypes.IdempotencyConflict"/>, the one the data path already
     /// emits</b> — one exception type, one classification, and an agent that learned to branch on it for a
-    /// create does not have to learn a management-only spelling. The detail is this surface's own, because
-    /// the two ways out are: the data path names a row, this one names a descriptor.
+    /// create does not have to learn a surface-specific spelling. The detail is these surfaces' own, because the
+    /// data path's names a row, and a descriptor revision or a tenant has no row to name: it says only that the key was
+    /// spent and the two ways out — a fresh key, or the original body.
     /// </remarks>
     internal static IResult IdempotencyKeySpent() => Problem(
         StatusCodes.Status409Conflict,
