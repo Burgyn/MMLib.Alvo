@@ -2,6 +2,7 @@
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tenants;
 using MMLib.Alvo.Tests.Ef;
 using Shouldly;
 using System.Data.Common;
@@ -31,6 +32,85 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
 
     /// <inheritdoc/>
     public ValueTask InitializeAsync() => _fixture.InitializeAsync();
+
+    /// <summary>
+    /// The lock order of the hardening design (§2.3): a refresh-token reuse sweeps the person's credentials, and creating an
+    /// invitation hands one out, so each takes the person's account row before the session — the order a ban takes them
+    /// in. With the account row held, each must queue, holding no session row while it waits.
+    /// </summary>
+    /// <param name="write">The write.</param>
+    [Theory]
+    [InlineData("a reuse")]
+    [InlineData("a swept ancestor's reuse")]
+    [InlineData("an invitation")]
+    public async Task A_reuse_or_an_invitation_takes_the_account_row_before_the_session(string write)
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var tenants = services.GetRequiredService<ITenantStore>();
+        var tenant = new TenantId(Guid.NewGuid());
+        (await tenants.CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", account, [], 5, Start), Ct)).Status
+            .ShouldBe(CreateTenantStatus.Created);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        if (write == "a swept ancestor's reuse")
+        {
+            await ScalarAsync(
+                services,
+                $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE id = '{session.RefreshTokenId:D}'");
+        }
+
+        await using var holder = await PostgresRowLocks.HoldAsync(
+            services,
+            $"UPDATE {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} SET last_sign_in_at = last_sign_in_at WHERE id = '{account.Value:D}'");
+
+        Task call = write != "an invitation"
+            ? store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(2)) with { Session = session.SessionId }, Ct)
+            : tenants.CreateInvitationAsync(
+                new CreateInvitationRequest(
+                    Guid.NewGuid(), tenant, account, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"), [], GrantsOwner: true,
+                    null, 1, Start.AddDays(7), Start.AddMinutes(2), session.SessionId),
+                Ct);
+        await PostgresRowLocks.UntilWaitingAsync(services, 1, $"{write} went ahead without the person's account row", call);
+
+        (await PostgresRowLocks.FreeAsync(
+            services,
+            $"SELECT 1 FROM {TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix)} WHERE id = '{session.SessionId:D}' FOR UPDATE NOWAIT"))
+            .ShouldBeTrue($"{write} holds the session while it waits for the account");
+        await holder.CommitAsync(Ct);
+        await call;
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(write == "an invitation" ? null : SessionRevocations.Reuse);
+    }
+
+    /// <summary>
+    /// #527 after #543: a reuse reads its session before it takes the account row, so it re-reads it after the lock. A ban
+    /// that committed while the reuse waited has ended the session already; the reuse is then only refused, and the ban's
+    /// reason stands. Red without the re-read, which answered <see cref="RefreshStatus.Reused"/> for a session already dead.
+    /// </summary>
+    /// <param name="path">Which reuse path.</param>
+    [Theory]
+    [InlineData("a rotated row presented again")]
+    [InlineData("a swept ancestor")]
+    public async Task A_reuse_that_waited_on_a_ban_is_only_refused(string path)
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        if (path == "a swept ancestor")
+        {
+            await ScalarAsync(
+                services,
+                $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE id = '{session.RefreshTokenId:D}'");
+        }
+
+        await using var holder = await PostgresRowLocks.HoldAsync(services, Revocation(services, "a disable", account, session.SessionId));
+
+        var reuse = store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(2)) with { Session = session.SessionId }, Ct);
+        await PostgresRowLocks.UntilWaitingAsync(services, 1, "the reuse must queue behind the ban's account row", reuse);
+        await holder.CommitAsync(Ct);
+
+        (await reuse).Status.ShouldBe(RefreshStatus.Refused);
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Disabled);
+    }
 
     [Theory]
     [InlineData("a sign-out")]

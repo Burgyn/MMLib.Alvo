@@ -15,7 +15,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <b>Creating and revoking are membership writes</b>: both run through <see cref="MemberWriteAsync"/>, so they bump the
 /// tenant's <c>version</c> first and judge the actor's ownership after it. That is what serialises a creation with its
 /// creator's demotion or removal, whose sweep (<see cref="InvitationTables.RevokeCreatedBySql"/>) then either sees the new
-/// invitation or has already made the creator a non-owner — never an invitation of a non-owner left live.
+/// invitation or has already made the creator a non-owner — never an invitation of a non-owner left live. Creating one
+/// first takes the creator's account row, as a mint does (hardening design §2.3).
 /// </para>
 /// <para>
 /// <b>Accepting is <see cref="InvitationAcceptance"/></b>, in a transaction of its own here and inside the sign-in's in the
@@ -40,7 +41,8 @@ internal sealed partial class EfCoreTenantStore
                 return written;
             },
             ct,
-            request.Session is { } session ? (connection, transaction, token) => SessionLiveAsync(connection, transaction, request, session, token) : null)
+            request.Session is { } session ? (connection, transaction, token) => SessionLiveAsync(connection, transaction, request, session, token) : null,
+            person: request.Actor)
             .ConfigureAwait(false);
 
         return status == MemberChangeStatus.Changed
@@ -121,8 +123,8 @@ internal sealed partial class EfCoreTenantStore
     }
 
     /// <summary>
-    /// Locks the creator's <paramref name="session"/> if it is still live (stack review A-I1) — before the tenant's bump, the
-    /// order a mint and a refresh take a session and a tenant in.
+    /// Locks the creator's <paramref name="session"/> if it is still live (stack review A-I1) — after the creator's account row
+    /// and before the tenant's bump, the order a mint takes an account, a session and a tenant in (hardening design §2.3).
     /// </summary>
     private async Task<bool> SessionLiveAsync(
         DbConnection connection, DbTransaction transaction, CreateInvitationRequest request, Guid session, CancellationToken ct) =>

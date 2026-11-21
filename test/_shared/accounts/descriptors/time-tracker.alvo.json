@@ -10,7 +10,7 @@
     "signUp": {
       "mode": "open"
     },
-    "accessTokens": {
+    "apiTokens": {
       "personal": true
     }
   },

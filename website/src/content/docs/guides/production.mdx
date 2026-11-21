@@ -188,8 +188,8 @@ API browser at `/scalar` behind a path base has not been verified
   only with it, so losing the file breaks sign-in.
 - **`Alvo__Api__Cors__Origins__0`** (and `__1`, …) lists your app's origins exactly, with scheme and port. A wildcard
   is refused.
-- **The rate budgets** count requests per client address: `Alvo__Api__RateLimits__Token` (default 30 a minute),
-  `__Invitations` (20) and `__Create` (10, shared by creating a tenant and minting a token). Behind a proxy, turn on
+- **The rate budgets** count requests per client address: `Alvo__Api__RateLimits__TokenEndpoint` (default 30 a
+  minute), `__Invitations` (20), `__Tenants` (10, creating a tenant) and `__ApiTokens` (10, minting a token). Behind a proxy, turn on
   `Alvo:ForwardedHeaders:Enabled` (section 6), or every user shares the proxy's one budget.
 
 The Google client id goes in `Alvo__Accounts__Providers__Google__ClientIds__0`, with the production origin among the

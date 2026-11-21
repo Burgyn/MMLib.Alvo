@@ -725,6 +725,11 @@ Three decisions in that table:
 Nothing prunes this table yet: growth is bounded by the writes its caller may already perform, but a
 retention window and a sweep are **#115**.
 
+**Three surfaces write it.** The Data API's rows under `tenant/user`, the Management API's revisions under the caller's
+identity, and, since #542, self-service tenant creation (`POST /auth/v1/tenants`) under `auth:tenants/<userId>` — the
+surface prefix keeps its keys from ever meeting a Data API key with the same text (`docs/architecture/accounts.md`,
+*The routes* of S3).
+
 A reused key with a **different** fingerprint is `409 idempotency-conflict`, refused before the row is
 read: it is not a replay, and answering with the first request's row would report success for a create that
 never happened.
@@ -1108,11 +1113,11 @@ and a host without origins answers it 405 exactly as before. No origins means no
 by a filter on the route (the `AlvoAdminCredentialLimit` precedent): fixed one-minute windows, no queue, partitioned by
 `Connection.RemoteIpAddress` — IPv4-mapped as IPv4, IPv6 by its `/64`, no address as one shared partition. Over budget is
 429 `rate-limited` with `Retry-After` in whole seconds (60 when the limiter does not say). S2 charges the token endpoint
-(`Token`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3 charges
-`Create` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 charges
-`Invitations` (default 20/min) on the five invitation routes, in the same order — the exchange keeps `Token` even with
-an `invitation_code`; S5 charges token minting, `POST /auth/v1/tokens`, to the same `Create` budget, so tenant
-creation and minting share one per-client budget (listing and revoking tokens are not charged). A host behind a proxy configures forwarded headers so the address is the client's.
+(`TokenEndpoint`, default 30/min, filter order CORS → no-store → limit, so the 429 is readable and uncacheable); S3
+charges `Tenants` (default 10/min) on `POST /auth/v1/tenants` alone, in the same order; S4 charges `Invitations`
+(default 20/min) on the five invitation routes, in the same order — the exchange keeps `TokenEndpoint` even with an
+`invitation_code`; S5 charges token minting, `POST /auth/v1/tokens`, to `ApiTokens` (default 10/min; listing and
+revoking tokens are not charged). No two routes share a budget: #542 renamed `Token` and split S5's shared `Create`. A host behind a proxy configures forwarded headers so the address is the client's.
 
 ## The status and `type`-slug catalogue
 

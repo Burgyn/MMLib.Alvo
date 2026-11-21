@@ -25,7 +25,13 @@ internal interface ITenantStore
     /// row is locked first, so concurrent creates of one person are serialised and none passes
     /// <see cref="CreateTenantRequest.MaxPerAccount"/>. A refusal writes nothing.
     /// </summary>
-    /// <param name="request">The tenant's id and name, its creator and their roles, the cap and the instant.</param>
+    /// <remarks>
+    /// <b>With <see cref="CreateTenantRequest.Idempotency"/></b> (#542 item 5) the key is recorded with the tenant, in the
+    /// same transaction, under the creator's own scope; a later create with the same key is read after the account lock, so
+    /// it answers <see cref="CreateTenantStatus.Replayed"/> with the first tenant — before the cap is counted, so a replay
+    /// spends no slot — or <see cref="CreateTenantStatus.IdempotencyConflict"/> for another fingerprint. Neither writes.
+    /// </remarks>
+    /// <param name="request">The tenant's id and name, its creator and their roles, the cap, the instant and the key.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     Task<CreateTenantOutcome> CreateSharedAsync(CreateTenantRequest request, CancellationToken ct);
 
@@ -145,7 +151,61 @@ internal interface ITenantStore
     /// <param name="request">The code's hash, the person and the instant.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Makes an account an owner of a shared tenant — an operator's act, never a member's (#543): it joins the tenant if it
+    /// is not a member, and keeps its membership otherwise. In one transaction, in the lock order every accounts and tenancy
+    /// write keeps: the account's row (which also refuses a disabled one), then the tenant's version bump, then the
+    /// membership. It revokes nothing.
+    /// </summary>
+    /// <param name="grant">The tenant, the account, the roles to set (or <see langword="null"/> to keep them) and the instant.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<OwnershipGrantOutcome> GrantOwnershipAsync(OwnershipGrant grant, CancellationToken ct);
+
+    /// <summary>
+    /// The shared tenants <paramref name="account"/> owns in which no owner's account is enabled — the tenants a ban of it
+    /// left nobody to manage (#543), by name and then id. A tenant the account merely belongs to is never listed.
+    /// </summary>
+    /// <param name="account">The account.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<IReadOnlyList<OrphanedTenant>> ListOrphanedTenantsAsync(UserId account, CancellationToken ct);
 }
+
+/// <summary>An operator making an account an owner of a shared tenant (#543).</summary>
+/// <param name="Tenant">The tenant.</param>
+/// <param name="Account">The account to make an owner.</param>
+/// <param name="Roles">The tenant roles to store, already checked against <c>assignableRoles</c>; <see langword="null"/> keeps a member's roles, and a new member holds none.</param>
+/// <param name="Now">When a new member joins.</param>
+internal sealed record OwnershipGrant(TenantId Tenant, UserId Account, IReadOnlyList<string>? Roles, DateTimeOffset Now);
+
+/// <summary>What an ownership grant did; every status but <see cref="Granted"/> wrote nothing.</summary>
+internal enum OwnershipGrantStatus
+{
+    /// <summary>The account owns the tenant now — also when it already did.</summary>
+    Granted,
+
+    /// <summary>There is no such tenant.</summary>
+    NoSuchTenant,
+
+    /// <summary>There is no such account.</summary>
+    NoSuchAccount,
+
+    /// <summary>The account is disabled; a banned person is never made an owner.</summary>
+    AccountDisabled,
+
+    /// <summary>The tenant is a personal one, which has exactly one member forever (spec §6.1).</summary>
+    PersonalTenant,
+}
+
+/// <summary>An ownership grant's status and, when granted, the membership as stored.</summary>
+/// <param name="Status">What the grant did.</param>
+/// <param name="Membership">The account's membership, for <see cref="OwnershipGrantStatus.Granted"/>.</param>
+internal readonly record struct OwnershipGrantOutcome(OwnershipGrantStatus Status, StoredMembership? Membership);
+
+/// <summary>A shared tenant no enabled owner can manage (#543).</summary>
+/// <param name="Id">The tenant.</param>
+/// <param name="Name">Its name.</param>
+internal sealed record OrphanedTenant(TenantId Id, string Name);
 
 /// <summary>What kind of tenant a registry tenant is.</summary>
 internal enum TenantKind
@@ -179,8 +239,27 @@ internal sealed record StoredMembership(
 /// <param name="CreatorRoles">The tenant roles the creator's membership starts with (<c>createTenants.creatorRoles</c>).</param>
 /// <param name="MaxPerAccount">How many shared tenants one account may create (<c>createTenants.maxPerAccount</c>).</param>
 /// <param name="Now">The instant of the creation.</param>
+/// <param name="Idempotency">
+/// The caller's <c>Idempotency-Key</c> and the fingerprint of the request it came with, or <see langword="null"/> for none.
+/// It is scoped to <paramref name="Creator"/> by the store (<see cref="IdempotencyScopeOf"/>).
+/// </param>
 internal sealed record CreateTenantRequest(
-    TenantId Id, string Name, UserId Creator, IReadOnlyList<string> CreatorRoles, int MaxPerAccount, DateTimeOffset Now);
+    TenantId Id,
+    string Name,
+    UserId Creator,
+    IReadOnlyList<string> CreatorRoles,
+    int MaxPerAccount,
+    DateTimeOffset Now,
+    Data.AlvoIdempotency? Idempotency = null)
+{
+    /// <summary>
+    /// The scope a tenant creation's key is recorded under: the surface, then the person — so a Data API create holding the
+    /// same key string never meets it (the command ledger's <c>command:&lt;name&gt;/…</c> precedent), and one person's key
+    /// never another's.
+    /// </summary>
+    /// <param name="creator">The person creating the tenant.</param>
+    internal static string IdempotencyScopeOf(UserId creator) => $"auth:tenants/{creator.Value:D}";
+}
 
 /// <summary>What a shared-tenant creation did.</summary>
 internal enum CreateTenantStatus
@@ -193,12 +272,26 @@ internal enum CreateTenantStatus
 
     /// <summary>The creator has no enabled account; nothing was written.</summary>
     NoAccount,
+
+    /// <summary>
+    /// The key was already recorded by this creator for the same request: <see cref="CreateTenantOutcome.Tenant"/> is the
+    /// tenant that create made; nothing was written.
+    /// </summary>
+    Replayed,
+
+    /// <summary>The key was already recorded by this creator for a different request; nothing was written.</summary>
+    IdempotencyConflict,
 }
 
 /// <summary>A creation's status and, when it created the tenant, the creator's membership.</summary>
 /// <param name="Status">What the creation did.</param>
 /// <param name="Membership">The creator's owner membership, for <see cref="CreateTenantStatus.Created"/>.</param>
-internal readonly record struct CreateTenantOutcome(CreateTenantStatus Status, StoredMembership? Membership);
+/// <param name="Replayed">The tenant an earlier create with the same key made, for <see cref="CreateTenantStatus.Replayed"/>.</param>
+internal readonly record struct CreateTenantOutcome(CreateTenantStatus Status, StoredMembership? Membership, TenantId? Replayed = null)
+{
+    /// <summary>Gets the tenant this outcome names: the one created, or the one a replay answers.</summary>
+    internal TenantId? Tenant => Membership?.Tenant ?? Replayed;
+}
 
 /// <summary>The personal tenant a sign-in or a refresh ensures for its account (S3 plan D6).</summary>
 /// <param name="Id">The id the personal tenant gets if it does not exist yet.</param>

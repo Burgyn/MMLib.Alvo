@@ -34,6 +34,18 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// token's are fixed at mint. A mint takes the tenant's lock before it reads the minter's membership, so a mint racing one of
 /// these writes either sees it and is refused, or is committed first and swept.
 /// </para>
+/// <para>
+/// <b>One person, one mutex</b> (hardening design §2.3, #543): a write that may sweep a member's credentials — a removal,
+/// leaving, a demotion — first takes that member's account row (<see cref="AuthTables.LockAccountRowSql"/>), the row a ban
+/// and a refresh-token reuse take first too. So no two sweeps of one person's invitations and tokens ever run at once,
+/// whatever order their unordered multi-row <c>UPDATE</c>s would meet the rows in — an index walk and a heap scan meet
+/// them in opposite orders after a HOT update, which deadlocked a removal racing a ban (40P01). The order every accounts
+/// and tenancy transaction keeps: one account row, then sessions, then the tenant, then members, invitations and tokens.
+/// </para>
+/// <para>
+/// <b>The last owner is the last <i>enabled</i> owner</b> (#543): a banned owner keeps the flag, so enabling them restores
+/// it, but counts for nothing — a co-owner cannot leave them alone in a tenant nobody could manage.
+/// </para>
 /// </remarks>
 internal sealed partial class EfCoreTenantStore
 {
@@ -86,7 +98,8 @@ internal sealed partial class EfCoreTenantStore
             update.Tenant,
             update.Actor,
             (connection, transaction, actor, token) => UpdatedAsync(connection, transaction, update, actor, token),
-            ct);
+            ct,
+            person: update.IsOwner == false ? update.Member : null);
     }
 
     /// <inheritdoc/>
@@ -98,7 +111,8 @@ internal sealed partial class EfCoreTenantStore
             removal.Tenant,
             removal.Actor,
             (connection, transaction, actor, token) => RemovedAsync(connection, transaction, removal, actor, token),
-            ct);
+            ct,
+            person: removal.Member);
     }
 
     private async Task<MemberChangeStatus> UpdatedAsync(
@@ -120,7 +134,7 @@ internal sealed partial class EfCoreTenantStore
             return MemberChangeStatus.NoSuchMember;
         }
 
-        if (update.IsOwner == false && await IsLastOwnerAsync(connection, transaction, member, ct).ConfigureAwait(false))
+        if (update.IsOwner == false && await IsLastOwnerAsync(connection, transaction, update.Member, member, ct).ConfigureAwait(false))
         {
             return MemberChangeStatus.LastOwner;
         }
@@ -151,7 +165,7 @@ internal sealed partial class EfCoreTenantStore
             return MemberChangeStatus.NoSuchMember;
         }
 
-        if (await IsLastOwnerAsync(connection, transaction, member, ct).ConfigureAwait(false))
+        if (await IsLastOwnerAsync(connection, transaction, removal.Member, member, ct).ConfigureAwait(false))
         {
             return MemberChangeStatus.LastOwner;
         }
@@ -166,12 +180,17 @@ internal sealed partial class EfCoreTenantStore
         : actor.Kind == TenantKind.Personal ? MemberChangeStatus.PersonalTenant
         : null;
 
+    /// <summary>
+    /// Whether <paramref name="member"/>, <paramref name="user"/>'s membership, is an ownership no other enabled owner would
+    /// outlast — the tenant would be left with nobody who can manage it (#543).
+    /// </summary>
     private async Task<bool> IsLastOwnerAsync(
-        DbConnection connection, DbTransaction transaction, StoredMembership member, CancellationToken ct) =>
+        DbConnection connection, DbTransaction transaction, UserId user, StoredMembership member, CancellationToken ct) =>
         member.IsOwner
         && await CountAsync(
-            connection, transaction, _tables.OwnersSql, command => Bind(command, ("@tenant_id", Id(member.Tenant))), ct)
-            .ConfigureAwait(false) <= 1;
+            connection, transaction, _tables.OtherEnabledOwnersSql,
+            command => Bind(command, ("@tenant_id", Id(member.Tenant)), ("@user_id", Id(user))), ct)
+            .ConfigureAwait(false) == 0;
 
     private async Task WriteUpdateAsync(
         DbConnection connection, DbTransaction transaction, MemberUpdate update, StoredMembership member, CancellationToken ct)
@@ -230,15 +249,21 @@ internal sealed partial class EfCoreTenantStore
         ExecuteAsync(connection, transaction, sweep, command => BindMemberKey(command, tenant, member, ("@now", Instant(now))), ct);
 
     /// <summary>
-    /// One membership write: the actor's live session when <paramref name="session"/> is given, bump the tenant's version,
-    /// read the actor's membership, then <paramref name="judge"/> — in one transaction, committed only on
+    /// One membership write: the account row of <paramref name="person"/> — whose credentials the write may sweep or hand
+    /// out — when given, the actor's live session when <paramref name="session"/> is given, bump the tenant's version, read
+    /// the actor's membership, then <paramref name="judge"/> — in one transaction, committed only on
     /// <see cref="MemberChangeStatus.Changed"/>, so a refusal leaves even the bump undone.
     /// </summary>
     private Task<MemberChangeStatus> MemberWriteAsync(
-        TenantId tenant, UserId actor, Judgement judge, CancellationToken ct, SessionGate? session = null) =>
+        TenantId tenant, UserId actor, Judgement judge, CancellationToken ct, SessionGate? session = null, UserId? person = null) =>
         InTransactionAsync(
             async (connection, transaction, token) =>
             {
+                if (person is { } swept)
+                {
+                    await LockAccountRowAsync(connection, transaction, swept, token).ConfigureAwait(false);
+                }
+
                 if (session is not null && !await session(connection, transaction, token).ConfigureAwait(false))
                 {
                     return MemberChangeStatus.SessionEnded;
@@ -257,6 +282,13 @@ internal sealed partial class EfCoreTenantStore
             },
             status => status == MemberChangeStatus.Changed,
             ct);
+
+    /// <summary>
+    /// Takes <paramref name="account"/>'s row lock, enabled or not (§2.3's first lock); an id with no account row locks
+    /// nothing and the write goes on.
+    /// </summary>
+    private Task<int> LockAccountRowAsync(DbConnection connection, DbTransaction transaction, UserId account, CancellationToken ct) =>
+        ExecuteAsync(connection, transaction, _authTables.LockAccountRowSql, command => Bind(command, ("@account_id", Id(account))), ct);
 
     private async Task<StoredMembership?> MembershipAsync(
         DbConnection connection, DbTransaction transaction, TenantId tenant, UserId user, CancellationToken ct)

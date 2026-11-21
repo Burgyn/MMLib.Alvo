@@ -133,26 +133,51 @@ internal sealed partial class EfCoreAccountStore
             return token.Child is { } child ? token.Answer(RefreshStatus.Replayed, child) : _refused;
         }
 
-        await ReusedAsync(connection, transaction, token.Account, token.Session, token.SessionStartedAt, request.Now, ct).ConfigureAwait(false);
-        return new RefreshOutcome(RefreshStatus.Reused, null, null, null, null);
+        return await ReusedAsync(connection, transaction, token.Account, token.Session, token.SessionStartedAt, request.Now, ct)
+            .ConfigureAwait(false);
     }
 
-    /// <summary>Ends a reused session and sweeps what was minted since it started, in one transaction (stack review A-I1).</summary>
-    private async Task ReusedAsync(
+    /// <summary>
+    /// Ends a reused session and sweeps what was minted since it started, in one transaction (stack review A-I1) — both
+    /// reuse paths, a rotated row presented again and a swept ancestor (#527), come here. It keeps #543's lock order: the
+    /// person's account row first (<see cref="AuthTables.LockAccountRowSql"/>), then the session, then invitations and
+    /// tokens. The session was read before the lock, so it is re-read after it: a ban or a sign-out that committed while
+    /// this waited has ended it already, and the presentation is then only refused — as it would have been had it come a
+    /// moment later — with nothing left to sweep that the ban did not.
+    /// </summary>
+    private async Task<RefreshOutcome> ReusedAsync(
         DbConnection connection, DbTransaction transaction, UserId account, Guid session, DateTimeOffset startedAt, DateTimeOffset now,
         CancellationToken ct)
     {
+        await ExecuteAsync(
+            connection, transaction, _tables.LockAccountRowSql, command => Bind(command, ("@account_id", Id(account))), ct)
+            .ConfigureAwait(false);
+        if (!await SessionLiveAsync(connection, transaction, session, now, ct).ConfigureAwait(false))
+        {
+            return _refused;
+        }
+
         await RevokeAsync(connection, transaction, session, SessionRevocations.Reuse, now, ct).ConfigureAwait(false);
         await RevokeMintedSinceAsync(connection, transaction, account, startedAt, now, ct).ConfigureAwait(false);
+        return new RefreshOutcome(RefreshStatus.Reused, null, null, null, null);
     }
+
+    private async Task<bool> SessionLiveAsync(
+        DbConnection connection, DbTransaction transaction, Guid session, DateTimeOffset now, CancellationToken ct) =>
+        (await RelationalSqlBatch.ReadRowsAsync(
+            connection, transaction, _tables.LiveSessionByIdSql,
+            command => Bind(command, ("@session_id", Id(session)), ("@now", Instant(now))),
+            static _ => true,
+            ct).ConfigureAwait(false)).Count == 1;
 
     /// <summary>
     /// Revokes, beside the reused session and in its transaction, every invitation and app token
     /// <paramref name="account"/> created since <paramref name="since"/> — the session's start (stack review A-I1). Reuse is
     /// the one signal that a refresh token was stolen, and nothing ties a token or an invitation to the session that minted
     /// it, so the sweep takes all of them from that instant on, including any the person's other sessions created
-    /// meanwhile. What was created before the session started is not the thief's and lives on. The ban's lock order:
-    /// the session, then invitations, then tokens.
+    /// meanwhile. What was created before the session started is not the thief's and lives on. The ban's lock order
+    /// (hardening design §2.3): the account row — taken by the caller before the session's revocation — then the session,
+    /// then invitations, then tokens.
     /// </summary>
     private async Task RevokeMintedSinceAsync(
         DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset since, DateTimeOffset now, CancellationToken ct)
@@ -189,8 +214,8 @@ internal sealed partial class EfCoreAccountStore
             return _refused;
         }
 
-        await ReusedAsync(connection, transaction, live[0].Account, request.Session, live[0].StartedAt, request.Now, ct).ConfigureAwait(false);
-        return new RefreshOutcome(RefreshStatus.Reused, null, null, null, null);
+        return await ReusedAsync(connection, transaction, live[0].Account, request.Session, live[0].StartedAt, request.Now, ct)
+            .ConfigureAwait(false);
     }
 
     private static bool IsWithinGrace(DateTimeOffset rotatedAt, RefreshRequest request) =>

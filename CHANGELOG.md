@@ -9,10 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An operator can give a tenant whose only owner is banned a new owner** (#543). `PUT
+  {management}/projects/{project}/tenants/{tenant}/owners/{account}` (`ManageAccounts`, `admin`) makes an end user's
+  account an owner of a shared tenant — joining it if needed, with optional `roles` from
+  `tenancy.selfService.assignableRoles` — without enabling the banned person. It answers `200` with the membership,
+  `404` for an unknown tenant or account, `409` for a disabled account or a personal tenant and `422` for a role a
+  membership cannot carry, and revokes nothing.
+
+- **`Idempotency-Key` on `POST /auth/v1/tenants`** (#542 item 5, decided by the maintainer). A tenant cannot be deleted,
+  so a create retried after a lost answer used to spend a `maxPerAccount` slot for good. With a key, a retry with the same
+  name answers the tenant the first create made (the same 201 and `Location`, the membership as it reads now, or the id
+  alone for a creator who has left it) and creates nothing; the same key with another name is 409
+  `idempotency-conflict`; a key sent twice, blank or too long is 422. Recorded in the Data API's idempotency table under
+  the person's own scope, in the creation's transaction. **Not on `POST /auth/v1/tokens` or
+  `POST /auth/v1/tenants/{id}/invitations`**, a recorded deviation: their answers carry a secret shown once and kept
+  only as a hash, so a replay could not repeat it. A key sent there is refused, 422 `malformed-query` with that fix, so a
+  retry is never mistaken for a replay. After a lost answer, list, revoke the one you cannot account for, and create
+  again. A bad key on `POST /auth/v1/tenants` (sent twice, blank, too long) is the same 422 `malformed-query`, the Data
+  API's slug for the header. **Docs:** the tenants and tokens guides, `docs/architecture/accounts.md`.
 - **One framework sweeper, and the end-user tables stop growing** (#527). The hourly ledger sweep becomes the one
   internal framework sweeper: it runs every table's sweep job in batches of 500, at most 20 a tick, and a failed job
   never stops the others. `AddAlvoAccounts` adds four jobs: sessions revoked, expired or idle past
-  `Alvo:Accounts:RetentionDays` (new, default 30, at least 1) go with their refresh tokens — never one younger than the
+  `Alvo:Accounts:RetentionDays` (new, default 30, 1 to 3650) go with their refresh tokens — never one younger than the
   ID-token window — refresh tokens rotated past the grace window go, and app tokens and invitations revoked, expired or
   used up past the retention go.
 
@@ -676,6 +694,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **Google sign-in refuses an ID token whose `azp` is not a configured client id** (#544). When a token carries `azp`
+  — the OAuth client the person signed in through — it must be one of `Alvo:Accounts:Providers:Google:ClientIds`, as
+  every `aud` already had to be. A Google Cloud service account can mint a Google-signed ID token for any `aud`, ours
+  included, so under `signUp: open` it could create accounts by script; Google service-account ID tokens, which carry
+  `azp` (the account's own numeric id), are now refused. A token without `azp` must carry a single `aud` (OIDC Core
+  §3.1.3.7 item 4); with one, it still passes on `aud` alone — what
+  closes the hole is Google's own behaviour of putting `azp` in every service-account token, not anything Alvo can
+  require of a token that omits it. **An app that signs in from Android or iOS must list those client ids beside the
+  web one**, or its people are refused. An `azp` that is empty or JSON `null` is refused, never read as absent; a
+  mismatch answers the same `invalid_request` as another app's `aud`, and the operator's log (event 6403, Information)
+  says which claim it was and for which provider, never its value.
+
+- **Disabling or enabling an end user's account answers `200`, not `204`** (#543). The body is
+  `{"orphanedTenants": [{"id", "name"}]}`: the shared tenants the account owns that no owner with an enabled account can
+  manage after the change — what a ban of a sole owner orphaned.
+- **The last owner of a tenant is the last *enabled* owner** (#543). A co-owner can no longer leave, nor be demoted or
+  removed, while the only other owner is banned: the banned owner keeps the flag, so enabling them restores it, but no
+  longer counts toward the last-owner check.
+
+- **Each rate budget is named after what it limits, and none is shared** (#542 item 3, decided by the maintainer).
+  `Alvo:Api:RateLimits:Token` is now `:TokenEndpoint` (RFC 6749 §3.2's name for `POST /auth/v1/token`; default 30).
+  `:Create`, which tenant creation and token minting shared, is split into `:Tenants` (`POST /auth/v1/tenants`) and
+  `:ApiTokens` (`POST /auth/v1/tokens`), 10 each, so minting at its limit no longer blocks creating a tenant from the
+  same address. `:Invitations` is unchanged. The configuration binder ignores a key it does not know, so a host still
+  setting `:Token` or `:Create` silently gets the defaults: rename the keys. **Public API:**
+  `AlvoRateLimitOptions.Token`/`.Create` → `.TokenEndpoint`, `.Tenants` and `.ApiTokens`.
+- **`auth.accessTokens` is now `auth.apiTokens`** (#542 item 4, decided by the maintainer). The block that switches on
+  personal and service tokens kept OAuth's name for a different thing: Alvo issues real OAuth access tokens at
+  `POST /auth/v1/token`, while these tokens are API keys sent in `X-Alvo-Api-Key`. The keys inside (`personal`,
+  `service`, `maxLifetimeDays`) are unchanged. A descriptor still using `auth.accessTokens` is refused by the schema;
+  rename the key. `feature-disabled`'s `descriptorKey` is now `auth.apiTokens`, `auth.apiTokens.personal` or
+  `auth.apiTokens.service`, and the apply refusal points at `/auth/apiTokens/service`. **Public API:**
+  `Auth.AccessTokens` → `Auth.ApiTokens`, `AuthAccessTokens` → `AuthApiTokens`. `AlvoAccountsOptions.AccessTokenMinutes`
+  and the token response's `access_token` keep their names: they are the OAuth access token.
 - **A refresh-token value names its session: `alvo_rt_<session>_<id>_<mac>`** (#527). The MAC covers both, and a value
   whose row the sweep deleted is still recognised as a reuse while its session lives. Every refresh token issued
   before this change is refused; people sign in again.
@@ -688,7 +740,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read a body without `disabled` — `{}` or none — as **enable**; it is now `422` with the sentence naming both values,
   exactly as `…/accounts/{id}/disabled` answers. A caller that sent the deployment's real project name and an explicit
   `{"disabled": true|false}` sees no change. The dashboard calls the port in-process and is unaffected.
-
 - **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
   as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
   the person has none:
@@ -1488,6 +1539,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An owner's removal racing her ban no longer deadlocks on PostgreSQL** (#543). Both revoked her invitations with an
+  unordered multi-row `UPDATE`, one walking the `tenant_id` index and one the heap; after a HOT update they met her rows
+  in opposite orders, and one of the two failed with `40P01` (a 500 that rolled back) — 9 of 10 staged runs. Every
+  transaction that sweeps or hands out a person's credentials now takes that person's account row first: a removal,
+  leaving, a demotion, a refresh-token reuse, an invitation's creation, a ban and a mint.
+
+- **A write hook's cold runs no longer fail a write by timing out** (#519). A hook's timeout (250 ms inside the
+  transaction by default) is wall-clock, and its first run after the host starts also pays for JIT compilation, type
+  loading, DI activation and its first queries — work no later run repeats. In a fresh or loaded process that run could
+  overrun and the write answered 500 `hook-failed` (`timeout`): the first write after a deploy, and the field-service
+  sample's tests on CI. Cold runs now get ten times the hook's timeout, at most 5 s and never less than the timeout
+  itself (2.5 s for the default). Every run that starts before the hook's first run has ended is cold, so concurrent
+  first runs share the allowance; and every run whose first call through `write.Transaction` comes before a run that
+  made such a call has ended gets it from that call on — a hook whose first run returns early meets its first queries
+  later. A run the caller cancelled (a client that disconnected) ends neither. Every other run has the timeout you set.
+  The second rule cannot help when the cold work *before* that first call already exceeds the timeout. A cold run
+  admitted past its timeout is logged at `Information`. A timed-out run is still not retried, since that would run the
+  hook's code twice. Host CEL functions' `Alvo:Extensions:CelFunctionBudget` is unchanged.
 - **The standalone host exits 78 on a descriptor the boot refuses at stage 0, not 139** (#340, #547). A mounted
   descriptor that fails validation — mistyped, or written for a newer Alvo — or that the mapper refuses (a field naming
   an unknown format, a format pattern that is not a regular expression) used to escape `Main` unhandled, and the

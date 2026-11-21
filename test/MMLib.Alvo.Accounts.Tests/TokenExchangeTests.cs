@@ -129,6 +129,30 @@ public sealed class TokenExchangeTests
         (await world.CountAsync("_auth_sessions")).ShouldBe(0);
     }
 
+    /// <summary>
+    /// #544: an ID token whose <c>azp</c> names a client this deployment did not configure — a Google service account's
+    /// token for our <c>aud</c> — is refused exactly as one for another app's <c>aud</c>: one answer, no oracle telling
+    /// which claim failed.
+    /// </summary>
+    [Fact]
+    public async Task An_azp_naming_another_client_is_refused_exactly_as_another_audience()
+    {
+        await using var world = await AccountsWorld.StartAsync(_engine);
+
+        using var foreignAzp = await world.ExchangeAsync(world.Oidc.Mint(
+            "112233445566778899000", email: "ci@project.iam.gserviceaccount.com", audience: AccountsWorld.ClientId,
+            issuer: AccountsWorld.GoogleIssuer, azp: "112233445566778899000"));
+        using var foreignAudience = await world.ExchangeAsync(world.Oidc.Mint(
+            "sub-1", audience: "another-app", issuer: AccountsWorld.GoogleIssuer));
+
+        var azp = await RefusalAsync(foreignAzp, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_request");
+        var audience = await RefusalAsync(foreignAudience, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_request");
+        azp.Remove("traceId");
+        audience.Remove("traceId");
+        azp.ToJsonString().ShouldBe(audience.ToJsonString());
+        (await world.CountAsync("_auth_accounts")).ShouldBe(0, "no account for either");
+    }
+
     [Fact]
     public async Task A_provider_the_descriptor_does_not_list_is_invalid_request()
     {

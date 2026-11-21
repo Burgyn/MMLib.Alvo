@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-accounts
-description: Use when an Alvo descriptor change lets people sign in or run their own tenants — auth.providers, auth.signUp, auth.accessTokens and tenancy.selfService.
+description: Use when an Alvo descriptor change lets people sign in or run their own tenants — auth.providers, auth.signUp, auth.apiTokens and tenancy.selfService.
 ---
 
 # Sign-in, self-service tenants and app tokens in an Alvo descriptor
@@ -13,7 +13,7 @@ from a caller an operator provisioned to anyone Google vouches for. Shapes:
 |---|---|---|
 | 1 per-person rows | `auth.providers` with `google`, `auth.signUp` | rules such as `created_by == @user.id` on an `audit` entity |
 | 2 a tenant per person | + `tenancy.enabled`, `selfService.personalTenant` | every scoped row walled to its person |
-| 3 shared tenants | + `createTenants`, `invitations`, `assignableRoles`, `auth.accessTokens` | teams with roles per tenant, and tokens |
+| 3 shared tenants | + `createTenants`, `invitations`, `assignableRoles`, `auth.apiTokens` | teams with roles per tenant, and tokens |
 
 ## Keys, defaults and refusals
 
@@ -28,8 +28,8 @@ from a caller an operator provisioned to anyone Google vouches for. Shapes:
   - `personalTenant.roles` (default `[]`) and `createTenants.creatorRoles` must be in `assignableRoles`, else refused
     ("a membership can only ever carry a tenant role"). `createTenants.maxPerAccount`: 1–100, default 5.
   - `invitations: true` needs `createTenants`, else refused ("no shared tenant can exist").
-- `auth.accessTokens` — `personal` and `service`, default `false`; `maxLifetimeDays` 1–365, default 90. `service`
-  without `createTenants` is refused at `/auth/accessTokens/service`: a service token acts as a shared tenant.
+- `auth.apiTokens` — `personal` and `service`, default `false`; `maxLifetimeDays` 1–365, default 90. `service`
+  without `createTenants` is refused at `/auth/apiTokens/service`: a service token acts as a shared tenant.
 
 ## Tenant roles are not project roles
 

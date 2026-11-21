@@ -259,6 +259,15 @@ internal sealed class AuthTables(string schemaPrefix)
         """;
 
     /// <summary>
+    /// Gets the statement taking one account's row lock, enabled or not, with a write that changes nothing — the first lock
+    /// of every transaction that sweeps or hands out a person's credentials (hardening design §2.3, #543): a ban, a
+    /// refresh-token reuse, a removal, leaving, a demotion, a mint, an invitation's creation. On PostgreSQL a second such
+    /// transaction of the same person waits here, before it holds any of the person's sessions, invitations or tokens, so
+    /// two sweeps of one person never meet those rows in opposite orders. Matching no row locks nothing.
+    /// </summary>
+    internal string LockAccountRowSql => $"UPDATE {Accounts} SET last_sign_in_at = last_sign_in_at WHERE id = @account_id";
+
+    /// <summary>
     /// Gets the statement reading one live session's account and start, by the session's id alone — whatever the session's
     /// refresh tokens still have rows (#527: a swept ancestor's value names its session).
     /// </summary>
