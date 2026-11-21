@@ -119,7 +119,7 @@ internal sealed partial class AccountsWorld : IAsyncDisposable
         var setup = new AlvoApiWorldSetup(
             ConfigureApi: options =>
             {
-                options.RateLimits.Token = UnthrottledTokenRequests;
+                options.RateLimits.TokenEndpoint = UnthrottledTokenRequests;
                 options.RateLimits.Invitations = UnthrottledInvitationRequests;
                 api?.Invoke(options);
             },

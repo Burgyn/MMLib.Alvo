@@ -257,9 +257,9 @@ public abstract class AppTokenEngineFacts
         await world.ReapplyAsync(descriptor => OnlyTechnicianAssignable(descriptor["tenancy"]!["selfService"]!));
         await ExpectAsync(JobAsync(world, service, acme, "Dispatcher dropped"), HttpStatusCode.Forbidden);
 
-        await world.ReapplyAsync(descriptor => descriptor["auth"]!["accessTokens"]!["service"] = false);
+        await world.ReapplyAsync(descriptor => descriptor["auth"]!["apiTokens"]!["service"] = false);
         await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, Jobs, service, Header(acme)), HttpStatusCode.Unauthorized);
-        await world.ReapplyAsync(descriptor => descriptor["auth"]!["accessTokens"]!["service"] = true);
+        await world.ReapplyAsync(descriptor => descriptor["auth"]!["apiTokens"]!["service"] = true);
         await ExpectAsync(world.AsTokenAsync(HttpMethod.Get, Jobs, service, Header(acme)), HttpStatusCode.OK);
 
         await world.ReapplyAsync(AccountsWorld.WithoutSelfService);

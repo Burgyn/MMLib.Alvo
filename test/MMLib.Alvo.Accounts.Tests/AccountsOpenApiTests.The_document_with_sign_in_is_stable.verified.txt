@@ -110,7 +110,7 @@
             }
           },
           "429": {
-            "description": "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:Token` allows. Wait for `Retry-After`, then send the request again.",
+            "description": "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:TokenEndpoint` allows. Wait for `Retry-After`, then send the request again.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
@@ -531,8 +531,18 @@
           "tenants"
         ],
         "summary": "Create a shared tenant",
-        "description": "Creates a tenant others can join, with an id the server chooses. The person becomes its owner, holding `createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.",
+        "description": "Creates a tenant others can join, with an id the server chooses. The person becomes its owner, holding `createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.\n\n**Send `Idempotency-Key` to make a retry safe.** A tenant cannot be deleted, so a retried create without a key spends a `maxPerAccount` slot for good. With one, a retry carrying the same key and the same name answers the tenant the first create made — the same 201 and `Location`, the person's membership as it reads now (the id alone if they have left it) — and creates nothing; the same key with another name is 409 `idempotency-conflict`.",
         "operationId": "tenants.create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes the creation retry-safe: recorded with the tenant under the person's own scope, so a retry with the same key and name answers the tenant the first create made and creates nothing. At most one header line, not blank, and within the API's byte bound, or 422.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "description": "The new tenant's name.",
           "content": {
@@ -634,7 +644,7 @@
             }
           },
           "409": {
-            "description": "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap).",
+            "description": "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap). `idempotency-conflict`: the person already spent this `Idempotency-Key` on a creation with another name.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -672,7 +682,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`. `malformed-query`: `Idempotency-Key` is sent twice, blank or too long — the Data API's answer for the same header.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -691,7 +701,7 @@
             }
           },
           "429": {
-            "description": "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Create` allows. Wait for `Retry-After`, then send the request again.",
+            "description": "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Tenants` allows. Wait for `Retry-After`, then send the request again.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -1325,7 +1335,7 @@
           "tenants"
         ],
         "summary": "Invite someone into a tenant",
-        "description": "An owner of a shared tenant creates an invitation: the tenant roles it grants (each from `tenancy.selfService.assignableRoles`), whether it makes an owner, an optional email it is bound to, how many people may accept it and when it expires. The answer carries its `code` — shown this once, never again.",
+        "description": "An owner of a shared tenant creates an invitation: the tenant roles it grants (each from `tenancy.selfService.assignableRoles`), whether it makes an owner, an optional email it is bound to, how many people may accept it and when it expires. The answer carries its `code` — shown this once, never again.\n\n**`Idempotency-Key` is refused here (422 `malformed-query`):** the code is kept only as a hash, so no retry could return it. If an answer is lost, list the tenant's invitations, revoke the one you cannot account for and create a new one.",
         "operationId": "tenants.createInvitation",
         "parameters": [
           {
@@ -1472,7 +1482,7 @@
             }
           },
           "422": {
-            "description": "`validation`: `roles` is missing or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` or is named twice; `maxUses` is not 1–100; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most 30 days away; `email` is not one address; an owner-making invitation admits more than one person or lives longer than 7 days; or the body carries another property.",
+            "description": "`validation`: `roles` is missing or a role at `/roles/{i}` is not in `tenancy.selfService.assignableRoles` or is named twice; `maxUses` is not 1–100; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most 30 days away; `email` is not one address; an owner-making invitation admits more than one person or lives longer than 7 days; or the body carries another property. `malformed-query`: `Idempotency-Key` was sent, which creating an invitation does not honour.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2127,7 +2137,7 @@
           "tokens"
         ],
         "summary": "Mint a personal or service token",
-        "description": "A signed-in person mints a token for an integration. A `personal` token acts as the person — with the tenant roles they hold, read on every request — in one tenant or none; a `service` token acts as a tenant the person owns, with roles the person holds there, and only in shared tenants. On the generated Data API and on a command bound to an entity, a token reaches only the `scopes` named (`<entity>:read` or `<entity>:write`, never `*`); a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or mints a token.",
+        "description": "A signed-in person mints a token for an integration. A `personal` token acts as the person — with the tenant roles they hold, read on every request — in one tenant or none; a `service` token acts as a tenant the person owns, with roles the person holds there, and only in shared tenants. On the generated Data API and on a command bound to an entity, a token reaches only the `scopes` named (`<entity>:read` or `<entity>:write`, never `*`); a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or mints a token.\n\n**`Idempotency-Key` is refused here (422 `malformed-query`):** the secret is kept only as a hash, so no retry could return it. If an answer is lost, list your tokens (`GET /tokens`), revoke the one you never received (`DELETE /tokens/{keyId}`) and mint again.",
         "operationId": "tokens.create",
         "requestBody": {
           "description": "The token to mint.",
@@ -2205,7 +2215,7 @@
             }
           },
           "404": {
-            "description": "`not-found`: no such tenant, or the person is no member of it — one answer for both. `feature-disabled`: the descriptor does not declare `auth.accessTokens`, or the requested kind is off; `descriptorKey` names which (`auth.accessTokens`, `auth.accessTokens.personal` or `auth.accessTokens.service`).",
+            "description": "`not-found`: no such tenant, or the person is no member of it — one answer for both. `feature-disabled`: the descriptor does not declare `auth.apiTokens`, or the requested kind is off; `descriptorKey` names which (`auth.apiTokens`, `auth.apiTokens.personal` or `auth.apiTokens.service`).",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2262,7 +2272,7 @@
             }
           },
           "422": {
-            "description": "`validation`: `name`, `kind`, `scopes` or `expiresAt` is missing or out of bounds; `tenantId` is missing for a service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most `auth.accessTokens.maxLifetimeDays` away; or the body carries another property.",
+            "description": "`validation`: `name`, `kind`, `scopes` or `expiresAt` is missing or out of bounds; `tenantId` is missing for a service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body carries another property. `malformed-query`: `Idempotency-Key` was sent, which minting does not honour.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2281,7 +2291,7 @@
             }
           },
           "429": {
-            "description": "`rate-limited`: this client created tenants and minted tokens more often this minute than `Alvo:Api:RateLimits:Create` allows — one budget for both. Wait for `Retry-After`, then send the request again.",
+            "description": "`rate-limited`: this client minted more tokens this minute than `Alvo:Api:RateLimits:ApiTokens` allows. Wait for `Retry-After`, then send the request again.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2388,7 +2398,7 @@
             }
           },
           "404": {
-            "description": "`feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it.",
+            "description": "`feature-disabled`: the descriptor does not declare `auth.apiTokens`; `descriptorKey` names it.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2491,7 +2501,7 @@
             }
           },
           "404": {
-            "description": "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it.",
+            "description": "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the descriptor does not declare `auth.apiTokens`; `descriptorKey` names it.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -3617,7 +3627,7 @@
           },
           "expiresAt": {
             "type": "string",
-            "description": "When the token expires: RFC 3339 with an offset, in the future, at most `auth.accessTokens.maxLifetimeDays` days away. A token always expires.",
+            "description": "When the token expires: RFC 3339 with an offset, in the future, at most `auth.apiTokens.maxLifetimeDays` days away. A token always expires.",
             "format": "date-time"
           }
         },

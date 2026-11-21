@@ -12,6 +12,11 @@ internal static partial class HookLog
     internal static partial void HookSetRefused(ILogger logger, string extension, string field, string problem);
 
     [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Write hook {Extension} ran {ElapsedMs:0} ms on a cold start, past its {TimeoutMs:0} ms timeout; admitted under the cold-start allowance, which its first run and its first run that calls through the transaction get.")]
+    internal static partial void ColdRunAdmitted(ILogger logger, string extension, double elapsedMs, double timeoutMs);
+
+    [LoggerMessage(
         Level = LogLevel.Warning,
         Message = "Write hook {Extension} acted as the system in tenant {Tenant} on {Entity} ({Operation}) for {Actor}, correlation {CorrelationId}.")]
     internal static partial void ExtensionSystemAccess(

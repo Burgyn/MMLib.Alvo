@@ -15,7 +15,7 @@
     "providers": ["local", "google"],
     "roles": ["dispatcher", "technician"],
     "signUp": { "mode": "open" },
-    "accessTokens": { "personal": true, "service": true }
+    "apiTokens": { "personal": true, "service": true }
   },
   "formats": {
     "work-order-ref": {

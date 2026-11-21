@@ -22,7 +22,7 @@ public sealed class TokenRateLimitTests
     [Fact]
     public async Task The_token_endpoint_answers_429_after_its_limit()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, api: api => api.RateLimits.Token = 2);
+        await using var world = await AccountsWorld.StartAsync(_engine, api: api => api.RateLimits.TokenEndpoint = 2);
 
         using var first = await world.RefreshAsync("not-a-token");
         using var second = await world.RefreshAsync("not-a-token");
@@ -40,7 +40,7 @@ public sealed class TokenRateLimitTests
     [Fact]
     public async Task The_limit_does_not_touch_the_data_api()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, api: api => api.RateLimits.Token = 1);
+        await using var world = await AccountsWorld.StartAsync(_engine, api: api => api.RateLimits.TokenEndpoint = 1);
         var (access, _) = await world.SignInAsync("sub-1");
 
         for (var i = 0; i < 3; i++)

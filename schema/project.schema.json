@@ -227,7 +227,7 @@
             }
           }
         },
-        "accessTokens": {
+        "apiTokens": {
           "type": "object",
           "additionalProperties": false,
           "description": "Self-service tokens for integrators: personal tokens that act as a person, service tokens that act as a tenant. Optional; absent = no self-service tokens.",

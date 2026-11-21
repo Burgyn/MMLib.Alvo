@@ -41,7 +41,7 @@ public sealed class AppTokenResolutionTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static PolicyCatalog Compile(string? accessTokens, string? selfService)
+    private static PolicyCatalog Compile(string? apiTokens, string? selfService)
     {
         var descriptor = AlvoDescriptor.Parse($$"""
             {
@@ -51,7 +51,7 @@ public sealed class AppTokenResolutionTests
                 "providers": ["google"],
                 "roles": ["dispatcher", "technician"],
                 "signUp": { "mode": "open" }
-                {{(accessTokens is null ? string.Empty : $", \"accessTokens\": {accessTokens}")}}
+                {{(apiTokens is null ? string.Empty : $", \"apiTokens\": {apiTokens}")}}
               },
               "tenancy": { "enabled": true {{(selfService is null ? string.Empty : $", \"selfService\": {selfService}")}} },
               "entities": { "jobs": { "fields": { "title": { "type": "string" } } } }
@@ -60,8 +60,8 @@ public sealed class AppTokenResolutionTests
         return PolicyCatalog.Build(descriptor, DescriptorToSchemaMapper.Map(descriptor), new CelCompiler());
     }
 
-    private void Apply(string? accessTokens = """{ "personal": true, "service": true }""", string? selfService = AllOn) =>
-        _catalogs.SetCurrent("tokens", Compile(accessTokens, selfService));
+    private void Apply(string? apiTokens = """{ "personal": true, "service": true }""", string? selfService = AllOn) =>
+        _catalogs.SetCurrent("tokens", Compile(apiTokens, selfService));
 
     private ApiKeyContextResolver Resolver(ILogger<ApiKeyContextResolver>? logger = null)
     {
@@ -270,9 +270,9 @@ public sealed class AppTokenResolutionTests
     [InlineData(PersonalId, """{ "personal": false, "service": true }""", AllOn)]
     [InlineData(ServiceId, """{ "personal": true, "service": false }""", AllOn)]
     [InlineData(ServiceId, """{ "personal": true, "service": true }""", null)]
-    public async Task A_kind_the_descriptor_does_not_enable_is_refused(string keyId, string? accessTokens, string? selfService)
+    public async Task A_kind_the_descriptor_does_not_enable_is_refused(string keyId, string? apiTokens, string? selfService)
     {
-        Apply(accessTokens, selfService);
+        Apply(apiTokens, selfService);
         Stored(keyId, _tenant, ["dispatcher"]);
         Member(_tenant, TenantKind.Shared, "dispatcher");
 
@@ -285,7 +285,7 @@ public sealed class AppTokenResolutionTests
     {
         Stored(PersonalId, _tenant);
         Member(_tenant, TenantKind.Shared, "dispatcher");
-        Apply(accessTokens: """{ "personal": false }""");
+        Apply(apiTokens: """{ "personal": false }""");
         (await Present(PersonalId)).ShouldBeNull();
 
         Apply();
