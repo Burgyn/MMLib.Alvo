@@ -1,0 +1,49 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Events/Internal/EventPump.cs",
+      "Events/Internal/HandlerCondition.cs",
+      "Events/Internal/HandlerMessage.cs",
+      "Events/Internal/JsonPayload.cs",
+      "Events/Internal/JsonataSlot.cs",
+      "Events/Internal/MailHeaders.cs",
+      "Events/Internal/OperationsAudit.cs",
+      "Events/Internal/OutboxDispatcher.cs",
+      "Events/Internal/PassThroughSteps.cs",
+      "Events/Internal/PayloadFacets.cs",
+      "Events/Internal/StepNames.cs",
+      "Events/Internal/StepSleep.cs",
+      "Events/Internal/WebhookAddressClassifier.cs",
+      "Events/Internal/WebhookDelivery.cs",
+      "Events/Internal/WebhookEgressGuard.cs",
+      "Events/Internal/WebhookHostResolver.cs",
+      "Events/Internal/WebhookTarget.cs",
+      "Events/Setup.cs",
+      "Extensions/AlvoConcurrency.cs",
+      "Extensions/AlvoDeliveryOptions.cs",
+      "Extensions/AlvoEntityBuilder.Reads.cs",
+      "Extensions/AlvoEntityBuilder.WriteHooks.cs",
+      "Extensions/AlvoEntityBuilder.cs",
+      "Extensions/AlvoEntityBuilder{T}.Reads.cs",
+      "Extensions/AlvoEntityBuilder{T}.WriteHooks.cs",
+      "Extensions/AlvoEntityBuilder{T}.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Functions/Internal/FunctionInputSchema.cs",
+      "Functions/Internal/FunctionInvocation.cs",
+      "Functions/Internal/FunctionRegistration.cs",
+      "Hooks/AfterDelete{T}.cs",
+      "Hooks/AfterWrite{T}.cs",
+      "Hooks/AlvoWriteRejectedException.cs",
+      "Hooks/AlvoWriteRejectionKind.cs",
+      "Hooks/BeforeDelete{T}.cs",
+      "Hooks/BeforeWrite{T}.cs",
+      "Hooks/IAfterDeleteHook.cs",
+      "Hooks/IAfterDeleteHook{T}.cs",
+      "Hooks/IAfterWriteHook.cs",
+      "Hooks/IAfterWriteHook{T}.cs",
+      "Hooks/IBeforeDeleteHook.cs",
+      "Hooks/IBeforeDeleteHook{T}.cs",
+      "Hooks/IBeforeWriteHook.cs",
+      "Hooks/IBeforeWriteHook{T}.cs",
+      "Hooks/IValidateWriteHook.cs",
+      "Hooks/IValidateWriteHook{T}.cs",
+      "Hooks/Internal/BoundWriteHook.cs",
+      "Hooks/Internal/HookContexts.cs",
+      "Hooks/Internal/HookDependencies.cs",
+      "Hooks/Internal/HookDescription.cs",
+      "Hooks/Internal/HookImage.cs",
+      "Hooks/Internal/HookInvoker.cs",
+      "Hooks/Internal/HookLog.cs",
+      "Hooks/Internal/HookRejections.cs",
+      "Hooks/Internal/HookRun.cs",
+      "Hooks/Internal/HookSets.cs",
+      "Hooks/Internal/HookTelemetry.cs",
+      "Hooks/Internal/HookTransaction.cs",
+      "Hooks/Internal/Setup.cs",
+      "Hooks/Internal/WriteConditionTranslator.cs",
+      "Hooks/Internal/WriteExtensionRunner.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Rules/Internal/PolicyCatalogBuilder.cs",
+      "Rules/Internal/PolicyCatalogProvider.cs",
+      "Rules/Internal/PolicyEngine.cs",
+      "Rules/Internal/RelationBinder.cs",
+      "Rules/Internal/RelationCatalogBuilder.cs",
+      "Rules/Internal/RelationGraph.cs",
+      "Rules/Internal/RelationRefusals.cs",
+      "Rules/Internal/RelationWarnings.cs",
+      "Rules/ManagementAccessCatalog.cs",
+      "Rules/PolicyCatalog.cs",
+      "Scheduling/AlvoJobContext.cs",
+      "Scheduling/AlvoScheduleOptions.cs",
+      "Scheduling/AlvoScheduleScope.cs",
+      "Scheduling/AlvoScheduler.cs",
+      "Scheduling/AlvoSchedulerExtensions.cs",
+      "Scheduling/CronSchedule.cs",
+      "Scheduling/DataMigrationBootCheck.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

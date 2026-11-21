@@ -1,0 +1,36 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Expressions/Internal/HostCelFunction.cs",
+      "Expressions/Internal/IChangeListPredicateEvaluator.cs",
+      "Expressions/Internal/IValueCompiler.cs",
+      "Expressions/Internal/PredicateEvaluator.cs",
+      "Expressions/Internal/RelationImageValue.cs",
+      "Expressions/Internal/RelationLifter.cs",
+      "Expressions/Internal/RoleMembership.cs",
+      "Expressions/Internal/RoleProvenance.cs",
+      "Expressions/Internal/SqlPredicateRenderer.Constraint.cs",
+      "Expressions/Internal/SqlPredicateRenderer.Relations.cs",
+      "Expressions/Internal/SqlPredicateRenderer.Temporal.cs",
+      "Expressions/Internal/SqlPredicateRenderer.cs",
+      "Expressions/Internal/StoredPredicateSurface.cs"
+    ],
+    "thresholds": {
+      "high": 96,
+      "low": 92,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

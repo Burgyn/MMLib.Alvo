@@ -1,0 +1,30 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Descriptor/Internal/RollupResolver.cs",
+      "Descriptor/Internal/RollupValidationOrderCheck.cs",
+      "Descriptor/Internal/SelfServiceCheck.cs",
+      "Descriptor/Internal/SequenceFieldCheck.cs",
+      "Descriptor/Internal/SignUpCheck.cs",
+      "Descriptor/Internal/StateMachineCheck.cs",
+      "Descriptor/Internal/UnhonouredFeatures.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

@@ -95,13 +95,25 @@ config="${2:?missing stryker config path}"
 expected_mutants="${3:?missing expected mutant count}"
 expected_tests="${4:?missing expected test count}"
 shard="${5:?missing shard name}"
-# Optional 6th argument, literally the word `canary`. Anything else is refused rather
-# than ignored: a typo that silently turned check 5 off would leave the one check that
-# can detect a lying runner quietly absent, which is the defect class it exists for.
+# Optional 6th argument, the MODE: absent, literally `canary`, or literally `since`.
+# Anything else is refused rather than ignored: a typo that silently turned check 5 off
+# would leave the one check that can detect a lying runner quietly absent, which is the
+# defect class it exists for.
+#
+# `since` is the per-push run of a long leg with Stryker's `since` against the previous
+# main commit (.github/workflows/mutation.yml, "THE CADENCE"). It mutates only the files the
+# merge changed, so ZERO mutants is a legitimate answer — a merge that touched no file of this
+# leg — and the declared count is the FULL leg's, which a diff run never approaches. So that
+# mode skips exactly two things: check 1's zero-mutant clause and check 3's floor. Every
+# other check (the test projects, the suite floor, the timeout and error shares) still holds:
+# a diff run that substituted its suite or spent its mutants on timeouts is as wrong as a
+# full one.
 canary="${6:-}"
+since=false
 case "$canary" in
     ''|canary) ;;
-    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary' or absent, got '$canary'."; exit 1 ;;
+    since) since=true; canary='' ;;
+    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary', the word 'since', or absent, got '$canary'."; exit 1 ;;
 esac
 
 fail() {
@@ -184,7 +196,10 @@ tr '\r' '\n' < "$log" | command sed -E 's/\x1B\[[0-9;?]*[A-Za-z]//g' > "$norm"
 # inherited from the inline workflow step could never match and that whole
 # alternative was dead.
 # ---------------------------------------------------------------------------
-if command grep -qE '(^|[^0-9])0[[:space:]]+total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0([^0-9]|$)' "$norm"; then
+vacuous='(^|[^0-9])0[[:space:]]+total mutants will be tested|unable to calculate a mutation score|Number of tests found: 0([^0-9]|$)'
+# In `since` mode zero mutants is a merge that touched nothing here; an empty SUITE is still vacuous.
+[ "$since" = true ] && vacuous='Number of tests found: 0([^0-9]|$)'
+if command grep -qE "$vacuous" "$norm"; then
     fail "tested zero mutants (vacuous run) — see the log above. Failing the gate instead of a false green (stryker-net#3094)."
 fi
 
@@ -230,6 +245,8 @@ tested="$(command grep -oE '[0-9]+[[:space:]]+total mutants will be tested' "$no
 [ -n "$tested" ] || fail "the log never reports 'N total mutants will be tested', so there is no verdict to trust. Either the run did not reach the mutation loop, or a Stryker upgrade reworded the line — in which case fix this assertion rather than deleting it."
 
 mutant_floor=$(( expected_mutants * 60 / 100 ))
+# A `since` run mutates only what the merge changed, so the full leg's count is no floor for it.
+[ "$since" = true ] && mutant_floor=0
 if [ "$tested" -lt "$mutant_floor" ]; then
     fail "tested $tested mutants, but '$config' measured $expected_mutants when this shard was last calibrated (floor $mutant_floor = 60 %).
     A collapse this size is not ordinary drift: check the mutate globs against the files that moved. If the drop is legitimate, update the shard's 'mutants:' in .github/workflows/mutation.yml so the floor tracks reality."
