@@ -200,6 +200,7 @@ the answers are the same.
      "maxUses": 1,
      "uses": 0,
      "expiresAt": "…",
+     "createdBy": { "id": "5b1f…", "name": "Dana Novak" },
      "status": "active",
      …
    }
@@ -238,9 +239,12 @@ the answers are the same.
    ```http
    HTTP/1.1 200 OK
 
-   { "tenantName": "Acme Repairs", "inviterName": "Dana Novak", "roles": ["technician"], "isOwner": false,
+   { "tenantName": "Acme Repairs", "createdBy": { "name": "Dana Novak" }, "roles": ["technician"], "isOwner": false,
      "expiresAt": "…", "emailBound": false }
    ```
+
+   `createdBy` names Dana as every answer names a creator, but by name alone: someone who has not signed in learns no
+   account id.
 
    Theo signs in, and the page accepts the code as him:
 

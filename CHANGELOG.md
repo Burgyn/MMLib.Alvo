@@ -669,6 +669,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
+  as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
+  the person has none:
+  - `GET /auth/v1/tokens`: `mintedBy: { "id", "displayName" }` → `createdBy: { "id", "name" }`.
+  - `POST` and `GET /auth/v1/tenants/{id}/invitations`: `createdBy` was a bare account id; it is now the object.
+  - `POST /auth/v1/invitations/preview` (anonymous): `inviterName` → `createdBy: { "name" }` — the same key and path, by
+    name alone, so the preview still discloses no account id.
+  - `POST /auth/v1/tokens`: the 201 is now the token's list item plus `token` and `header` — it gains `createdBy`,
+    `lastUsedAt`, `revokedAt` and `status` — so a client parses one shape for a minted and a listed token, as for
+    invitations. The OpenAPI document publishes the two shapes as `authPersonReference` and `authPersonName`.
+  **Docs:** the tokens and tenants guides, `docs/architecture/accounts.md`, the design
+  `docs/superpowers/specs/2026-11-21-auth-v1-contract-uniformity-design.md` §2.
 - **An API key on a person-only `/auth/v1` route is `401`, not `403`** (#542 item 2). Every route only a signed-in
   person reaches — the tenant, member and token routes, managing and accepting invitations (not the anonymous preview),
   and `/user` and `/logout` — authenticates with a person's Bearer token alone. Any `X-Alvo-Api-Key` there — a

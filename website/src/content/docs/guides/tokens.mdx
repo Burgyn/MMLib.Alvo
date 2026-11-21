@@ -85,13 +85,18 @@ answers are the same.
      "tenantId": "3c9e…",
      "roles": ["dispatcher"],
      "scopes": ["work_orders:read"],
+     "createdBy": { "id": "5b1f…", "name": "Dana Novak" },
+     "createdAt": "…",
      "expiresAt": "…",
-     "createdAt": "…"
+     "lastUsedAt": null,
+     "revokedAt": null,
+     "status": "active"
    }
    ```
 
    **`token` is in this answer and in no other, ever.** Put it in the billing system's secret store now. Alvo keeps
-   only a hash of it. `header` names the header to send it in.
+   only a hash of it. `header` names the header to send it in. Everything else is exactly what the token list will
+   show of it.
 
    `expiresAt` is required and is computed when you mint, never written down: RFC 3339 with an offset, later than now
    and at most `maxLifetimeDays` ahead, or the mint is refused at `/expiresAt`. Here it is 28 days, inside the
@@ -194,7 +199,7 @@ answers are the same.
        "tenantId": "3c9e…",
        "roles": ["dispatcher"],
        "scopes": ["work_orders:read"],
-       "mintedBy": { "id": "5b1f…", "displayName": "Dana Novak" },
+       "createdBy": { "id": "5b1f…", "name": "Dana Novak" },
        "createdAt": "…",
        "expiresAt": "…",
        "lastUsedAt": "…",

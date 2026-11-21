@@ -1,6 +1,7 @@
 # The `/auth/v1` contract before v0.1: names, credential answers, rate-limit keys, `auth.accessTokens`, idempotency — design
 
-**Status:** proposed — item 4's name is the maintainer's call and is **not decided** here · **Date:** 2026-11-21 ·
+**Status:** items 1 and 2 implemented (slices 1–2); items 3, 4, 5b and 5c await the maintainer (item 4's name is his
+call and is **not decided** here); 5a may follow · **Date:** 2026-11-21 ·
 **Branch:** `debt/542-auth-contract` · **Issue:** [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542) (milestone F6 — v0.1)
 
 Built on: the accounts spec `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
@@ -31,6 +32,14 @@ Management answers. Management is a different surface with its own scheme (§3.4
 stays).
 
 ## 2. Item 1 — one shape for a person, one key per role
+
+> **Implemented** (slice 2; recommendation A accepted, and the token's 201 as its list item ruled in scope). Wire as in
+> §2.5. `PersonReference`/`PersonName` (`Tenants/SelfService/PersonReference.cs`) back the two OpenAPI components
+> `authPersonReference`/`authPersonName`; `InvitationView.CreatorName` is read by the list's own left join, and an
+> invitation's 201 is read back with it after the creation commits (the token mint's precedent, outside its transaction
+> here). `InvitationPreview.InviterName` was renamed `CreatorName` internally. Held by
+> `InvitationStoreFacts.An_invitation_names_its_creator_by_their_current_display_name` (both engines) and
+> `AppTokenResponseTests` (the 201 equals the list item member for member, plus `token`/`header`; a null name).
 
 ### 2.1 Current state
 
