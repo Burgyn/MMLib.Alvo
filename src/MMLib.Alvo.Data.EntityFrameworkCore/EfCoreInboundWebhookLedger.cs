@@ -58,8 +58,8 @@ internal sealed class EfCoreInboundWebhookLedger : IInboundWebhookLedger
             cancellationToken);
 
     /// <inheritdoc/>
-    public Task<int> SweepAsync(DateTimeOffset receivedBefore, CancellationToken cancellationToken) =>
-        AffectedAsync(connection => InboundWebhookTable.SweepAsync(connection, _table, receivedBefore, cancellationToken), cancellationToken);
+    public Task<int> SweepAsync(DateTimeOffset receivedBefore, int limit, CancellationToken cancellationToken) =>
+        AffectedAsync(connection => InboundWebhookTable.SweepAsync(connection, _table, receivedBefore, limit, cancellationToken), cancellationToken);
 
     private async Task<WebhookClaimResult> ClaimedAsync(
         DbConnection connection, DbTransaction transaction, string receiver, string id, DateTimeOffset now, CancellationToken ct)

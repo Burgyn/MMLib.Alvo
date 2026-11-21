@@ -42,7 +42,7 @@ public sealed class PostgreSqlLedgerTests : LedgerFacts, IAsyncLifetime
         var connections = services.GetRequiredService<RelationalConnectionFactory>();
         var table = CommandLedgerTable.NameFor(services.GetRequiredService<IOptions<AlvoOptions>>().Value.SchemaPrefix);
         var key = new CommandKey("command:quote_stay/global/race/-", "race", "fp");
-        await ledger.SweepAsync(_now.AddYears(-1), Ct);
+        await ledger.SweepAsync(_now.AddYears(-1), 500, Ct);
 
         await using var rival = await OpenAsync(connections);
         await using var uncommitted = await rival.BeginTransactionAsync(Ct);

@@ -1,8 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using MMLib.Alvo.InboundWebhooks.Internal;
+using MMLib.Alvo.Sweeping;
 
 namespace MMLib.Alvo.InboundWebhooks;
 
@@ -12,10 +11,8 @@ internal static class InboundWebhooksSetup
     internal static IServiceCollection AddAlvoInboundWebhooks(this IServiceCollection services)
     {
         services.TryAddSingleton<WebhookReceivers>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LedgerSweeper>(provider => new LedgerSweeper(
-            provider,
-            provider.GetService<TimeProvider>() ?? TimeProvider.System,
-            provider.GetRequiredService<ILogger<LedgerSweeper>>())));
-        return services;
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, InboundWebhookLedgerSweepJob>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, CommandLedgerSweepJob>());
+        return services.AddAlvoFrameworkSweeper();
     }
 }

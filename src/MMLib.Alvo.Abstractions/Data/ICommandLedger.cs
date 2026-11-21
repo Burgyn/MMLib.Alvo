@@ -33,8 +33,8 @@ internal interface ICommandLedger
     Task CompleteAsync(
         AlvoFrameworkEnvelope completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>Forgets every key claimed before <paramref name="claimedBefore"/>; answers how many.</summary>
-    Task<int> SweepAsync(DateTimeOffset claimedBefore, CancellationToken cancellationToken);
+    /// <summary>Forgets at most <paramref name="limit"/> keys claimed before <paramref name="claimedBefore"/>; answers how many.</summary>
+    Task<int> SweepAsync(DateTimeOffset claimedBefore, int limit, CancellationToken cancellationToken);
 }
 
 /// <summary>

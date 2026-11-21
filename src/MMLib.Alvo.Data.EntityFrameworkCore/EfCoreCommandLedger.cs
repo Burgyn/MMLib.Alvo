@@ -83,13 +83,13 @@ internal sealed class EfCoreCommandLedger : ICommandLedger
     }
 
     /// <inheritdoc/>
-    public async Task<int> SweepAsync(DateTimeOffset claimedBefore, CancellationToken cancellationToken)
+    public async Task<int> SweepAsync(DateTimeOffset claimedBefore, int limit, CancellationToken cancellationToken)
     {
         var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using (connection.ConfigureAwait(false))
         using (await _connections.WriteGate.EnterAsync(cancellationToken).ConfigureAwait(false))
         {
-            return await CommandLedgerTable.SweepAsync(connection, _table, claimedBefore, cancellationToken).ConfigureAwait(false);
+            return await CommandLedgerTable.SweepAsync(connection, _table, claimedBefore, limit, cancellationToken).ConfigureAwait(false);
         }
     }
 
