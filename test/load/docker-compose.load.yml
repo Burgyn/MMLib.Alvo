@@ -33,7 +33,8 @@ services:
       Alvo__Accounts__Providers__Google__Authority: !reset null
       Alvo__Accounts__Providers__Google__AllowHttpMetadata: !reset null
       Alvo__Secrets__EncryptionKeyFile: !reset null
-      Alvo__Api__RateLimits__Token: !reset null
-      Alvo__Api__RateLimits__Create: !reset null
+      Alvo__Api__RateLimits__TokenEndpoint: !reset null
+      Alvo__Api__RateLimits__Tenants: !reset null
+      Alvo__Api__RateLimits__ApiTokens: !reset null
       Alvo__Api__RateLimits__Invitations: !reset null
     secrets: !reset []

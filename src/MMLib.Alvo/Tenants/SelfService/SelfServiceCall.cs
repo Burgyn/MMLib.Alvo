@@ -55,7 +55,7 @@ internal sealed record SelfServiceCall(UserId Person, Guid? Session, PolicyCatal
 
     /// <summary>
     /// Admits the request's person and checks a feature the self-service policy alone does not decide, such as
-    /// <c>auth.accessTokens</c>, or answers the refusal instead.
+    /// <c>auth.apiTokens</c>, or answers the refusal instead.
     /// </summary>
     /// <param name="http">The request.</param>
     /// <param name="feature">The feature check over the applied catalog: the refusal, or <see langword="null"/> when it is on.</param>

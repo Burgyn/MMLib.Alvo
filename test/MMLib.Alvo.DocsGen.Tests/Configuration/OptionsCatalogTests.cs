@@ -55,7 +55,7 @@ public class OptionsCatalogTests
         var api = _sections.Single(s => s.Name == "Alvo:Api").Keys.Select(k => k.Key).ToList();
 
         api.ShouldContain(key => key.StartsWith("Alvo:Api:Cors:Origins", StringComparison.Ordinal));
-        api.ShouldContain("Alvo:Api:RateLimits:Token");
+        api.ShouldContain("Alvo:Api:RateLimits:TokenEndpoint");
     }
 
     /// <summary>An options type held as a dictionary's value is a nested section keyed by name, not a section of its own.</summary>

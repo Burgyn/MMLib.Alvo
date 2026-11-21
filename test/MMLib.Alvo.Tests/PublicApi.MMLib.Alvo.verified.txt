@@ -111,9 +111,10 @@ namespace MMLib.Alvo.Api
     public sealed class AlvoRateLimitOptions
     {
         public AlvoRateLimitOptions() { }
-        public int Create { get; set; }
+        public int ApiTokens { get; set; }
         public int Invitations { get; set; }
-        public int Token { get; set; }
+        public int Tenants { get; set; }
+        public int TokenEndpoint { get; set; }
     }
     public sealed class AlvoViolation : System.IEquatable<MMLib.Alvo.Api.AlvoViolation>
     {

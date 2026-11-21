@@ -109,6 +109,28 @@ public sealed class TokenRoutesTests
         (await team.World.Store.GetAccountAsync(new UserId(author), Ct)).ShouldBeNull("a service token is no account");
     }
 
+    /// <summary>
+    /// #542 item 5: minting does not honour <c>Idempotency-Key</c> — the secret is shown once — and a key sent anyway is
+    /// refused at 422 <c>malformed-query</c> with the fix, never silently ignored: a retried mint must not quietly leave a
+    /// second live secret behind.
+    /// </summary>
+    [Fact]
+    public async Task An_idempotency_key_is_refused_and_mints_nothing()
+    {
+        await using var team = await TeamAsync();
+
+        using var refused = await team.World.Api.SendAsync(
+            HttpMethod.Post,
+            Tokens,
+            body: Personal(team, team.Tenant),
+            headers: [new("Authorization", $"Bearer {team.Ada}"), new("Idempotency-Key", "mint-1")]);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery);
+        (await refused.ReadProblemDetailAsync()).ShouldContain("revoke");
+        (await team.World.CountAsync("_api_keys")).ShouldBe(0);
+    }
+
     [Fact]
     public async Task A_token_cannot_mint_a_token()
     {
@@ -221,42 +243,48 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
-    public async Task Without_access_tokens_every_route_is_404_naming_its_key()
+    public async Task Without_api_tokens_every_route_is_404_naming_its_key()
     {
         await using var team = await TeamAsync();
-        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("accessTokens"));
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("apiTokens"));
 
         using var response = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
 
-        await TenantRoutesTests.FeatureDisabledAsync(response, "auth.accessTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(response, "auth.apiTokens");
     }
 
     [Fact]
     public async Task A_kind_switched_off_is_404_naming_its_key()
     {
         await using var team = await TeamAsync();
-        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!["accessTokens"]!["service"] = false);
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!["apiTokens"]!["service"] = false);
 
         using var service = await team.World.MintAsync(team.Ada, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
         using var personal = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
         await team.World.ReapplyAsync(descriptor =>
         {
-            descriptor["auth"]!["accessTokens"]!["service"] = true;
-            descriptor["auth"]!["accessTokens"]!["personal"] = false;
+            descriptor["auth"]!["apiTokens"]!["service"] = true;
+            descriptor["auth"]!["apiTokens"]!["personal"] = false;
         });
         using var offPersonal = await team.World.MintAsync(team.Ada, Personal(team, team.Tenant));
         using var onService = await team.World.MintAsync(team.Ada, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
 
-        await TenantRoutesTests.FeatureDisabledAsync(service, "auth.accessTokens.service");
+        await TenantRoutesTests.FeatureDisabledAsync(service, "auth.apiTokens.service");
         personal.StatusCode.ShouldBe(HttpStatusCode.Created, await personal.ReadTextAsync());
-        await TenantRoutesTests.FeatureDisabledAsync(offPersonal, "auth.accessTokens.personal");
+        await TenantRoutesTests.FeatureDisabledAsync(offPersonal, "auth.apiTokens.personal");
         onService.StatusCode.ShouldBe(HttpStatusCode.Created, await onService.ReadTextAsync());
     }
 
+    /// <summary>
+    /// #542 item 3: minting is charged its own budget, <c>Alvo:Api:RateLimits:ApiTokens</c>, no longer the one tenant
+    /// creation draws on: a tenant created first takes nothing from it, and a mint at its limit leaves creating a tenant
+    /// open.
+    /// </summary>
     [Fact]
-    public async Task Minting_answers_429_after_the_create_budget_and_shares_it_with_tenant_creation()
+    public async Task Minting_answers_429_after_its_own_budget_and_shares_none_with_tenant_creation()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Create = 2);
+        await using var world = await AccountsWorld.StartAsync(
+            _engine, descriptor: TeamTracker, api: api => (api.RateLimits.ApiTokens, api.RateLimits.Tenants) = (2, 2));
         var (ada, _) = await world.SignInAsync("ada");
         await TenantRoutesTests.CreatedAsync(world, ada, "Acme");
         var body = new JsonObject
@@ -267,15 +295,24 @@ public sealed class TokenRoutesTests
             ["expiresAt"] = world.Clock.GetUtcNow().AddDays(7).ToString("O", CultureInfo.InvariantCulture),
         };
 
+        using var first = await world.MintAsync(ada, body);
         using var second = await world.MintAsync(ada, body);
         using var third = await world.MintAsync(ada, body);
+        using var tenantWhileMintingIsSpent = await world.AsPersonAsync(
+            HttpMethod.Post, "/auth/v1/tenants", ada, new JsonObject { ["name"] = "Globex" });
+        using var tenantPastItsBudget = await world.AsPersonAsync(
+            HttpMethod.Post, "/auth/v1/tenants", ada, new JsonObject { ["name"] = "Initech" });
 
-        second.StatusCode.ShouldBe(HttpStatusCode.Created, await second.ReadTextAsync());
+        first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.ReadTextAsync());
+        second.StatusCode.ShouldBe(HttpStatusCode.Created, "the tenant created before took nothing from the minting budget");
         third.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, await third.ReadTextAsync());
+        tenantWhileMintingIsSpent.StatusCode.ShouldBe(
+            HttpStatusCode.Created, "a spent minting budget leaves tenant creation open: " + await tenantWhileMintingIsSpent.ReadTextAsync());
+        tenantPastItsBudget.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "tenant creation keeps its own budget of two");
         (await third.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.RateLimited);
         int.Parse(third.Headers.GetValues("Retry-After").ShouldHaveSingleItem(), CultureInfo.InvariantCulture).ShouldBeInRange(1, 60);
         third.Headers.CacheControl!.NoStore.ShouldBeTrue();
-        (await world.CountAsync("_api_keys")).ShouldBe(1);
+        (await world.CountAsync("_api_keys")).ShouldBe(2);
     }
 
     [Fact]
@@ -521,7 +558,7 @@ public sealed class TokenRoutesTests
         await team.World.ReapplyAsync(descriptor =>
         {
             descriptor["tenancy"]!["selfService"] = selfService;
-            descriptor["auth"]!["accessTokens"]!["service"] = true;
+            descriptor["auth"]!["apiTokens"]!["service"] = true;
         });
         var (list, _) = await ListAsync(team, team.Ada);
 
@@ -545,16 +582,16 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
-    public async Task Without_access_tokens_list_and_revoke_are_404_naming_its_key()
+    public async Task Without_api_tokens_list_and_revoke_are_404_naming_its_key()
     {
         await using var team = await TeamAsync();
-        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("accessTokens"));
+        await team.World.ReapplyAsync(descriptor => descriptor["auth"]!.AsObject().Remove("apiTokens"));
 
         using var list = await team.World.AsPersonAsync(HttpMethod.Get, Tokens, team.Ada);
         using var revoke = await RevokeAsync(team, team.Ada, "alvo_pat_whatever");
 
-        await TenantRoutesTests.FeatureDisabledAsync(list, "auth.accessTokens");
-        await TenantRoutesTests.FeatureDisabledAsync(revoke, "auth.accessTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(list, "auth.apiTokens");
+        await TenantRoutesTests.FeatureDisabledAsync(revoke, "auth.apiTokens");
     }
 
     [Fact]
@@ -685,7 +722,7 @@ public sealed class TokenRoutesTests
         ];
     }
 
-    private static void Unthrottled(AlvoApiOptions options) => options.RateLimits.Create = 1000;
+    private static void Unthrottled(AlvoApiOptions options) => (options.RateLimits.Tenants, options.RateLimits.ApiTokens) = (1000, 1000);
 
     private static async Task<string> DisplayNameAsync(Team team, string access)
     {

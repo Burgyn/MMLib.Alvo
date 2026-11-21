@@ -57,7 +57,7 @@ and `test/teapie-field-service/170-SelfService` plays the whole story against it
 The suite then tries the walls: a tenant you are not in, a role from one company used in another, a self-made
 dispatcher writing the global `regions`, invitations that are expired, revoked or used up, a token minting a token,
 a token at the Management API, and, last, a refresh token reused after its grace window, which ends the session. The
-descriptor gains only the keys the guides teach: `auth.signUp`, `auth.accessTokens` and `tenancy.selfService`.
+descriptor gains only the keys the guides teach: `auth.signUp`, `auth.apiTokens` and `tenancy.selfService`.
 
 **How the stack signs people in.** Google's own provider is pointed at a **test issuer** the stack's mock server
 serves, with `Authority` and `AllowHttpMetadata`. Alvo refuses that setting outside Development, so this stack runs

@@ -178,17 +178,17 @@ with `PUT /management/projects/{project}/accounts/{account}/disabled` and makes 
 the ban orphaned with `PUT /management/projects/{project}/tenants/{tenant}/owners/{account}` (both `admin`; see
 `management-api.md`, *Disabling an end user* and *Making an end user an owner of a tenant*).
 
-**`Alvo:Api:Cors:Origins`**, **`Alvo:Api:RateLimits:Token`**, **`Alvo:Api:RateLimits:Create`** and **`Alvo:Api:RateLimits:Invitations`** come with the `Alvo:Api` binding the host already
+**`Alvo:Api:Cors:Origins`**, **`Alvo:Api:RateLimits:TokenEndpoint`**, **`Alvo:Api:RateLimits:Tenants`**, **`Alvo:Api:RateLimits:ApiTokens`** and **`Alvo:Api:RateLimits:Invitations`** come with the `Alvo:Api` binding the host already
 makes into `AlvoApiOptions` — nothing host-specific. `Cors:Origins` lists the exact browser origins
 (`https://app.example.com`, no path, no `*`) allowed to call the Data API and the auth routes; empty, which is the
-default, sends no CORS headers and answers no preflight. `RateLimits:Token` is the token endpoint's budget per client
-IP per minute (default 30); `RateLimits:Create` is the same per-client budget for creating tenants and minting
-personal and service tokens, `POST /auth/v1/tenants` and `POST /auth/v1/tokens` (default 10, at least 1). The two
-routes **share** it — ten creations a minute is ten of either, in any mix (accounts S5 D15, spec §7.3's "tenant creation
-and token minting 10/min") — and no other self-service route is charged to it; `RateLimits:Invitations` is the
+default, sends no CORS headers and answers no preflight. `RateLimits:TokenEndpoint` is the token endpoint's budget per
+client IP per minute (default 30; RFC 6749 §3.2's name for `POST /auth/v1/token`); `RateLimits:Tenants` is the same
+per-client budget for creating a tenant, `POST /auth/v1/tenants`, and `RateLimits:ApiTokens` for minting a personal or
+service token, `POST /auth/v1/tokens` (default 10 each, at least 1). The two **no longer share** one budget (#542 item
+3, which split accounts S5 D15's `RateLimits:Create`), and no other self-service route is charged to either; `RateLimits:Invitations` is the
 per-client budget shared by the five invitation routes — creating, listing and revoking an invitation, previewing and
-accepting a code (default 20, at least 1). The token exchange keeps the `Token` budget even when it carries an
-`invitation_code`. The client IP is the connection's, so behind a proxy it is honest only with
+accepting a code (default 20, at least 1). The token exchange keeps the `TokenEndpoint` budget even when it
+carries an `invitation_code`. The client IP is the connection's, so behind a proxy it is honest only with
 `Alvo:ForwardedHeaders:Enabled` — see *Behind a reverse proxy*. See `data-api.md`, *CORS and rate limits*.
 
 **`Alvo:Admin:Dashboard:Enabled`** (`Alvo__Admin__Dashboard__Enabled`) is the whole of the
@@ -281,13 +281,13 @@ Scrutor's `Decorate<IApiKeyStore, …>()`) and delegates the ids it does not own
 working. A host that *replaces* the registration owns key resolution entirely: its store is the only one asked, it never
 reaches the token registry (whose port is internal), and no token can resolve there. Such a host's
 `POST /auth/v1/tokens` therefore refuses rather than mints — 404 `feature-disabled`, `descriptorKey`
-`auth.accessTokens`, with a fixed sentence naming the replaced store — because the route first asks the resolved store
+`auth.apiTokens`, with a fixed sentence naming the replaced store — because the route first asks the resolved store
 for a reserved probe id, **`alvo_pat_~reach`**, that only Alvo's routing store answers (with a dead record: revoked,
 expired, and a hash no secret matches — never a usable key). **A decorator owes that lookup one thing: pass it through
 to the inner store unchanged and return the inner store's answer as it came** — do not answer unknown `alvo_pat_…` ids
 itself, filter ids by shape, or rebuild the record. A decorator that returns a changed copy, or nothing, is judged a
 replacement, and the mint fails closed with the same `feature-disabled` refusal. It is a route refusal, not a boot one:
-a host that replaces the store and never turns `auth.accessTokens` on is legitimate. A store that issues its own ids under
+a host that replaces the store and never turns `auth.apiTokens` on is legitimate. A store that issues its own ids under
 the reserved `alvo_pat_`/`alvo_svc_` prefixes is refused the same way by the Management API and by `.WithAlvoCaller()`
 endpoints, which judge any principal whose key id carries a prefix an app token: the prefixes are Alvo's.
 

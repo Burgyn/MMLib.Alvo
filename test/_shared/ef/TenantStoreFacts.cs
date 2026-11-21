@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Tenants;
 using Shouldly;
@@ -151,6 +152,83 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         }
 
         (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(2 * Iterations);
+    }
+
+    /// <summary>
+    /// #542 item 5: a create carrying an idempotency key is recorded with the tenant, in one transaction, and a retry with the
+    /// same key and fingerprint answers that tenant — creating nothing and spending no <c>maxPerAccount</c> slot, also when
+    /// the creator has reached the cap since.
+    /// </summary>
+    [Fact]
+    public async Task A_replayed_create_answers_the_same_tenant_and_spends_no_slot()
+    {
+        var (store, services) = await StoreAsync();
+        var person = await SignedUpAsync(services);
+        var key = new AlvoIdempotency("retry-1", "fingerprint-a");
+
+        var first = await store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 1) with { Idempotency = key }, Ct);
+        var replay = await store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 1) with { Idempotency = key }, Ct);
+
+        first.Status.ShouldBe(CreateTenantStatus.Created);
+        replay.Status.ShouldBe(CreateTenantStatus.Replayed);
+        replay.Tenant.ShouldBe(first.Membership!.Tenant);
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1, "a replay creates nothing");
+        (await store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 1), Ct)).Status
+            .ShouldBe(CreateTenantStatus.LimitReached, "the cap of one was spent by the first create alone");
+    }
+
+    /// <summary>The same key for a different request is a conflict, never a replay of the first and never a second tenant.</summary>
+    [Fact]
+    public async Task The_same_key_for_a_different_create_is_a_conflict_and_writes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var person = await SignedUpAsync(services);
+        await store.CreateSharedAsync(Create(TenantId.New(), person, []) with { Idempotency = new("k", "fingerprint-a") }, Ct);
+
+        var other = await store.CreateSharedAsync(Create(TenantId.New(), person, []) with { Idempotency = new("k", "fingerprint-b") }, Ct);
+
+        other.ShouldBe(new CreateTenantOutcome(CreateTenantStatus.IdempotencyConflict, null));
+        (await CountAsync(services, AlvoFrameworkTables.TenantsSuffix)).ShouldBe(1);
+    }
+
+    /// <summary>A key is the person's own: another person's identical key and fingerprint is a create of their own.</summary>
+    [Fact]
+    public async Task Two_people_s_keys_never_meet()
+    {
+        var (store, services) = await StoreAsync();
+        var ada = await SignedUpAsync(services);
+        var bob = await SignedUpAsync(services);
+        var key = new AlvoIdempotency("1", "same");
+
+        var adas = await store.CreateSharedAsync(Create(TenantId.New(), ada, []) with { Idempotency = key }, Ct);
+        var bobs = await store.CreateSharedAsync(Create(TenantId.New(), bob, []) with { Idempotency = key }, Ct);
+
+        (adas.Status, bobs.Status).ShouldBe((CreateTenantStatus.Created, CreateTenantStatus.Created));
+        bobs.Membership!.Tenant.ShouldNotBe(adas.Membership!.Tenant);
+    }
+
+    /// <summary>
+    /// The double-click: five concurrent creates with one key make one tenant, and every other answer replays it — the
+    /// account lock serialises them, and the record is read after it.
+    /// </summary>
+    [Fact]
+    public async Task Concurrent_creates_with_one_key_make_one_tenant_and_replay_it()
+    {
+        var (store, services) = await StoreAsync();
+
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var person = await SignedUpAsync(services);
+            var key = new AlvoIdempotency($"click-{iteration}", "fingerprint");
+
+            var outcomes = await Task.WhenAll(Enumerable.Range(0, 5)
+                .Select(_ => store.CreateSharedAsync(Create(TenantId.New(), person, [], cap: 2) with { Idempotency = key }, Ct)));
+
+            var tenant = outcomes.Where(outcome => outcome.Status == CreateTenantStatus.Created).ShouldHaveSingleItem().Tenant;
+            outcomes.Where(outcome => outcome.Status != CreateTenantStatus.Created)
+                .ShouldAllBe(outcome => outcome.Status == CreateTenantStatus.Replayed && outcome.Tenant == tenant);
+            (await store.ListMembershipsAsync(person, Ct)).Count.ShouldBe(1, $"iteration {iteration}");
+        }
     }
 
     [Fact]

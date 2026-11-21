@@ -35,7 +35,7 @@ public sealed class SkillAreasTests
     [Theory]
     [InlineData("/auth/signUp", "accounts")]
     [InlineData("/auth/providers/1", "accounts")]
-    [InlineData("/auth/accessTokens/service", "accounts")]
+    [InlineData("/auth/apiTokens/service", "accounts")]
     [InlineData("/tenancy/selfService/invitations", "accounts")]
     [InlineData("/auth/roles", null)]
     [InlineData("/tenancy", "traits-and-tenancy")]

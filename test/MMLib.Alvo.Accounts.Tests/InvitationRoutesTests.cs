@@ -328,6 +328,28 @@ public sealed class InvitationRoutesTests
         return new Team(world, ada, bob, await world.UserIdAsync(ada), tenant);
     }
 
+    /// <summary>
+    /// #542 item 5: creating an invitation does not honour <c>Idempotency-Key</c> — its answer carries a code shown once —
+    /// and a key sent anyway is refused at 422 <c>malformed-query</c> with the fix, never silently ignored, so a client
+    /// never mistakes a retry for a replay and holds two live codes.
+    /// </summary>
+    [Fact]
+    public async Task An_idempotency_key_is_refused_and_creates_nothing()
+    {
+        await using var team = await TeamAsync();
+
+        using var refused = await team.World.Api.SendAsync(
+            HttpMethod.Post,
+            Path(team.Tenant.Value),
+            body: Technician(),
+            headers: [new("Authorization", $"Bearer {team.Ada}"), new("Idempotency-Key", "invite-1")]);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.MalformedQuery);
+        (await refused.ReadProblemDetailAsync()).ShouldContain("list");
+        (await team.World.CountAsync("_tenant_invitations")).ShouldBe(0);
+    }
+
     private static Task<HttpResponseMessage> InviteAsync(Team team, string access, TenantId tenant, JsonObject body)
         => InviteAsync(team, access, tenant.Value, body);
 
