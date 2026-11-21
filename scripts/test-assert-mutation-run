@@ -768,6 +768,38 @@ derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\10/' || exit 
 assert_ok "a bare 'Timeout: 0' is a legitimate reading, not a malformed one" \
   "$DERIVED" "$CORE_CFG" 543 1135
 
+# ============================================ check 7 — the RuntimeError share
+#
+# Stryker leaves an errored mutant out of the score, so a run that is nearly all errors
+# scores on what is left. commands-http-runtime-errors.txt is the real capture: 157 tested,
+# 1 Killed / 156 Errors, "100.00 %", exit 0, a green leg.
+echo "check 7 — a score computed over the few mutants that did not error is not a measurement"
+
+HTTP_CFG="$ROOT/stryker-config.commands-http.json"
+ERROR_SHARE="ended in a RuntimeError"
+NO_ERRORS_LINE="but never 'Errors: N'"
+
+assert_rejected "a leg that is 156 of 157 RuntimeErrors is rejected, whatever score it printed" "$ERROR_SHARE" \
+  "$FIXTURES/commands-http-runtime-errors.txt" "$HTTP_CFG" 157 1236
+case "$GUARD_OUT" in
+  *"156 of 157"*) pass "the rejection names the counts (156 of 157)" ;;
+  *) fail "the rejection names the counts (156 of 157)" "'156 of 157' in the message" "$GUARD_OUT" ;;
+esac
+
+# One-sided, at the same integer ceiling as check 6: 565 tested -> 113 allowed, 114 refused.
+# The digits sit between SGR escapes in this CI capture, so only they are perturbed.
+derive data-ef-rest-no-timeouts.txt 's/\(^Errors:  .*13m\)  0/\1113/' || exit 1
+assert_ok "errors exactly at the 20 % ceiling are accepted (the bound is one-sided)" \
+  "$DERIVED" "$REST_CFG" 565 554
+derive data-ef-rest-no-timeouts.txt 's/\(^Errors:  .*13m\)  0/\1114/' || exit 1
+assert_rejected "one errored mutant over the ceiling is rejected" "$ERROR_SHARE" \
+  "$DERIVED" "$REST_CFG" 565 554
+
+# Fail-closed on a rewording, like check 6.
+derive data-ef-rest-no-timeouts.txt '/^Errors:/d' || exit 1
+assert_rejected "a summary with no 'Errors:' line is refused, not read as zero" "$NO_ERRORS_LINE" \
+  "$DERIVED" "$REST_CFG" 565 554
+
 # ================================== every config key is one Stryker accepts at all
 #
 # Stryker refuses a WHOLE config over one key it does not know, at startup, before it

@@ -375,6 +375,34 @@ if [ "$canary" != canary ] && command grep -qE '^Killed:[[:space:]]+[0-9]+' "$no
     set). Do NOT lower 'break', and do not delete this check: both rebuild a gate that reports a number
     nothing measured."
     fi
+
+    # -----------------------------------------------------------------------
+    # Check 7 — the RuntimeError share. The mirror image of check 6: Stryker leaves an
+    # errored mutant OUT of the score entirely — neither numerator nor denominator — so a
+    # run that is almost all errors scores on the handful that are not. Measured, which is
+    # why this exists: commands-http on run 44850064624 tested 157 mutants, reported
+    # 1 Killed / 0 Survived / 0 Timeout / 156 Errors, printed 100.00 %, exited 0, and the
+    # leg went GREEN (scripts/fixtures/mutation-logs/commands-http-runtime-errors.txt).
+    # Every one of the 156 is "The test host crashed or became unreachable while testing
+    # this mutant" in the json report. Same 20 % ceiling as check 6, and for a calibrated
+    # reason: the leg's honest local run (2026-10-30) had 24 of 145, 16.6 %, and the
+    # accounts leg 4 of 1381; neither is a lie, while a crashing host on most mutants is.
+    # -----------------------------------------------------------------------
+    errored="$(command grep -oE '^Errors:[[:space:]]+[0-9]+' "$norm" | command grep -oE '[0-9]+$' | tail -1)"
+    [ -n "$errored" ] || fail "the log reports 'Killed: N' but never 'Errors: N', so the share of mutants Stryker left out of the score is unknown. Stryker prints it in the same summary block; if an upgrade reworded it, fix this assertion rather than deleting it."
+    require_log_number "$errored" "the error count read from the log"
+
+    error_ceiling=$(( tested * 20 / 100 ))
+    if [ "$errored" -gt "$error_ceiling" ]; then
+        error_pct=$(( errored * 100 / tested ))
+        fail "$errored of $tested mutants ended in a RuntimeError (${error_pct} %, ceiling ${error_ceiling} = 20 % of $tested, rounded down).
+    Stryker leaves an errored mutant out of the score altogether, so the percentage it printed is computed
+    over the $(( tested - errored )) that did not error and says nothing about the rest. Measured on this
+    repository: commands-http printed 100.00 % on 1 Killed / 156 Errors and went green.
+    THE CAUSE is in the json report's 'statusReason' (commands-http's was 'The test host crashed or became
+    unreachable while testing this mutant') and, for a leg with 'debug-log: true' in the matrix, in Stryker's
+    trace log under 'logs/' in this shard's artifact. Do NOT lower 'break' and do not delete this check."
+    fi
 fi
 
 # ---------------------------------------------------------------------------
