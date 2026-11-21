@@ -821,25 +821,56 @@ if ! command -v jq >/dev/null 2>&1; then
   fail "every stryker-config*.json key is one Stryker accepts" "jq on PATH" "jq is not installed"
 else
   allowed="$(printf '%s\n' $STRYKER_KEYS | jq -R . | jq -s .)"
-  for cfg in "$ROOT"/stryker-config*.json; do
-    name="$(basename "$cfg")"
-    unknown="$(jq -r --argjson allowed "$allowed" \
-      '.["stryker-config"] | keys - $allowed | join(", ")' "$cfg")"
-    if [ -z "$unknown" ]; then
-      pass "$name uses only keys Stryker accepts"
+
+  # FAIL-CLOSED. The first version failed open two ways, which are the negative cases
+  # below: a config whose wrapper key is not "stryker-config" (`null | keys` errors) and a
+  # file that is not JSON at all (jq dies) both left the captured output EMPTY, which read
+  # as "no unknown keys" — a pass. So a missing wrapper is an explicit error, and jq's
+  # exit status is checked before its output is.
+  # Sets UNKNOWN; returns non-zero when the file could not be judged at all.
+  unknown_keys() { # <config>
+    UNKNOWN="$(jq -r --argjson allowed "$allowed" \
+      '(.["stryker-config"] // error("no \"stryker-config\" object")) | keys - $allowed | join(", ")' "$1" 2>&1)"
+  }
+
+  judge_config() { # <label> <config>
+    if ! unknown_keys "$2"; then
+      fail "$1" "a config jq can read, wrapped in \"stryker-config\"" "jq refused it: $UNKNOWN"
+    elif [ -n "$UNKNOWN" ]; then
+      fail "$1" "keys from Stryker's allowed list" "unknown: $UNKNOWN"
     else
-      fail "$name uses only keys Stryker accepts" "keys from Stryker's allowed list" "unknown: $unknown"
+      pass "$1"
     fi
+  }
+
+  for cfg in "$ROOT"/stryker-config*.json; do
+    judge_config "$(basename "$cfg") uses only keys Stryker accepts" "$cfg"
   done
 
-  # The check must be able to fail: the key that cost the four legs nine days is refused.
+  # The check must be able to fail, three ways. First, the key that cost the four legs
+  # nine days is refused.
   probe="$TMP_ROOT/stryker-config.probe.json"
   jq '.["stryker-config"]["log-to-file"] = true' "$ROOT/stryker-config.canary.json" > "$probe"
-  unknown="$(jq -r --argjson allowed "$allowed" '.["stryker-config"] | keys - $allowed | join(", ")' "$probe")"
-  if [ "$unknown" = "log-to-file" ]; then
+  if unknown_keys "$probe" && [ "$UNKNOWN" = "log-to-file" ]; then
     pass "a config carrying \"log-to-file\" is refused, as Stryker refuses it"
   else
-    fail "a config carrying \"log-to-file\" is refused, as Stryker refuses it" "unknown: log-to-file" "unknown: $unknown"
+    fail "a config carrying \"log-to-file\" is refused, as Stryker refuses it" "unknown: log-to-file" "$UNKNOWN"
+  fi
+
+  # Then a config under the wrong wrapper key, and a file that is not JSON: neither may
+  # come back as "no unknown keys".
+  jq '{stryker: .["stryker-config"]}' "$ROOT/stryker-config.canary.json" > "$probe"
+  if unknown_keys "$probe"; then
+    fail "a config not wrapped in \"stryker-config\" is refused, not judged empty" "a jq error" "exit 0, unknown: '$UNKNOWN'"
+  else
+    pass "a config not wrapped in \"stryker-config\" is refused, not judged empty"
+  fi
+
+  printf '{"stryker-config": {"project": "x",\n' > "$probe"
+  if unknown_keys "$probe"; then
+    fail "a config that is not valid JSON is refused, not judged empty" "a jq error" "exit 0, unknown: '$UNKNOWN'"
+  else
+    pass "a config that is not valid JSON is refused, not judged empty"
   fi
 fi
 

@@ -48,8 +48,8 @@ name: Mutation
 #                        (stryker-config.accounts-store.json) — against
 #                        MMLib.Alvo.Data.Sqlite.Tests and MMLib.Alvo.Accounts.Tests. A third
 #                        partition of the EF project beside data-ef-core and data-ef-rest; see
-#                        "THE ACCOUNTS LEGS" below for why, and for how their thresholds were set
-#                        without a measurement.
+#                        "THE ACCOUNTS LEGS" below for why. The one leg still PROVISIONAL: it
+#                        timed out on its first run (ACCOUNTS-STORE TIMED OUT, below).
 #   - "self-service"   → the self-service tenant routes of the core — the twelve
 #                        Tenants/SelfService/** files reachable only through
 #                        SelfServiceEndpoints.Map, whose one caller is MapAlvoAccounts
@@ -172,8 +172,9 @@ name: Mutation
 # report the number of test projects the config declares, must not have lost 40 % of
 # either its mutants or its suite, and must not have spent more than 20 % of its mutants
 # on timeouts (check 6, above) or on RuntimeErrors (check 7, added 2026-11-21 after
-# commands-http printed 100.00 % on 1 Killed / 156 Errors and went green) — because the first version of the solution-mode check
-# was a negative `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker
+# commands-http printed 100.00 % on 1 Killed / 156 Errors and went green) — because the
+# first version of the solution-mode check was a negative `grep -q 'will mutate
+# solution'`, which fails OPEN the moment a Stryker
 # release rewords that line. Note especially why the solution-mode check is the
 # TEST-PROJECT count and not the mutant count: solution mode leaves the mutant count
 # untouched (834 and 834, 596 and 596 above) and moves only the suite. The `mutants:` and
@@ -376,7 +377,8 @@ name: Mutation
 # 44850064624: 115 K / 7 S / 0 T of 122, 94.26 %. The 7 are equivalent: ConfigureAwait(false)
 # -> true (6), and `installed && v >= min` -> `||` on a path reached only when one of the two
 # already decided (1). break = 94.26 − max(2 pp, 2 mutants = 1.64 pp) = 92.26 -> 92 (was 90),
-# `low` 94 (was 95, the Killed-only floor), `high` 100. REAL SLACK 115 − ceil(0.92 × 122) = 3.
+# `low` 94 (was 95, the Killed-only floor), `high` 100.
+# REAL SLACK 115 − ceil(0.92 × 122) = 115 − 113 = 2 kills.
 # Note the cleartext table's "survived" column: it counts Ignored mutants too, so it read
 # 110 for a leg with 27 survivors, and 36 for AlvoPostgreSqlBuilderExtensions.cs, whose
 # exclusion works (all 34 of its mutants are "Removed by mutate filter"). Read the json report.
@@ -422,7 +424,9 @@ name: Mutation
 # all — the leg that runs it is the 60-minute one. Its first post-merge score is the
 # measurement.
 #
-# THE ACCOUNTS LEGS (accounts S2, 2026-11-14) — TWO LEGS, AND BOTH ARE UNMEASURED.
+# THE ACCOUNTS LEGS (accounts S2, 2026-11-14) — TWO LEGS, PLUS SELF-SERVICE BELOW. accounts and
+# self-service were measured on 2026-11-21 (ACCOUNTS IS MEASURED, SELF-SERVICE IS MEASURED);
+# accounts-store timed out and is the only one still PROVISIONAL.
 #
 # WHY TWO. A Stryker config mutates ONE project, and sign-in lives in two: the
 # MMLib.Alvo.Accounts package, and the account store inside the EF adapter. The store's
@@ -462,11 +466,13 @@ name: Mutation
 # because here it is not plain DI wiring: it registers the startup refusals
 # (ValidateOnStart) and every AccountsOptionsTests fact builds a real host through it.
 #
-# WHY THE THRESHOLDS ARE `break: 30`, `low: 40`, `high: 80`, PROVISIONAL. This header has
+# WHY accounts-store'S THRESHOLDS ARE STILL `break: 30`, `low: 40`, `high: 80`, PROVISIONAL —
+# the reasoning all three legs started under, which now applies to accounts-store alone (the
+# other two were re-cut from their first run; see the MEASURED paragraphs below). This header has
 # one rule for setting `break` — the KILLED-ONLY score of a measured run minus max(2 pp,
-# 2 mutants) — and these legs have no measured run: running Stryker to take one was out of
-# scope for the change that added them. The prescribed procedure is therefore not
-# applicable yet, and a calibrated-LOOKING number would be the fabrication the api.json
+# 2 mutants) — and a leg with no completed run has nothing to apply it to: running Stryker to
+# take one was out of scope for the change that added these legs. The prescribed procedure
+# is therefore not applicable yet, and a calibrated-LOOKING number would be the fabrication the api.json
 # paragraph above refuses. 30 is chosen as a COLLAPSE floor, not a latch: it is below the
 # lowest honest score any leg here has ever measured (38.15 %, the ten-file commands-http
 # run), so it does not fire on ordinary test debt, and it does fire on the failure no
@@ -475,7 +481,9 @@ name: Mutation
 # the first run needs no ceremony, lowering it would. `low` 40 only colours the report;
 # `high` 80 is the ambition every leg shares.
 #
-# `mutants:` AND `suite:` ARE ESTIMATES TOO, and they are marked as such in the matrix.
+# `mutants:` AND `suite:` WERE ESTIMATES TOO — HISTORY NOW, kept because the miss is the lesson:
+# accounts came in at 1381 against 240, self-service at 280 against 95, accounts-store at 888
+# against 247. All three matrix entries carry measured counts since 2026-11-21. The estimate was:
 # `suite:` is MTP's own case count from `dotnet test` on 2026-11-14 (Accounts.Tests 237,
 # Data.Sqlite.Tests 1228) — the same unit Stryker's "Number of tests found" sums per
 # project (data-ef-core's 2156 = 1286 + 870 on 2026-10-30), but not taken from Stryker.
@@ -486,7 +494,7 @@ name: Mutation
 # -> 139. Both floors are one-sided, so an under-estimate is the safe direction; the upper
 # end of the same ratios (765 and 416) is what the budgets are sized on.
 #
-# THE SELF-SERVICE LEG (accounts S3, 2026-11-14) — A THIRD, AND UNMEASURED TOO. S3 put the
+# THE SELF-SERVICE LEG (accounts S3, 2026-11-14) — A THIRD, MEASURED 2026-11-21. S3 put the
 # self-service tenant routes in the core project (src/MMLib.Alvo/Tenants/SelfService/**), so
 # the core leg's `**/*.cs` glob swept them up — against MMLib.Alvo.Tests, which references
 # only MMLib.Alvo.csproj and cannot map them: their one entry point, SelfServiceEndpoints.Map,
@@ -498,9 +506,10 @@ name: Mutation
 # MMLib.Alvo.Accounts.Tests (TenantRoutesTests, MemberRoutesTests, the engine facts). The pure
 # half of the folder — MembershipRules, SelfServicePolicy, SelfServiceName, GlobalWriteWarnings,
 # RegistryTenantCatalog, RegistryMembershipResolution — stays on the core leg, whose suite tests
-# it directly. Its thresholds are the same provisional 30 / 40 / 80 for the same reason;
-# `mutants:` is ~374 code lines x 0.16 -> 59 (upper end x 0.48 -> 179, what the budget is sized
-# on), `suite:` MTP's own Accounts.Tests count after S3.
+# it directly. Until its first run its thresholds were the same provisional 30 / 40 / 80, and its
+# `mutants:` an estimate of ~374 code lines x 0.16 -> 59 (upper end x 0.48 -> 179); the three S5
+# paragraphs below track how that estimate grew. All of it is superseded by SELF-SERVICE IS
+# MEASURED.
 #
 # S5 (accounts, tokens) adds three route files to this leg — TokenRoutes, AppTokenResponse, AppTokenProblems
 # (~129 code lines; `POST {prefix}/tokens` and its answers), judged by TokenRoutesTests in the same
@@ -517,13 +526,12 @@ name: Mutation
 # THE FIRST REAL RUN OF EACH LEG MUST RE-MEASURE, and until it has, neither number is
 # evidence: replace `mutants:` with its "N total mutants will be tested", `suite:` with
 # its "Number of tests found", `timeout:` with ~2x its wall clock, and `break` with
-# KILLED-ONLY − max(2 pp, 2 mutants), floored — then delete this paragraph's
-# "PROVISIONAL". Check its timeout share against check 6 and its RuntimeError count too:
-# Accounts.Tests drives a real HTTP pipeline over TestHost the way Api.Tests does, and
-# commands-http's run on that kind of suite once came back all RuntimeError (run
-# 42335661278, below) — which is why these legs, like commands-http, carry
-# `debug-log: true` in the matrix and so run Stryker with `--log-to-file`. See
-# "`log-to-file` IS A COMMAND-LINE FLAG" below for why it is not in their configs.
+# KILLED-ONLY − max(2 pp, 2 mutants), floored — then mark it measured. Done for accounts and
+# self-service (below); still owed by accounts-store. Check its timeout share against check 6
+# and its RuntimeError count against check 7: Accounts.Tests drives a real HTTP pipeline over
+# TestHost the way Api.Tests does, and commands-http's run on that kind of suite came back all
+# RuntimeError (run 42335661278, below). That is why the unmeasured legs ran with
+# `debug-log: true`; see "`log-to-file` IS A COMMAND-LINE FLAG" below for who keeps it.
 #
 # SELF-SERVICE IS MEASURED (run 44850064624, 2026-11-21, the first run in which it could
 # start): 280 mutants (estimated 95; the 0.48 upper end, 284, was the right ratio), 398 tests,
@@ -635,7 +643,14 @@ name: Mutation
 # three accounts legs on every run they have had (the first was 44834820709, 2026-11-20), and the
 # debug log they were all meant to write was never written. The key is gone from
 # all four; the matrix's `debug-log: true` passes `-L|--log-to-file` ("always uses loglevel
-# trace") on just those legs, because a trace log of a big shard is far too large to keep.
+# trace"). It is kept only where a leg has an UNEXPLAINED failure to diagnose — commands-http
+# (its host crashes) and accounts-store (it has never finished) — and was dropped from accounts
+# and self-service once their first run came back with 4 and 0 RuntimeErrors: a trace log
+# grows with every test of every mutant, and on the measured legs it would only be cost. The
+# size to watch: no trace log has been uploaded yet (the glob bug under #486'S COMMANDS-HTTP
+# HALF), and the artifacts without one already run to 0.4 MB zipped for commands-http and
+# 1.1 MB for accounts (its json report alone is 21 MB unzipped). Check the first artifact that
+# carries a `logs/` directory before adding this flag to anything larger.
 # scripts/test-assert-mutation-run now refuses any config key outside the allowed set, on the PR.
 #
 # #486's COMMANDS-HTTP HALF, CLOSED AS FAR AS ONE RUN CAN CLOSE IT. Run 44850064624 is the first
@@ -732,7 +747,8 @@ name: Mutation
 # data-sqlite was 4 min short of its 60 on both runs and is now 120.
 #
 # RE-SHARDING THE LONG LEGS — THE PLAN, NOT YET DONE, AND WHY IT NEEDS ONE MEASURING RUN FIRST.
-# Ruled 2026-11-21 on the maintainer's behalf: re-shard rather than lower `mutation-level`. Five
+# Ruled 2026-11-21 by the debt-cleanup session on the maintainer's behalf, pending his
+# confirmation: re-shard rather than lower `mutation-level`. Five
 # legs cannot finish under the ceiling (expressions, rules/auth/rest, data-ef-rest, data-ef-core,
 # accounts-store); a shard has to be sized from RUNNER SECONDS PER MUTANT on its suite, and for
 # none of those suites is that number known — every one was cancelled, so its log gives a LOWER
@@ -1177,7 +1193,6 @@ jobs:
             timeout: 340    # 2x the measured job (186.5 min) is 373, past GitHub's 360-minute ceiling;
                             # 340 is 1.8x and the most the ceiling leaves room for. The next growth of
                             # this leg is a split, not a budget — see ACCOUNTS IS MEASURED.
-            debug-log: true
           - name: accounts-store
             config: stryker-config.accounts-store.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
@@ -1193,7 +1208,6 @@ jobs:
             mutants: 280    # run 44850064624, 2026-11-21 (estimated 95) — see SELF-SERVICE IS MEASURED
             suite: 398      # same run (MTP's own count was 383)
             timeout: 210    # 2x the measured job: 106 min (105.5 of Stryker) on run 44850064624
-            debug-log: true
     steps:
       - name: Checkout
         uses: actions/checkout@v7
