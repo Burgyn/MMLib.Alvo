@@ -78,6 +78,9 @@ public sealed class TokenRoutesTests
         body["roles"]!.AsArray().ShouldBeEmpty();
         body["scopes"]!.AsArray().Select(scope => scope!.GetValue<string>()).ShouldBe(["jobs:read"]);
         body["expiresAt"]!.GetValue<DateTimeOffset>().ShouldBe(team.World.Clock.GetUtcNow().AddDays(7));
+        body["createdBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value, "the minter, as the list will name them (#542)");
+        body["createdBy"]!["name"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
+        body["status"]!.GetValue<string>().ShouldBe("active");
         jobs.StatusCode.ShouldBe(HttpStatusCode.OK, await jobs.ReadTextAsync());
         notes.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "notes is outside the token's scopes");
         (await notes.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.OutOfScope);
