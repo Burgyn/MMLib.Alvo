@@ -51,7 +51,7 @@ public sealed class InvitationAcceptTests
         anonymous.StatusCode.ShouldBe(HttpStatusCode.OK, text);
         anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
         var expires = team.World.Clock.GetUtcNow().AddDays(7).AddMinutes(-1).ToString("yyyy-MM-ddTHH:mm:ss+00:00", CultureInfo.InvariantCulture);
-        text.ShouldBe($$"""{"tenantName":"Acme","inviterName":"Ada Lovelace","roles":["dispatcher","technician"],"isOwner":false,"expiresAt":"{{expires}}","emailBound":true}""");
+        text.ShouldBe($$"""{"tenantName":"Acme","createdBy":{"name":"Ada Lovelace"},"roles":["dispatcher","technician"],"isOwner":false,"expiresAt":"{{expires}}","emailBound":true}""");
         keyed.StatusCode.ShouldBe(HttpStatusCode.OK, await keyed.ReadTextAsync());
         (await keyed.ReadTextAsync()).ShouldBe(text);
     }

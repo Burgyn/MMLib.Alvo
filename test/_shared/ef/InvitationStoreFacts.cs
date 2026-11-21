@@ -60,11 +60,32 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
 
         var expected = new InvitationView(
             request.Id, tenant, ["viewer", "planner"], GrantsOwner: true, "bob@example.com", MaxUses: 3, Uses: 0,
-            _now.AddDays(7), owner, _now, RevokedAt: null);
+            _now.AddDays(7), owner, CreatorName: "Ada", _now, RevokedAt: null);
         outcome.Status.ShouldBe(MemberChangeStatus.Changed);
         Same(outcome.Invitation.ShouldNotBeNull(), expected);
         Same((await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem(), expected);
         (await ColumnAsync(services, request.Id, "code_hash")).ShouldBe(request.CodeHash, "only the code's hash is stored");
+    }
+
+    /// <summary>
+    /// #542 item 1: an invitation names its creator as a person — the id and the display name — and a creator with no
+    /// display name is a creator with a <see langword="null"/> name, never a missing one; a rename shows on the next read.
+    /// </summary>
+    [Fact]
+    public async Task An_invitation_names_its_creator_by_their_current_display_name()
+    {
+        var (store, services) = await StoreAsync();
+        var owner = await SignedUpAsync(services, name: null);
+        var tenant = TenantId.New();
+        (await store.CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", owner, ["dispatcher"], 5, _now), Ct)).Status
+            .ShouldBe(CreateTenantStatus.Created);
+
+        var created = await store.CreateInvitationAsync(Invite(tenant, owner), Ct);
+        await services.GetRequiredService<IAccountStore>().SetDisplayNameAsync(owner, "Ada Lovelace", Ct);
+
+        (created.Invitation!.CreatedBy, created.Invitation.CreatorName).ShouldBe((owner, null));
+        var listed = (await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem();
+        (listed.CreatedBy, listed.CreatorName).ShouldBe((owner, "Ada Lovelace"));
     }
 
     [Fact]

@@ -3370,21 +3370,25 @@
       "authAppToken": {
         "required": [
           "keyId",
-          "token",
-          "header",
           "kind",
           "name",
           "tenantId",
           "roles",
           "scopes",
+          "createdBy",
+          "createdAt",
           "expiresAt",
-          "createdAt"
+          "lastUsedAt",
+          "revokedAt",
+          "status",
+          "token",
+          "header"
         ],
         "type": "object",
         "properties": {
           "keyId": {
             "type": "string",
-            "description": "The token's key id (`alvo_pat_…` or `alvo_svc_…`): not secret."
+            "description": "The token's key id (`alvo_pat_…` or `alvo_svc_…`): not secret, the one revoking takes."
           },
           "token": {
             "type": "string",
@@ -3428,18 +3432,46 @@
             },
             "description": "What the token may do, as `<entity>:read` or `<entity>:write`."
           },
-          "expiresAt": {
-            "type": "string",
-            "description": "When the token expires.",
-            "format": "date-time"
+          "createdBy": {
+            "$ref": "#/components/schemas/authPersonReference"
           },
           "createdAt": {
             "type": "string",
             "description": "When it was minted.",
             "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When it expires.",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When it last authenticated a request, to the minute; null if never.",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "When it was revoked; null while it is not.",
+            "format": "date-time"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "type": "string",
+            "description": "`revoked`, else `expired`, else `active` — the first that holds, judged when the answer was made."
           }
         },
-        "description": "A just-minted app token, with its credential."
+        "description": "A just-minted app token: its list item, with the credential and the header it goes in."
       },
       "authAppTokenListItem": {
         "required": [
@@ -3449,7 +3481,7 @@
           "tenantId",
           "roles",
           "scopes",
-          "mintedBy",
+          "createdBy",
           "createdAt",
           "expiresAt",
           "lastUsedAt",
@@ -3496,27 +3528,8 @@
             },
             "description": "What the token may do, as `<entity>:read` or `<entity>:write`."
           },
-          "mintedBy": {
-            "required": [
-              "id",
-              "displayName"
-            ],
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "The account id.",
-                "format": "uuid"
-              },
-              "displayName": {
-                "type": [
-                  "null",
-                  "string"
-                ],
-                "description": "The account's display name, or null."
-              }
-            },
-            "description": "The account that minted the token."
+          "createdBy": {
+            "$ref": "#/components/schemas/authPersonReference"
           },
           "createdAt": {
             "type": "string",
@@ -3666,9 +3679,7 @@
             "format": "date-time"
           },
           "createdBy": {
-            "type": "string",
-            "description": "The owner who created it.",
-            "format": "uuid"
+            "$ref": "#/components/schemas/authPersonReference"
           },
           "createdAt": {
             "type": "string",
@@ -3714,7 +3725,7 @@
       "authInvitationPreview": {
         "required": [
           "tenantName",
-          "inviterName",
+          "createdBy",
           "roles",
           "isOwner",
           "expiresAt",
@@ -3726,12 +3737,8 @@
             "type": "string",
             "description": "The tenant's name."
           },
-          "inviterName": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "description": "The display name of the owner who invited, or null."
+          "createdBy": {
+            "$ref": "#/components/schemas/authPersonName"
           },
           "roles": {
             "type": "array",
@@ -3754,7 +3761,7 @@
             "description": "Whether only the person whose provider vouches for one particular email may accept it."
           }
         },
-        "description": "What a live invitation offers. Never the email it may be bound to."
+        "description": "What a live invitation offers. Never the email it may be bound to, nor any account id."
       },
       "authInvitationRequest": {
         "required": [
@@ -4031,9 +4038,7 @@
             "format": "date-time"
           },
           "createdBy": {
-            "type": "string",
-            "description": "The owner who created it.",
-            "format": "uuid"
+            "$ref": "#/components/schemas/authPersonReference"
           },
           "createdAt": {
             "type": "string",
@@ -4060,6 +4065,44 @@
           }
         },
         "description": "A just-created invitation, with its code."
+      },
+      "authPersonName": {
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The display name, or null when the person has none."
+          }
+        },
+        "description": "A person named to someone who has not signed in: the display name alone, never the account id or an email."
+      },
+      "authPersonReference": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The account id.",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The display name, or null when the person has none."
+          }
+        },
+        "description": "A person: the account id and the display name `/auth/v1/user` answers, as it reads now. Never an email."
       },
       "authServerMetadata": {
         "required": [

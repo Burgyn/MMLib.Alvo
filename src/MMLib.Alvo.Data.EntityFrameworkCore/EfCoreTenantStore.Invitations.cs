@@ -38,7 +38,7 @@ internal sealed partial class EfCoreTenantStore
             .ConfigureAwait(false);
 
         return status == MemberChangeStatus.Changed
-            ? new CreateInvitationOutcome(status, StoredView(request))
+            ? new CreateInvitationOutcome(status, await StoredViewAsync(request.Id, ct).ConfigureAwait(false))
             : new CreateInvitationOutcome(status, null);
     }
 
@@ -161,16 +161,14 @@ internal sealed partial class EfCoreTenantStore
         ("@created_by", Id(request.Actor)),
         ("@now", Instant(request.Now)));
 
-    private static InvitationView StoredView(CreateInvitationRequest request) => new(
-        request.Id,
-        request.Tenant,
-        [.. request.Roles],
-        request.GrantsOwner,
-        request.Email,
-        request.MaxUses,
-        Uses: 0,
-        request.ExpiresAt.ToUniversalTime(),
-        request.Actor,
-        request.Now.ToUniversalTime(),
-        RevokedAt: null);
+    /// <summary>
+    /// The invitation the creation just committed, read back as the list reads it — so the creation's answer names its
+    /// creator exactly as the list does (#542 item 1), from the one <see cref="InvitationTables.ReadView"/>.
+    /// </summary>
+    private async Task<InvitationView> StoredViewAsync(Guid invitation, CancellationToken ct) =>
+        (await ReadAsync(
+            _invitations.ViewSql,
+            command => Bind(command, ("@id", Id(invitation))),
+            InvitationTables.ReadView,
+            ct).ConfigureAwait(false)).Single();
 }

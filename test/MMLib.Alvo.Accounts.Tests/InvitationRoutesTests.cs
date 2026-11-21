@@ -49,12 +49,13 @@ public sealed class InvitationRoutesTests
         code.Length.ShouldBe(31);
         invitation["status"]!.GetValue<string>().ShouldBe("active");
         invitation["uses"]!.GetValue<int>().ShouldBe(0);
-        invitation["createdBy"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
+        invitation["createdBy"]!.ToJsonString().ShouldBe($"{{\"id\":\"{team.AdaId.Value:D}\",\"name\":\"Ada Lovelace\"}}");
         invitation["expiresAt"]!.GetValue<DateTimeOffset>().ShouldBe(team.World.Clock.GetUtcNow().AddDays(7));
         listed.StatusCode.ShouldBe(HttpStatusCode.OK, listedText);
         var item = (await listed.ReadJsonArrayAsync()).ShouldHaveSingleItem();
         item.Select(pair => pair.Key).ShouldBe(_listedKeys);
         item["id"]!.GetValue<Guid>().ShouldBe(invitation["id"]!.GetValue<Guid>());
+        JsonNode.DeepEquals(item["createdBy"], invitation["createdBy"]).ShouldBeTrue("the list names the creator as the 201 did");
         listedText.ShouldNotContain(code);
         team.World.Logs.Lines.ShouldAllBe(line => !line.Contains(code, StringComparison.Ordinal));
     }

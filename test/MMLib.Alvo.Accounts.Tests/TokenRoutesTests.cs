@@ -37,11 +37,14 @@ public sealed class TokenRoutesTests
 
     private static readonly string[] _listedKeys =
     [
-        "keyId", "kind", "name", "tenantId", "roles", "scopes", "mintedBy", "createdAt", "expiresAt", "lastUsedAt", "revokedAt", "status",
+        "keyId", "kind", "name", "tenantId", "roles", "scopes", "createdBy", "createdAt", "expiresAt", "lastUsedAt", "revokedAt", "status",
     ];
 
     private static readonly string[] _createdKeys =
-        ["keyId", "token", "header", "kind", "name", "tenantId", "roles", "scopes", "expiresAt", "createdAt"];
+    [
+        "keyId", "token", "header", "kind", "name", "tenantId", "roles", "scopes", "createdBy", "createdAt", "expiresAt", "lastUsedAt",
+        "revokedAt", "status",
+    ];
 
     private static readonly (HttpMethod Method, string Path)[] _bearerSurfaces =
     [
@@ -332,9 +335,9 @@ public sealed class TokenRoutesTests
         bob.Select(item => item!["kind"]!.GetValue<string>()).Order().ShouldBe(["personal", "service"]);
         var first = ada[0]!.AsObject();
         first.Select(pair => pair.Key).ShouldBe(_listedKeys);
-        first["mintedBy"]!.AsObject().Select(pair => pair.Key).ShouldBe(["id", "displayName"]);
-        first["mintedBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
-        first["mintedBy"]!["displayName"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
+        first["createdBy"]!.AsObject().Select(pair => pair.Key).ShouldBe(["id", "name"]);
+        first["createdBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
+        first["createdBy"]!["name"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
         first["lastUsedAt"].ShouldBeNull();
         first["revokedAt"].ShouldBeNull();
         var text = new JsonArray([.. ada.Select(item => item!.DeepClone())]).ToJsonString();
