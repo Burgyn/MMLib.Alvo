@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Idempotency-Key` on `POST /auth/v1/tenants`** (#542 item 5, decided by the maintainer). A tenant cannot be deleted,
+  so a create retried after a lost answer used to spend a `maxPerAccount` slot for good. With a key, a retry with the same
+  name answers the tenant the first create made (the same 201 and `Location`, the membership as it reads now, or the id
+  alone for a creator who has left it) and creates nothing; the same key with another name is 409
+  `idempotency-conflict`; a key sent twice, blank or too long is 422. Recorded in the Data API's idempotency table under
+  the person's own scope, in the creation's transaction. **Not on `POST /auth/v1/tokens` or
+  `POST /auth/v1/tenants/{id}/invitations`**, a recorded deviation: their answers carry a secret shown once and kept
+  only as a hash, so a replay could not repeat it. After a lost answer, list, revoke the one you cannot account for, and
+  create again. **Docs:** the tenants and tokens guides, `docs/architecture/accounts.md`.
 - **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
   per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
   in the standalone host), a person can sign in through the app:

@@ -420,6 +420,21 @@ registry.
 A name is trimmed, 1–100 code points, no control character — the display name's rules, one helper
 (`SelfServiceName`).
 
+**`POST /tenants` honours `Idempotency-Key`** (#542 item 5; design §6.3 of
+`docs/superpowers/specs/2026-11-21-auth-v1-contract-uniformity-design.md`). A tenant cannot be deleted, so a retry after a
+lost 201 used to spend a `maxPerAccount` slot for good. The key and a fingerprint of the operation and the validated
+name are recorded in the Data API's `{prefix}_idempotency` table, under the scope `auth:tenants/<userId>`, in the
+creation's own transaction (`TenantCreationKey`, `EfCoreTenantStore.RecordedAsync`/`RecordAsync`). The record is read
+**after** the account-row lock the creation already takes, and **before** the cap is counted: a double-click's five
+requests make one tenant and four replays, and a replay at the cap still answers. A replay is 201 with the first
+`Location` and the creator's membership as it reads now — the Data API's "replay the state, never a stored rendering" —
+or, for a creator who has since left the tenant, `{ "tenantId" }` alone, the id the first 201 already gave them. The same
+key with another name is 409 `idempotency-conflict`; a key sent twice, blank or past `MaxIdempotencyKeyBytes` is 422.
+Recorded deviations from `draft-ietf-httpapi-idempotency-key-header-08`: 409, not §2.7's 422, for a reused key (Alvo's
+one meaning, commands Ruling 7); a concurrent duplicate waits on the lock and replays rather than §2.7's 409; and
+retention is the shared table's — none yet (#115). The fingerprint is the validated name, not the body's bytes: the body
+has one member and refuses any other, so spacing is not a different request.
+
 ### Invariants, and the tests that hold them
 
 | Invariant | Held by |
@@ -645,6 +660,10 @@ after CORS and no-store and before any other gate. While `tenancy.selfService.in
 | `POST /token` with `invitation_code` | the exchange | 200; 400 `invalid_grant` for a dead code; 400 `invalid_request` while invitations are off |
 
 For the owner routes, a member who is not an owner gets 403, and a non-member or an unknown tenant gets the same 404.
+**Creating an invitation takes no `Idempotency-Key`** — a recorded deviation (#542 item 5, decided by the maintainer).
+The answer carries the code, shown once and stored only as its hash, so a replay could not repeat it without storing a
+secret. A client whose 201 was lost lists the tenant's invitations (`GET …/invitations`, newest first), revokes the one
+it cannot account for (`DELETE …/invitations/{id}`) and creates a new one. A header sent anyway is ignored.
 **Create refuses rather than clamps.** `roles` is required, unique and within `assignableRoles` (`admin` never is). An
 owner-granting invitation must be single-use and live at most 7 days, or it is refused at `/maxUses` or `/expiresAt`.
 `expiresAt` is RFC 3339 with an offset, later than now and at most 30 days ahead. `email` is trimmed, at most 254
@@ -958,6 +977,12 @@ the registry.
 | `GET /tokens` | any person | 200, newest first: their personal tokens and the service tokens of the shared tenants they own; `status` is `revoked` > `expired` > `active`; never `token`, never a hash |
 | `DELETE /tokens/{keyId}` | a personal token: its minter; a service token: its minter or any owner of its tenant | 204, also the second time (the first `revokedAt` is kept); one identical 404 for an unknown id, another person's personal token and a service token of a tenant the caller does not own |
 
+**Minting takes no `Idempotency-Key`** — a recorded deviation (#542 item 5, decided by the maintainer). The 201 carries
+the secret, shown once and stored only as its hash, so a replay could not return it without storing it, which spec §14
+AC6 rules out. A client whose 201 was lost lists its tokens (`GET /tokens` — the lost one is there, with its name,
+`createdAt` and `lastUsedAt`), revokes it (`DELETE /tokens/{keyId}`) and mints again: an unseen secret is then never
+left live. A header sent anyway is ignored.
+
 **The body is refused, never clamped.** `name` is 1–100 characters under the display name's rules (`SelfServiceName`).
 `kind` is `personal` or `service`. `tenantId` is a UUID — optional for a personal token, required for a service one.
 `roles` must be absent on a personal token (its roles are its person's); a service token names one or more, unique,
@@ -1104,11 +1129,10 @@ And where the implementation answered differently from the plan's first wording,
   bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
   grows by this table).
 - Events and an audit trail for minting and revoking (spec D9).
-- A settled `/auth/v1` contract before v0.1: ~~one name per thing, one answer for the wrong kind of credential~~ (both
-  done in #542: `createdBy: { id, name }` everywhere, and a 401 Bearer challenge for any API key on a person-only route),
-  the rate-limit keys (`RateLimits:Create` also charges `POST /tokens`, `RateLimits:Token` is the OAuth endpoint), the
-  `auth.apiTokens` name, and `Idempotency-Key` on `POST /tenants`, `…/invitations` and `/tokens`:
-  [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542).
+- ~~A settled `/auth/v1` contract before v0.1~~ — done in [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542):
+  `createdBy: { id, name }` everywhere, a 401 Bearer challenge for any API key on a person-only route, the descriptor key
+  `auth.apiTokens`, one rate budget per route (`TokenEndpoint`, `Tenants`, `ApiTokens`, `Invitations`), and
+  `Idempotency-Key` on `POST /tenants` — minting and creating an invitation record their deviation instead (above).
 - The field-service demo, its TeaPie suite, the users' guides and the descriptor skill — S6, [below](#the-demo-s6).
 
 ## The demo (S6)
@@ -1394,8 +1418,8 @@ defects that no slice could see, because each sits where two slices meet. Each f
   `tenancy.selfService` with `invitations: true`. Its one tenant role is a role of its own, `member`, because every
   other role it declares is named in an `access` level, and a tenant role there is refused.
 
-Still open after these fixes, each filed: the HTTP contract's coherence before v0.1
-([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
+Still open after these fixes, each filed (the HTTP contract's coherence before v0.1,
+[#542](https://github.com/Burgyn/MMLib.Alvo/issues/542), is done since): a banned sole owner's tenant and the owner-removal × ban
 lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
 sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
 race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a

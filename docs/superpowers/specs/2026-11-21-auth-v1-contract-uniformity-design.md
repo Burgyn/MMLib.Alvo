@@ -1,8 +1,9 @@
 # The `/auth/v1` contract before v0.1: names, credential answers, rate-limit keys, `auth.accessTokens`, idempotency — design
 
-**Status:** items 1 and 2 implemented (slices 1–2); items 3, 4, 5b and 5c await the maintainer (item 4's name is his
-call and is **not decided** here); 5a may follow · **Date:** 2026-11-21 ·
-**Branch:** `debt/542-auth-contract` · **Issue:** [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542) (milestone F6 — v0.1)
+**Status:** all five items **decided by the maintainer 2026-11-21** and implemented — items 1–2 on
+`debt/542-auth-contract` (#553), items 3, 4 and 5a on `debt/542-auth-contract-2`; 5b and 5c are recorded deviations, not
+built (§6.3) · **Date:** 2026-11-21 ·
+**Branches:** `debt/542-auth-contract`, `debt/542-auth-contract-2` · **Issue:** [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542) (milestone F6 — v0.1)
 
 Built on: the accounts spec `docs/superpowers/specs/2026-11-13-end-user-accounts-and-self-service-tenancy-design.md`
 (§3.1, §6.3, §7, §14), the contributor page `docs/architecture/accounts.md` (S3 D7/D14, S4 D11/D13, S5 D2/D15/D16), the
@@ -351,6 +352,12 @@ clause.
 
 ## 4. Item 3 — rate-limit names
 
+> **Decided by the maintainer 2026-11-21: option B, implemented.** `Token` → `TokenEndpoint`; `Create` split into
+> `Tenants` and `ApiTokens` (item 4's word), 10 each; `Invitations` unchanged. No shim for the retired keys. Held by
+> `TokenRoutesTests.Minting_answers_429_after_its_own_budget_and_shares_none_with_tenant_creation`,
+> `AlvoApiOptionsValidatorTests` and `FieldServiceTestIssuerTests.The_load_stack_resets_the_demos_sign_in` (which reads
+> the names from both compose files).
+
 ### 4.1 Current state
 
 `AlvoRateLimitOptions` (public, bound from `Alvo:Api:RateLimits`) has three budgets:
@@ -443,6 +450,10 @@ Alvo:Api:RateLimits:Invitations     (unchanged)
 - **TeaPie, skills, admin, assistant:** none. TeaPie reads no budget names, and only compose sets them.
 
 ## 5. Item 4 — `auth.accessTokens` (the maintainer's call)
+
+> **Decided by the maintainer 2026-11-21: `auth.apiTokens`, implemented.** Everything §5.4 lists moved, including the
+> public `Auth.ApiTokens`/`AuthApiTokens`; the internal "app token" vocabulary stays (slice 3b was not asked for). A
+> descriptor still using `auth.accessTokens` is refused by the schema (`ApiTokensSchemaTests`).
 
 ### 5.1 Current state
 
@@ -608,6 +619,17 @@ same child (S2 D6). None of this changes.
   one. Stripe calls the same act *rolling* an API key.
 
 ### 6.3 Per-route decision
+
+> **Decided by the maintainer 2026-11-21:** `POST /tenants` — supported as below, **implemented** (5a).
+> `POST /tokens` and `POST …/invitations` — **not supported**, option A, a recorded deviation: the roll below was not
+> taken. A header sent there is ignored. A client whose answer was lost lists (`GET /tokens`, `GET …/invitations`),
+> revokes the one it cannot account for, and creates again, so no unseen secret is left live; the tokens and tenants
+> guides and `accounts.md` say so. Built as: the fingerprint is the operation id and the **validated name** rather than
+> the body's bytes (the body has one member and refuses any other, so spacing is not a different request), the scope is
+> `CreateTenantRequest.IdempotencyScopeOf` (`auth:tenants/<userId>`), the record is read after the account lock and
+> before the cap, and the 409 reuses the Management API's sentence (`ProblemResultFactory.IdempotencyKeySpent`, renamed
+> from `ManagementIdempotencyConflict`). Held by `TenantStoreFacts` (replay, conflict, two people's keys, five
+> concurrent creates with one key — both engines) and `TenantRoutesTests` (201 replay, 409, 422 ×3, the id-only replay).
 
 #### `POST /tenants` — support, with the Data API's semantics
 
@@ -829,19 +851,15 @@ snapshot, so the snapshot judge runs. Slices 3 and 4 move a PublicApi baseline, 
 
 ## 10. Open questions for the maintainer
 
-Item 4's name is asked in §5. Beyond it:
+All **decided by the maintainer 2026-11-21**. Item 4's name: `auth.apiTokens` (§5).
 
-1. **Split or share the creating budget (item 3).** The recommendation is to split, which reverts S5 D15. If one
-   budget is preferred, its name would be `Provisioning`.
-2. **The roll on a keyed retry (item 5).** It is new behaviour beyond both the draft and Stripe. It needs an explicit
-   yes, because it makes "shown once" read "shown once, or rolled on a keyed retry" (spec §14 AC6). The alternative
-   is option A, a recorded deviation, for tokens and invitations.
-3. **Retention of the three new record families.** The recommendation inherits #115 (none yet). Should these routes
-   instead get the command ledger's 24-hour window now? That would mean a per-family sweep, because the shared table
-   has none.
+1. ~~**Split or share the creating budget (item 3).**~~ **Split**: `Tenants` and `ApiTokens` (§4).
+2. ~~**The roll on a keyed retry (item 5).**~~ **Not taken**: option A for tokens and invitations, a recorded deviation
+   (§6.3); `POST /tenants` takes the key.
+3. **Retention of the record family.** With only `POST /tenants` keyed, there is one new family, and it inherits the
+   shared table's retention: none yet, #115. Not re-opened.
 4. ~~**The token 201 as the list item (item 1).**~~ **Ruled in scope (2026-11-21, on the maintainer's behalf),
    implemented in slice 2.**
 
 Settled since the note was written (2026-11-21, on the maintainer's behalf): **item 2's recommendation (§3.3 A) and item
-1's recommendation (§2.3 A) were accepted, and both are implemented** (slices 1 and 2). Questions 1–3 and item 4's name
-stay open; slice 5a (item 5 on `POST /tenants`) may follow.
+1's recommendation (§2.3 A) were accepted, and both are implemented** (slices 1 and 2).

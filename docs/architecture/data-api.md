@@ -725,6 +725,11 @@ Three decisions in that table:
 Nothing prunes this table yet: growth is bounded by the writes its caller may already perform, but a
 retention window and a sweep are **#115**.
 
+**Three surfaces write it.** The Data API's rows under `tenant/user`, the Management API's revisions under the caller's
+identity, and, since #542, self-service tenant creation (`POST /auth/v1/tenants`) under `auth:tenants/<userId>` — the
+surface prefix keeps its keys from ever meeting a Data API key with the same text (`docs/architecture/accounts.md`,
+*The routes* of S3).
+
 A reused key with a **different** fingerprint is `409 idempotency-conflict`, refused before the row is
 read: it is not a replay, and answering with the first request's row would report success for a create that
 never happened.

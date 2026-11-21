@@ -284,6 +284,9 @@ Tokens are for reaching data. They never manage anything:
 
 - **Expiry**: at most `maxLifetimeDays` ahead, 90 by default and 365 at most. Lowering it bounds new tokens only.
 - **100 live tokens per account.** The next mint is `409`.
+- **A lost mint answer is not retried with a key.** `POST /auth/v1/tokens` takes no `Idempotency-Key`: the secret is
+  kept only as a hash, so no retry could show it again. List your tokens, revoke the one whose secret you never received
+  (it is there by its name and `createdAt`), and mint again. A secret nobody holds is then never left live.
 - **Minting is rate-limited**: 10 a minute per client address (`Alvo:Api:RateLimits:ApiTokens`), then `429`. Creating a
   tenant has a budget of its own.
 - **Scopes are entity × read/write.** Nothing finer, such as a field, an operation or "only my own rows".
