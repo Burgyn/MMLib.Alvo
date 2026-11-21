@@ -196,16 +196,16 @@ internal static partial class AccountsDocumentation
     {
         var (status, response) = TenantRefusal(
             "401",
-            "`unauthenticated`: no access token was presented, or it cannot be used. `WWW-Authenticate` is the RFC 6750 "
-            + "challenge: bare `Bearer` when none was presented, otherwise with `error=\"invalid_token\"` or "
-            + "`error=\"invalid_request\"`.",
+            "`unauthenticated`: no access token was presented (an API key, a personal token or a service token does not "
+            + "reach this route), or it cannot be used. `WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when "
+            + "none was presented, otherwise with `error=\"invalid_token\"` or `error=\"invalid_request\"`.",
             document);
         response.Headers!["WWW-Authenticate"] = Header("The RFC 6750 Bearer challenge.");
         return (status, response);
     }
 
     private static (string, OpenApiResponse) NotAPerson(OpenApiDocument document) => TenantRefusal(
-        "403", "`forbidden`: an API key or an integration's token was presented; only a signed-in person manages tenants.", document);
+        "403", "`forbidden`: the access token names a caller that is not a signed-in person.", document);
 
     private static (string, OpenApiResponse) Disabled(OpenApiDocument document, string description)
         => TenantRefusal("404", description, document);

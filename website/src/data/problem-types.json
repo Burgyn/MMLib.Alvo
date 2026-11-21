@@ -133,9 +133,10 @@
   "unauthenticated": {
     "causes": [
       "A credential was presented and cannot be used: an unknown, revoked or expired key, a wrong secret, or a key not issued for the requested tenant.",
-      "A request with no credential at all is not refused with this slug: it runs as an anonymous caller, and the rules decide."
+      "A request with no credential at all is not refused with this slug: it runs as an anonymous caller, and the rules decide.",
+      "On a route only a signed-in person reaches (`/auth/v1/user`, `/logout`, and every tenant, member, invitation and token route but the invitation preview), a request with no credential, or with an API key, a personal token or a service token in the API-key header, is refused with this slug and a bare `Bearer` challenge. A malformed Bearer token, or one beside an API key, is this slug with `error=\"invalid_request\"`. A Bearer token a host's own resolver resolves to a caller who is not a person is not this slug: it is `403 forbidden`."
     ],
-    "fix": "Send a valid key in the header the `WWW-Authenticate` challenge names, `X-Alvo-Api-Key` by default.",
+    "fix": "Follow the `WWW-Authenticate` challenge. On a route that takes keys, send a valid key in the header it names, `X-Alvo-Api-Key` by default. On a route only a signed-in person reaches, the challenge is `Bearer`: send a person's access token as `Authorization: Bearer <token>`.",
     "violationCodes": [],
     "guides": ["guides/authentication", "guides/handle-errors"],
     "needsProblemDetails": false

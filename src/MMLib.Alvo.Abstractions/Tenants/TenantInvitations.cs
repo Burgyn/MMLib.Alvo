@@ -38,11 +38,15 @@ internal readonly record struct CreateInvitationOutcome(MemberChangeStatus Statu
 /// <param name="Uses">How many have.</param>
 /// <param name="ExpiresAt">The instant from which it no longer admits anyone.</param>
 /// <param name="CreatedBy">The owner who created it.</param>
+/// <param name="CreatorName">
+/// The creator's display name as it reads now, or <see langword="null"/> when they have none (#542 item 1: an
+/// invitation names its creator as a person, the token list's precedent).
+/// </param>
 /// <param name="CreatedAt">When it was created.</param>
 /// <param name="RevokedAt">When it was first revoked, or <see langword="null"/>.</param>
 internal sealed record InvitationView(
     Guid Id, TenantId Tenant, IReadOnlyList<string> Roles, bool GrantsOwner, string? Email, int MaxUses, int Uses,
-    DateTimeOffset ExpiresAt, UserId CreatedBy, DateTimeOffset CreatedAt, DateTimeOffset? RevokedAt);
+    DateTimeOffset ExpiresAt, UserId CreatedBy, string? CreatorName, DateTimeOffset CreatedAt, DateTimeOffset? RevokedAt);
 
 /// <summary>An owner's revocation of one invitation of a tenant.</summary>
 /// <param name="Tenant">The tenant.</param>
@@ -54,13 +58,13 @@ internal sealed record InvitationRevocation(TenantId Tenant, UserId Actor, Guid 
 /// <summary>What a live invitation offers, as anyone holding its code sees it — never the email it may be bound to.</summary>
 /// <param name="Tenant">The tenant it invites into.</param>
 /// <param name="TenantName">The tenant's name.</param>
-/// <param name="InviterName">The creator's display name, if they have one.</param>
+/// <param name="CreatorName">The creator's display name, if they have one.</param>
 /// <param name="Roles">The stored tenant-role names an accepted membership starts with, verbatim.</param>
 /// <param name="GrantsOwner">Whether an accepted membership is an owner's.</param>
 /// <param name="EmailBound">Whether only one trusted email may accept it (S4 plan D8).</param>
 /// <param name="ExpiresAt">The instant from which it no longer admits anyone.</param>
 internal sealed record InvitationPreview(
-    TenantId Tenant, string TenantName, string? InviterName, IReadOnlyList<string> Roles, bool GrantsOwner,
+    TenantId Tenant, string TenantName, string? CreatorName, IReadOnlyList<string> Roles, bool GrantsOwner,
     bool EmailBound, DateTimeOffset ExpiresAt);
 
 /// <summary>One person's acceptance of the invitation whose code hashes to <paramref name="CodeHash"/>.</summary>

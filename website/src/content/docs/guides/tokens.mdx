@@ -85,13 +85,18 @@ answers are the same.
      "tenantId": "3c9e…",
      "roles": ["dispatcher"],
      "scopes": ["work_orders:read"],
+     "createdBy": { "id": "5b1f…", "name": "Dana Novak" },
+     "createdAt": "…",
      "expiresAt": "…",
-     "createdAt": "…"
+     "lastUsedAt": null,
+     "revokedAt": null,
+     "status": "active"
    }
    ```
 
    **`token` is in this answer and in no other, ever.** Put it in the billing system's secret store now. Alvo keeps
-   only a hash of it. `header` names the header to send it in.
+   only a hash of it. `header` names the header to send it in. Everything else is exactly what the token list will
+   show of it.
 
    `expiresAt` is required and is computed when you mint, never written down: RFC 3339 with an offset, later than now
    and at most `maxLifetimeDays` ahead, or the mint is refused at `/expiresAt`. Here it is 28 days, inside the
@@ -194,7 +199,7 @@ answers are the same.
        "tenantId": "3c9e…",
        "roles": ["dispatcher"],
        "scopes": ["work_orders:read"],
-       "mintedBy": { "id": "5b1f…", "displayName": "Dana Novak" },
+       "createdBy": { "id": "5b1f…", "name": "Dana Novak" },
        "createdAt": "…",
        "expiresAt": "…",
        "lastUsedAt": "…",
@@ -263,8 +268,9 @@ until you switch it back on.
 
 Tokens are for reaching data. They never manage anything:
 
-- **Minting, listing and revoking tokens, and every tenant, member and invitation route**: `403`. Those are acts of a
-  signed-in person, so a token cannot mint a token (`170-SelfService/010-tokens-reach`).
+- **Minting, listing and revoking tokens, `/auth/v1/user`, and every tenant, member and invitation route**: `401`
+  with `WWW-Authenticate: Bearer`. Those are acts of a signed-in person, and they take a person's access token and
+  nothing else, so a token cannot mint a token (`170-SelfService/010-tokens-reach`). Any API key gets the same answer.
 - **The Management API**: `403`, with "Personal and service tokens are app credentials and never manage a project.
   Use an operator session or a configured API key." This holds even if the token's roles would match an `access`
   level.

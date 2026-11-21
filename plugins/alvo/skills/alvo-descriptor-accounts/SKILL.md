@@ -47,7 +47,8 @@ give them a role through `creatorRoles`.
 - A scoped create needs no `tenant_id` in its body: it lands in the tenant `X-Alvo-Tenant` names, or the person's
   personal tenant without the header. A `tenant_id` naming any other tenant is 403, with the fix in `detail`.
 - An app token (`alvo_pat_…` personal, `alvo_svc_…` service) is sent as `X-Alvo-Api-Key`; as `Authorization: Bearer`
-  it is 401. The Management API refuses app tokens.
+  it is 401. The Management API refuses app tokens. The `/auth/v1` user, tenant and token routes take only a person's
+  Bearer token: any API key there is 401.
 
 <!-- example: google-sign-in -->
 **Let workshop customers sign in with Google.**

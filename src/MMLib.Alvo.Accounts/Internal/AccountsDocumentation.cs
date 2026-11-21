@@ -132,7 +132,8 @@ internal static partial class AccountsDocumentation
 
     private static (string, OpenApiResponse) Unauthenticated(OpenApiDocument document) => Refusal(
         "401",
-        "`unauthenticated`: no access token was presented (an API key does not reach this route), or it cannot be used. "
+        "`unauthenticated`: no access token was presented (an API key, a personal token or a service token does not reach "
+        + "this route), or it cannot be used. "
         + "`WWW-Authenticate` is the RFC 6750 challenge: bare `Bearer` when none was presented, otherwise with "
         + "`error=\"invalid_token\"` or `error=\"invalid_request\"`.",
         document,

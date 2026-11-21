@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Api;
 using MMLib.Alvo.Api.Tests;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Tenants;
 using MMLib.Alvo.Tests.Accounts;
 using System.Globalization;
@@ -190,7 +191,7 @@ public sealed class TenantRoutesTests
     }
 
     [Fact]
-    public async Task An_api_key_is_403_and_no_credential_is_a_bearer_challenge()
+    public async Task An_api_key_is_the_same_bearer_challenge_as_no_credential()
     {
         var integration = new TestApiKey("integration", ["authenticated"], ["*:read", "*:write"]);
         await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, keys: [integration]);
@@ -198,11 +199,31 @@ public sealed class TenantRoutesTests
         using var keyed = await world.Api.SendAsync(HttpMethod.Get, Tenants, integration);
         using var anonymous = await world.Api.SendAsync(HttpMethod.Get, Tenants);
 
-        keyed.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await keyed.ReadTextAsync());
-        (await keyed.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
-        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await anonymous.ReadTextAsync());
-        anonymous.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
-        anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
+        await BearerChallengeAsync(keyed);
+        await BearerChallengeAsync(anonymous);
+        (await keyed.ReadProblemDetailAsync()).ShouldBe(await anonymous.ReadProblemDetailAsync());
+    }
+
+    /// <summary>
+    /// The one 403 left on the person gate (#542 item 2): a Bearer token — the route's own scheme — that a host's own person
+    /// resolver resolves to a caller who is not a person. Authenticated, and insufficient; the sentence names no route.
+    /// </summary>
+    [Fact]
+    public async Task A_bearer_a_host_resolves_to_no_person_is_403_naming_no_route()
+    {
+        var people = new TestPersonResolver(("host-integration", NotAPerson()));
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, services: people.Register);
+
+        using var tenants = await world.AsPersonAsync(HttpMethod.Get, Tenants, "host-integration");
+        using var tokens = await world.AsPersonAsync(HttpMethod.Get, "/auth/v1/tokens", "host-integration");
+
+        foreach (var refused in new[] { tenants, tokens })
+        {
+            refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await refused.ReadTextAsync());
+            (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+            (await refused.ReadProblemDetailAsync()).ShouldBe(
+                "This route answers a signed-in person, and the bearer token names a caller that is not one.");
+        }
     }
 
     [Fact]
@@ -217,7 +238,10 @@ public sealed class TenantRoutesTests
         using var forged = await world.AsPersonAsync(HttpMethod.Get, Tenants, access[..^4] + "AAAA");
 
         both.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await both.ReadTextAsync());
-        both.Headers.WwwAuthenticate.ToString().ShouldContain("invalid_request");
+        both.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer error=\"invalid_request\"");
+        (await both.ReadProblemDetailAsync()).ShouldBe(
+            "The request presents both X-Alvo-Api-Key and a bearer token. This route answers a signed-in person: "
+            + "present only the bearer token.");
         forged.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await forged.ReadTextAsync());
         forged.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer error=\"invalid_token\"");
     }
@@ -359,6 +383,30 @@ public sealed class TenantRoutesTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static Task<AccountsWorld> TeamAsync() => AccountsWorld.StartAsync(_engine, descriptor: TeamTracker);
+
+    /// <summary>
+    /// Asserts the one answer a person-only route gives every request without a usable Bearer token — an API key of any
+    /// kind included (#542 item 2): 401 <c>unauthenticated</c>, the bare <c>Bearer</c> challenge, <c>no-store</c>.
+    /// </summary>
+    /// <param name="response">The response to judge.</param>
+    internal static async Task BearerChallengeAsync(HttpResponseMessage response)
+    {
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await response.ReadTextAsync());
+        response.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Unauthenticated);
+        response.Headers.CacheControl!.NoStore.ShouldBeTrue();
+    }
+
+    private static AlvoPrincipal NotAPerson()
+    {
+        var person = TestPersonResolver.Person("host:integration", tenant: null);
+        return new AlvoPrincipal
+        {
+            KeyId = person.KeyId,
+            Scopes = person.Scopes,
+            Context = new AlvoContext { User = person.Context.User, Roles = person.Context.Roles, ActorKind = AlvoActorKind.ApiKey },
+        };
+    }
 
     private static Task<HttpResponseMessage> CreateAsync(AccountsWorld world, string access, string name)
         => world.AsPersonAsync(HttpMethod.Post, Tenants, access, new JsonObject { ["name"] = name });
