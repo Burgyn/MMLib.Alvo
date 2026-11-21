@@ -396,9 +396,10 @@ new can ever sign up. The apply still succeeds, because closed registration is a
   nothing, on every tenant route. A tenant member who is not an owner gets `403` from the owner routes.
 - **Codes never travel in a URL.** Create answers the code once. Preview and accept take it in the body. Your join
   link keeps it in the fragment.
-- **Only a person manages tenants.** The tenant, member and invitation routes take a person's access token and nothing
-  else. An API key, a personal token or a service token there is `401` with `WWW-Authenticate: Bearer`, the same answer
-  as no credential at all.
+- **Only a person manages tenants.** The tenant and member routes, and creating, listing, revoking and accepting
+  invitations, take a person's access token and nothing else. An API key, a personal token or a service token there is
+  `401` with `WWW-Authenticate: Bearer`, the same answer as no credential at all. Previewing a code is the exception: it
+  needs only a valid code, and no sign-in.
 - **Rate limits per client address.** The five invitation routes share 20 requests a minute
   (`Alvo:Api:RateLimits:Invitations`). Creating a tenant and minting a token share 10
   (`Alvo:Api:RateLimits:Create`). Past either, the answer is `429` with `Retry-After`.
