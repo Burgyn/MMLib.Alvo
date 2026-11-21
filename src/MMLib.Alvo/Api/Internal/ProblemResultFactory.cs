@@ -316,7 +316,8 @@ internal static class ProblemResultFactory
         StatusCodes.Status409Conflict, AlvoProblemTypes.DestructiveChange, detail);
 
     /// <summary>
-    /// The 409 for a management key reused for a different request.
+    /// The 409 for a key the caller already spent on a different request — on the Management API's writes and on
+    /// <c>POST {prefix}/tenants</c> (#542 item 5), the surfaces that record a key without a row to name.
     /// </summary>
     /// <remarks>
     /// <b>The slug is <see cref="AlvoProblemTypes.IdempotencyConflict"/>, the one the data path already
@@ -324,7 +325,7 @@ internal static class ProblemResultFactory
     /// create does not have to learn a management-only spelling. The detail is this surface's own, because
     /// the two ways out are: the data path names a row, this one names a descriptor.
     /// </remarks>
-    internal static IResult ManagementIdempotencyConflict() => Problem(
+    internal static IResult IdempotencyKeySpent() => Problem(
         StatusCodes.Status409Conflict,
         AlvoProblemTypes.IdempotencyConflict,
         "This 'Idempotency-Key' was already spent on a different request. Send a fresh key with this body, "

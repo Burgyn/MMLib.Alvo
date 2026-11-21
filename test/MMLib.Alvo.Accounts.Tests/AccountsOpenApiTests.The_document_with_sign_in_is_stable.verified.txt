@@ -531,8 +531,18 @@
           "tenants"
         ],
         "summary": "Create a shared tenant",
-        "description": "Creates a tenant others can join, with an id the server chooses. The person becomes its owner, holding `createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.",
+        "description": "Creates a tenant others can join, with an id the server chooses. The person becomes its owner, holding `createTenants.creatorRoles`. One account creates at most `createTenants.maxPerAccount` shared tenants, ever.\n\n**Send `Idempotency-Key` to make a retry safe.** A tenant cannot be deleted, so a retried create without a key spends a `maxPerAccount` slot for good. With one, a retry carrying the same key and the same name answers the tenant the first create made — the same 201 and `Location`, the person's membership as it reads now (the id alone if they have left it) — and creates nothing; the same key with another name is 409 `idempotency-conflict`.",
         "operationId": "tenants.create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes the creation retry-safe: recorded with the tenant under the person's own scope, so a retry with the same key and name answers the tenant the first create made and creates nothing. At most one header line, not blank, and within the API's byte bound, or 422.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "description": "The new tenant's name.",
           "content": {
@@ -634,7 +644,7 @@
             }
           },
           "409": {
-            "description": "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap).",
+            "description": "`tenant-limit`: the person has already created `maxPerAccount` shared tenants (the member carries the cap). `idempotency-conflict`: the person already spent this `Idempotency-Key` on a creation with another name.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -672,7 +682,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`; or, on a creation, `Idempotency-Key` is sent twice, blank or too long.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -858,7 +868,7 @@
             }
           },
           "422": {
-            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`.",
+            "description": "`validation`: the name is missing, longer than 100 characters or not text, or the body carries a property other than `name`; or, on a creation, `Idempotency-Key` is sent twice, blank or too long.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
