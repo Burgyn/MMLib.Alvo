@@ -104,6 +104,11 @@ internal sealed class AlvoAccountsOptionsValidation(
             yield return OutOfRange(nameof(AlvoAccountsOptions.RefreshIdleDays), options.RefreshIdleDays, "at least 1");
         }
 
+        if (options.RetentionDays < 1)
+        {
+            yield return OutOfRange(nameof(AlvoAccountsOptions.RetentionDays), options.RetentionDays, "at least 1");
+        }
+
         if (options.SessionLifetimeDays < options.RefreshIdleDays)
         {
             yield return OutOfRange(nameof(AlvoAccountsOptions.SessionLifetimeDays), options.SessionLifetimeDays,

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One framework sweeper, and the end-user tables stop growing** (#527). The hourly ledger sweep becomes the one
+  internal framework sweeper: it runs every table's sweep job in batches of 500, at most 20 a tick, and a failed job
+  never stops the others. `AddAlvoAccounts` adds four jobs: sessions revoked, expired or idle past
+  `Alvo:Accounts:RetentionDays` (new, default 30, at least 1) go with their refresh tokens — never one younger than the
+  ID-token window — refresh tokens rotated past the grace window go, and app tokens and invitations revoked, expired or
+  used up past the retention go.
+
 - **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
   per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
   in the standalone host), a person can sign in through the app:
@@ -668,6 +675,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **A refresh-token value names its session: `alvo_rt_<session>_<id>_<mac>`** (#527). The MAC covers both, and a value
+  whose row the sweep deleted is still recognised as a reuse while its session lives. Every refresh token issued
+  before this change is refused; people sign in again.
+- **A revoked or expired app token or invitation disappears after `Alvo:Accounts:RetentionDays`** (#527). Until then it
+  is listed with its status and a second revocation is still `204`; after it, the id is the unknown one's `404`.
 
 - **The operator's user routes check `{project}`, and `…/users/{id}/disabled` refuses `{}`** (#526). All seven
   `{management}/projects/{project}/users…` routes answered for any project name, served or not; an unknown one is now

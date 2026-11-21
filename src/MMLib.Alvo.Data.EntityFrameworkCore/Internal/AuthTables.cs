@@ -54,8 +54,11 @@ internal sealed class AuthTables(string schemaPrefix)
         await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(Identities, "account_id"), ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateTableAsync(connection, Sessions, SessionsDdl, ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(Sessions, "account_id"), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(Sessions, "expires_at"), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(Sessions, "revoked_at"), ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateTableAsync(connection, RefreshTokens, RefreshTokensDdl, ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(RefreshTokens, "session_id"), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, IndexDdl(RefreshTokens, "rotated_at"), ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateTableAsync(connection, Keys, KeysDdl, ct).ConfigureAwait(false);
     }
 
@@ -264,6 +267,31 @@ internal sealed class AuthTables(string schemaPrefix)
         SELECT s.account_id, s.created_at FROM {Sessions} s JOIN {Accounts} a ON a.id = s.account_id
          WHERE s.id = @session_id AND s.revoked_at IS NULL AND s.expires_at > @now AND a.disabled_at IS NULL
         """;
+
+    /// <summary>
+    /// The sessions a sweep deletes (#527): dead past the retention — revoked, expired, or idle — and started before the
+    /// ID-token window, the first <c>@limit</c> by id, so the two statements of one sweep pick the same sessions.
+    /// </summary>
+    private string DeadSessionsSql =>
+        $"""
+        SELECT id FROM {Sessions}
+         WHERE (revoked_at < @revoked_before OR expires_at < @expired_before OR COALESCE(last_refreshed_at, created_at) < @idle_before)
+           AND created_at < @born_before
+         ORDER BY id LIMIT @limit
+        """;
+
+    /// <summary>Gets the statement deleting the refresh tokens of the sessions a sweep deletes, run first.</summary>
+    internal string SweepSessionTokensSql => $"DELETE FROM {RefreshTokens} WHERE session_id IN ({DeadSessionsSql})";
+
+    /// <summary>Gets the statement deleting the sessions a sweep deletes, run after their tokens.</summary>
+    internal string SweepSessionsSql => $"DELETE FROM {Sessions} WHERE id IN ({DeadSessionsSql})";
+
+    /// <summary>
+    /// Gets the statement deleting refresh tokens rotated before <c>@rotated_before</c> (#527): a value names its session,
+    /// so a presented ancestor whose row is gone is still recognised as a reuse; the unrotated tip stays.
+    /// </summary>
+    internal string SweepRotatedTokensSql =>
+        $"DELETE FROM {RefreshTokens} WHERE id IN (SELECT id FROM {RefreshTokens} WHERE rotated_at < @rotated_before LIMIT @limit)";
 
     /// <summary>Gets the statement revoking every live session of one account.</summary>
     internal string RevokeAccountSessionsSql =>

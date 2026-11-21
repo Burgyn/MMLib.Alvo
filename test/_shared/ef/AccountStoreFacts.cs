@@ -805,6 +805,79 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         account.ShouldNotBe(other);
     }
 
+    /// <summary>
+    /// #527: the sweep deletes a session dead past the retention — revoked, expired or idle — with every refresh token it
+    /// has, and nothing live; a session younger than the ID-token window stays whatever its state; the bound holds.
+    /// </summary>
+    [Fact]
+    public async Task The_sweep_deletes_dead_sessions_with_their_tokens_and_keeps_the_rest()
+    {
+        var (store, services) = await StoreAsync();
+        var (_, revoked) = await SignedInAsync(store);
+        var (liveAccount, live) = await SignedInAsync(store);
+        var (_, young) = await SignedInAsync(store);
+        await store.RefreshAsync(Refresh(revoked.RefreshTokenId, _now.AddMinutes(1)), Ct);
+        await store.RevokeSessionAsync(revoked.SessionId, SessionRevocations.Logout, _now.AddMinutes(2), Ct);
+        await store.RevokeSessionAsync(young.SessionId, SessionRevocations.Logout, _now.AddMinutes(2), Ct);
+        var past = _now.AddMinutes(3);
+
+        var guarded = await store.SweepSessionsAsync(new SessionSweep(past, past, _now.AddDays(-60), BornBefore: _now, Limit: 10), Ct);
+        var bounded = await store.SweepSessionsAsync(new SessionSweep(past, past, _now.AddDays(-60), _now.AddMinutes(1), Limit: 1), Ct);
+        var rest = await store.SweepSessionsAsync(new SessionSweep(past, past, _now.AddDays(-60), _now.AddMinutes(1), Limit: 10), Ct);
+
+        guarded.ShouldBe(0, "no session younger than the ID-token window goes, whatever its state");
+        bounded.ShouldBe(1);
+        rest.ShouldBe(1);
+        (await CountOfAsync(services, AlvoFrameworkTables.AuthSessionsSuffix)).ShouldBe(1, "only the live session is left");
+        (await IsLiveAsync(store, liveAccount, live.SessionId, past)).ShouldBeTrue();
+        (await CountOfAsync(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)).ShouldBe(1, "the swept sessions' tokens went with them");
+    }
+
+    /// <summary>
+    /// #527: rotated refresh tokens past the grace go; the unrotated tip stays and still refreshes — and a presented
+    /// ancestor still kills the session (<see cref="A_swept_ancestor_presented_again_kills_its_live_session"/>).
+    /// </summary>
+    [Fact]
+    public async Task The_sweep_deletes_rotated_refresh_tokens_and_keeps_the_tip()
+    {
+        var (store, services) = await StoreAsync();
+        var (_, session) = await SignedInAsync(store);
+        var first = await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(1)), Ct);
+        await store.RefreshAsync(Refresh(first.ChildId!.Value, _now.AddMinutes(2)), Ct);
+
+        (await store.SweepRotatedRefreshTokensAsync(_now.AddMinutes(3), 10, Ct)).ShouldBe(2);
+
+        (await CountOfAsync(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)).ShouldBe(1);
+        var tip = await ScalarAsync(
+            services, $"SELECT id FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE rotated_at IS NULL");
+        (await store.RefreshAsync(Refresh(Guid.Parse((string)tip!, System.Globalization.CultureInfo.InvariantCulture), _now.AddMinutes(4)), Ct))
+            .Status.ShouldBe(RefreshStatus.Rotated, "the tip survives the sweep");
+    }
+
+    /// <summary>#527: app tokens and invitations dead past the retention go; live ones and ones dead since stay.</summary>
+    [Fact]
+    public async Task The_sweep_deletes_dead_app_tokens_and_invitations_past_the_retention()
+    {
+        var (store, services) = await StoreAsync();
+        var (account, _) = await SignedInAsync(store);
+        var tenant = await OwnedTenantAsync(services, account);
+        var dead = await MintAsync(services, account, ApiKeyKind.Personal, tenant, _now);
+        var kept = await MintAsync(services, account, ApiKeyKind.Personal, tenant, _now);
+        await ScalarAsync(services, $"UPDATE {TableOf(services, AlvoFrameworkTables.ApiKeysSuffix)} SET revoked_at = '{StoredInstantText(_now.AddDays(-40))}' WHERE key_id = '{dead}'");
+        var usedUp = await InviteAsync(services, tenant, account, [], now: _now);
+        var live = await InviteAsync(services, tenant, account, [], now: _now);
+        await ScalarAsync(services, $"UPDATE {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} SET uses = max_uses, created_at = '{StoredInstantText(_now.AddDays(-40))}' WHERE id = '{usedUp.Id:D}'");
+
+        (await store.SweepAppTokensAsync(_now.AddDays(-30), 10, Ct)).ShouldBe(1);
+        (await store.SweepInvitationsAsync(_now.AddDays(-30), 10, Ct)).ShouldBe(1);
+
+        (await TokenRevokedAtAsync(services, kept)).ShouldBeNull();
+        (await CountOfAsync(services, AlvoFrameworkTables.ApiKeysSuffix)).ShouldBe(1);
+        (await ScalarAsync(services, $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} WHERE id = '{live.Id:D}'"))
+            .ShouldBe(1L);
+        (await CountOfAsync(services, AlvoFrameworkTables.TenantInvitationsSuffix)).ShouldBe(1);
+    }
+
     [Fact]
     public async Task Two_concurrent_refreshes_of_one_token_get_the_same_child()
     {
@@ -1036,6 +1109,13 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         var outcome = await store.SignInAsync(request, Ct);
         return (outcome.Account!.Value, request);
     }
+
+    /// <summary>How many rows the framework table <paramref name="suffix"/> names holds.</summary>
+    private static async Task<long> CountOfAsync(IServiceProvider services, string suffix) => Convert.ToInt64(
+        await ScalarAsync(services, $"SELECT COUNT(*) FROM {TableOf(services, suffix)}"), System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The stored text of <paramref name="instant"/>, as the store writes it.</summary>
+    private static string StoredInstantText(DateTimeOffset instant) => MMLib.Alvo.Data.EntityFrameworkCore.StoredInstant.Text(instant);
 
     /// <summary>A presentation of <paramref name="token"/> at <paramref name="now"/> with a fresh child id and no personal tenant.</summary>
     /// <param name="token">The refresh token id.</param>

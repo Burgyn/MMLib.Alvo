@@ -64,6 +64,8 @@ internal sealed class AppTokenTables(string schemaPrefix)
         await IfNotExistsDdl.CreateTableAsync(connection, ApiKeys, ApiKeysDdl, ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateIndexAsync(connection, AuthTables.IndexDdl(ApiKeys, "minted_by"), ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateIndexAsync(connection, AuthTables.IndexDdl(ApiKeys, "tenant_id"), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, AuthTables.IndexDdl(ApiKeys, "expires_at"), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, AuthTables.IndexDdl(ApiKeys, "revoked_at"), ct).ConfigureAwait(false);
     }
 
     /// <summary>Gets the tokens table's DDL.</summary>
@@ -149,6 +151,10 @@ internal sealed class AppTokenTables(string schemaPrefix)
         UPDATE {ApiKeys} SET revoked_at = @now
          WHERE tenant_id = @tenant_id AND kind = '{ServiceKind}' AND minted_by = @user_id AND revoked_at IS NULL
         """;
+
+    /// <summary>Gets the statement deleting tokens revoked or expired before <c>@dead_before</c> (#527), at most <c>@limit</c>.</summary>
+    internal string SweepDeadSql =>
+        $"DELETE FROM {ApiKeys} WHERE key_id IN (SELECT key_id FROM {ApiKeys} WHERE revoked_at < @dead_before OR expires_at < @dead_before LIMIT @limit)";
 
     /// <summary>Gets the sweep of a disabled account (D10): every live token it minted, personal or service, in any tenant.</summary>
     internal string RevokeMintedByAccountSql =>

@@ -68,6 +68,17 @@ public sealed class AlvoAccountsOptions
     /// </remarks>
     public int RefreshReuseGraceSeconds { get; set; } = 10;
 
+    /// <summary>
+    /// Gets or sets how long, in days, a dead row is kept before the framework sweep deletes it — at least 1 (#527): a
+    /// session revoked, expired or idle, an app token revoked or expired, an invitation revoked, expired or used up.
+    /// </summary>
+    /// <remarks>
+    /// Until then a revoked token still answers its list's <c>revoked</c> status and its second revocation is still a
+    /// <c>204</c>; after it, the row is gone. Rotated refresh tokens go as soon as their grace window has passed: a refresh
+    /// token's value names its session, so reuse is still recognised without them.
+    /// </remarks>
+    public int RetentionDays { get; set; } = 30;
+
     /// <summary>Gets the identity providers this deployment can verify a person's ID token from, by name.</summary>
     /// <remarks>
     /// Case-insensitive, because configuration keys are: <c>Alvo__Accounts__Providers__google__ClientIds__0</c> binds

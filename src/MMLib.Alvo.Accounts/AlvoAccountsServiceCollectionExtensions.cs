@@ -56,6 +56,7 @@ public static class AlvoAccountsServiceCollectionExtensions
         AddTokenEndpoint(services);
         AddPerson(services);
         services.TryAddSingleton<IAlvoAccountAdministration, AccountAdministration>();
+        AccountsSweepJobs.Add(services);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<OpenApiOptions>, AccountsOpenApiSetup>());
 
         return services;

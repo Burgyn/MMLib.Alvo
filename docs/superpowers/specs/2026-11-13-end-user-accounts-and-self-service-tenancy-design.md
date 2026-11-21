@@ -249,7 +249,8 @@ top-level management block, which §3.1's refusals below refer to.
   acceptance *Zmena role je auditovaná*). They need the event envelope to carry a tenant (#153) and the
   audit component (#42). This initiative records `created_by`/`joined_at`/`invitation_id` on the rows so
   the later audit has facts to start from; §14 does not claim those two criteria.
-- **D10 — Sessions and refresh tokens are not swept yet** (recorded by the S2 final review). Nothing deletes a
+- **D10 — Sessions and refresh tokens are not swept yet** (recorded by the S2 final review; **resolved by #527**: the
+  framework sweeper's accounts jobs, `docs/architecture/accounts.md`, *The sweep (#527)*). Nothing deletes a
   `{prefix}_auth_sessions` or `{prefix}_auth_refresh_tokens` row: every sign-in inserts a session, every refresh a token
   (about 96 rows a day for one session refreshed every 15 minutes), and with `signUp: open` anyone holding a Google
   account can add rows within the token budget. Session stores ordinarily expire such rows; Alvo does not in S2,

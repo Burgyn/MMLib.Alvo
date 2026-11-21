@@ -50,6 +50,7 @@ internal sealed class InvitationTables(string schemaPrefix)
     {
         await IfNotExistsDdl.CreateTableAsync(connection, Invitations, InvitationsDdl, ct).ConfigureAwait(false);
         await IfNotExistsDdl.CreateIndexAsync(connection, AuthTables.IndexDdl(Invitations, "tenant_id"), ct).ConfigureAwait(false);
+        await IfNotExistsDdl.CreateIndexAsync(connection, AuthTables.IndexDdl(Invitations, "expires_at"), ct).ConfigureAwait(false);
     }
 
     /// <summary>Gets the invitations table's DDL.</summary>
@@ -76,6 +77,18 @@ internal sealed class InvitationTables(string schemaPrefix)
         $"""
         INSERT INTO {Invitations} (id, tenant_id, code_hash, roles, grants_owner, email, max_uses, uses, expires_at, created_by, created_at, revoked_at)
         VALUES (@id, @tenant_id, @code_hash, @roles, @grants_owner, @email, @max_uses, 0, @expires_at, @created_by, @now, NULL)
+        """;
+
+    /// <summary>
+    /// Gets the statement deleting invitations dead before <c>@dead_before</c> (#527) — revoked, expired, or used up and
+    /// created before it — at most <c>@limit</c>.
+    /// </summary>
+    internal string SweepDeadSql =>
+        $"""
+        DELETE FROM {Invitations} WHERE id IN (
+            SELECT id FROM {Invitations}
+             WHERE revoked_at < @dead_before OR expires_at < @dead_before OR (uses >= max_uses AND created_at < @dead_before)
+             LIMIT @limit)
         """;
 
     /// <summary>Gets the statement reading every invitation of one tenant, newest first, then by id.</summary>
