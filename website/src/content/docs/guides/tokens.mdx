@@ -158,8 +158,8 @@ answers are the same.
    ```
 
    **The mistake to avoid: sending a token as `Authorization: Bearer`.** `Bearer` is for a person's access token
-   from sign-in. A personal or service token sent there is not one, and the answer is the generic refusal of an
-   unusable session. **It does not tell you to use the other header**:
+   from sign-in. A personal or service token sent there is not one. Alvo recognises the `alvo_pat_` and `alvo_svc_`
+   prefixes, never tries the token, and answers a `401` whose detail names the header to use instead:
 
    ```http
    HTTP/1.1 401 Unauthorized
@@ -168,14 +168,14 @@ answers are the same.
    {
      "type": "https://alvo.dev/errors/unauthenticated",
      "status": 401,
-     "detail": "The presented bearer token could not be used. Sign in again, or check that it has not expired or been revoked and that you belong to the tenant you requested.",
+     "detail": "Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, not as 'Authorization: Bearer'.",
      …
    }
    ```
 
-   If an integration gets this with a token whose key id starts `alvo_pat_` or `alvo_svc_`, move the token to
-   `X-Alvo-Api-Key`. A hint in the answer itself is [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539). (`170-SelfService/004-billing-token` and `010-tokens-reach`, `BillingAsBearer` and its control
-   `BillingAsKey`.)
+   The answer is the same for every such token, live, revoked or made up, and it never repeats the token. Move the
+   token to `X-Alvo-Api-Key`. (`170-SelfService/004-billing-token` and `010-tokens-reach`, `BillingAsBearer` and its
+   control `BillingAsKey`.)
 
    Dana's script creates jobs the same way, and **a scoped create needs no `tenant_id`** in its body: the row lands
    in the tenant the token acts in (see [step 3 of the tenants guide](/guides/tenants-and-invitations/)). The rows it writes
@@ -280,8 +280,6 @@ Tokens are for reaching data. They never manage anything:
 - **100 live tokens per account.** The next mint is `409`.
 - **Minting is rate-limited** with tenant creation: 10 a minute per client address together
   (`Alvo:Api:RateLimits:Create`), then `429`.
-- **A token sent as `Authorization: Bearer` gets no hint** that it belongs in `X-Alvo-Api-Key` (step 3;
-  [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539)).
 - **Scopes are entity × read/write.** Nothing finer, such as a field, an operation or "only my own rows".
 - **No IP allow-list per token**, and no OAuth client credentials: a service token is an API key, not an OAuth client.
 - **No events or audit trail** for minting and revoking yet.

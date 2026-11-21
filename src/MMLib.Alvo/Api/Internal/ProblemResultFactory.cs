@@ -92,6 +92,33 @@ internal static class ProblemResultFactory
         $"{BearerScheme} error=\"{error}\"");
 
     /// <summary>
+    /// The 401 for a personal or service token presented as <c>Authorization: Bearer</c> (#539) — refused before any
+    /// resolver sees it, with the fix: the header it belongs in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The challenge and the type are <see cref="BearerUnauthenticated"/>'s</b> — the request did present a Bearer token
+    /// Alvo cannot use — and only the detail differs: the reserved prefix (<c>AppTokenSecret</c>) lets Alvo recognise the
+    /// mistake, and an agent can act on the fix without reading a guide.
+    /// </para>
+    /// <para>
+    /// <b>The wording is fixed and echoes nothing</b> — not the token, not its prefix, not whether it is personal or
+    /// service, live or revoked: one sentence for every string that starts with a reserved prefix, so it is no oracle. The
+    /// fix is in the detail rather than a <c>violations</c> entry because an <see cref="AlvoViolation"/> points into the
+    /// body or a query parameter, never a header — and the detail is where every other credential refusal here carries its
+    /// fix.
+    /// </para>
+    /// </remarks>
+    /// <param name="headerName">The header an app token is read from, named as the fix.</param>
+    internal static IResult AppTokenAsBearer(string headerName) => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            $"Personal and service tokens are not bearer tokens. Present the token in the {headerName} header, "
+            + "not as 'Authorization: Bearer'."),
+        $"{BearerScheme} error=\"invalid_token\"");
+
+    /// <summary>
     /// The 401 for a route only a person's access token reaches, asked with no Bearer token at all — an API key, another
     /// scheme, or nothing.
     /// </summary>

@@ -25,6 +25,10 @@ public sealed class TokenRoutesTests
 
     private const string Allowed = "https://app.example.test";
 
+    private const string AppTokenAsBearerDetail =
+        "Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, "
+        + "not as 'Authorization: Bearer'.";
+
     private static readonly SqliteApiEngine _engine = SqliteApiEngine.Instance;
 
     private static readonly string[] _listedKeys =
@@ -34,6 +38,15 @@ public sealed class TokenRoutesTests
 
     private static readonly string[] _createdKeys =
         ["keyId", "token", "header", "kind", "name", "tenantId", "roles", "scopes", "expiresAt", "createdAt"];
+
+    private static readonly (HttpMethod Method, string Path)[] _bearerSurfaces =
+    [
+        (HttpMethod.Get, "/api/jobs"),
+        (HttpMethod.Get, "/auth/v1/user"),
+        (HttpMethod.Post, "/auth/v1/logout"),
+        (HttpMethod.Get, "/auth/v1/tenants"),
+        (HttpMethod.Get, Tokens),
+    ];
 
     [Fact]
     public async Task A_person_mints_a_personal_token_and_sees_it_once()
@@ -511,6 +524,47 @@ public sealed class TokenRoutesTests
         revoke.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await revoke.ReadTextAsync());
         using var still = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
         still.StatusCode.ShouldBe(HttpStatusCode.OK, "a refused revoke revoked nothing");
+    }
+
+    /// <summary>
+    /// #539: an app token sent as <c>Authorization: Bearer</c> gets one 401 on every surface that reads a Bearer — the Data
+    /// API, the signed-in person's own routes and the self-service routes — with a fixed detail naming the header it
+    /// belongs in. Live, revoked and made-up tokens of either kind answer alike, so the answer is no oracle; none is
+    /// authenticated (its <c>lastUsedAt</c> stays empty) and the same live token still works in the header named.
+    /// </summary>
+    [Fact]
+    public async Task An_app_token_as_a_bearer_is_one_401_naming_the_api_key_header_on_every_surface()
+    {
+        await using var team = await TeamAsync();
+        var personal = await MintedAsync(team, Personal(team, team.Tenant));
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        var revoked = await MintedAsync(team, Personal(team, team.Tenant));
+        (await RevokeAsync(team, team.Ada, KeyOf(revoked))).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        string[] tokens = [personal, service, revoked, "alvo_svc_nosuchkey.nosecret"];
+
+        var answers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (method, path) in _bearerSurfaces)
+        {
+            foreach (var token in tokens)
+            {
+                answers.Add(await AppTokenAsBearerAnswerAsync(team, method, path, token));
+            }
+        }
+
+        answers.ShouldHaveSingleItem().ShouldBe(
+            $"401 unauthenticated Bearer error=\"invalid_token\" {AppTokenAsBearerDetail}", "one answer for every token on every surface");
+        (await ListAsync(team, team.Ada)).Items.ShouldAllBe(item => item["lastUsedAt"] == null, "a Bearer never authenticated a token");
+        using var asKey = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", service, tenant: team.Tenant.ToString("D"));
+        asKey.StatusCode.ShouldBe(HttpStatusCode.OK, await asKey.ReadTextAsync());
+    }
+
+    private static async Task<string> AppTokenAsBearerAnswerAsync(Team team, HttpMethod method, string path, string token)
+    {
+        using var response = await team.World.AsPersonAsync(method, path, token, tenant: team.Tenant.ToString("D"));
+        var text = await response.ReadTextAsync();
+        text.ShouldNotContain("alvo_", Case.Sensitive, $"{method} {path} echoes no part of the token, not even its prefix");
+        return $"{(int)response.StatusCode} {await response.ReadProblemTypeAsync()} {response.Headers.WwwAuthenticate} "
+            + await response.ReadProblemDetailAsync();
     }
 
     private static async Task<string> DisplayNameAsync(Team team, string access)

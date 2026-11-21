@@ -20,6 +20,10 @@ namespace MMLib.Alvo.Tenants.SelfService;
 ///   <listheader><term>Presented</term><description>Answer</description></listheader>
 ///   <item><term>nothing usable</term><description>401 with the plain Bearer challenge (RFC 6750 §3.1)</description></item>
 ///   <item><term>a malformed or ambiguous Bearer</term><description>401 <c>invalid_request</c>, resolving nothing</description></item>
+///   <item>
+///   <term>a personal or service token as a Bearer</term>
+///   <description>401 <c>invalid_token</c> naming the API-key header, resolving nothing (#539)</description>
+///   </item>
 ///   <item><term>a Bearer token that does not hold</term><description>401 <c>invalid_token</c></description></item>
 ///   <item>
 ///   <term>an API key, or a Bearer resolving to anything but a person</term>
@@ -30,8 +34,6 @@ namespace MMLib.Alvo.Tenants.SelfService;
 internal static class SelfServicePerson
 {
     private const string InvalidToken = "invalid_token";
-
-    private const string InvalidRequest = "invalid_request";
 
     private const string NotAPerson =
         "Only a signed-in person manages tenants. Present the access token sign-in issued as 'Authorization: Bearer "
@@ -54,9 +56,7 @@ internal static class SelfServicePerson
         {
             CredentialChannel.Bearer => await ResolveAsync(resolvers.Person(http), credential.Value!, http).ConfigureAwait(false),
             CredentialChannel.ApiKey => (null, ProblemResultFactory.PersonForbidden(NotAPerson)),
-            CredentialChannel.MalformedBearer or CredentialChannel.Ambiguous =>
-                (null, ProblemResultFactory.BearerUnauthenticated(InvalidRequest)),
-            _ => (null, ProblemResultFactory.BearerRequired()),
+            var refused => (null, CallerResolution.PersonOnlyRefusal(refused, auth)),
         };
     }
 

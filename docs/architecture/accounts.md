@@ -1124,7 +1124,7 @@ it set up:
 | `007-roles-per-tenant` | Theo founds his own garage, where he is owner and dispatcher. A self-made dispatcher cannot write the global `regions`, in his tenant or in Dana's (the admin key's create is the control). Dana joins the garage as a technician, and the same body she sends is refused there and created in Acme. |
 | `008-dead-invitations` | A revoked invitation, and one that expires 15 seconds after it is made; the suite polls until it has lapsed. |
 | `009-dead-invitations-answer-alike` | Used-up, revoked, expired and unknown codes are one `404`, identical apart from the trace id, and none of them made Olga a member of anything. |
-| `010-tokens-reach` | A token cannot mint a token. An app token sent as `Authorization: Bearer` is `401 invalid_token` (the same secret in `X-Alvo-Api-Key` is the control). Personal and service tokens are refused at Management with its fixed sentence; a Bearer session there is an anonymous caller and gets the same refusal, never a `200`. An operator key is the control. |
+| `010-tokens-reach` | A token cannot mint a token. An app token sent as `Authorization: Bearer` is `401 invalid_token` whose detail names `X-Alvo-Api-Key` (#539; the same secret in that header is the control). Personal and service tokens are refused at Management with its fixed sentence; a Bearer session there is an anonymous caller and gets the same refusal, never a `200`. An operator key is the control. |
 | `011-refresh-rotation` | A refresh rotates the token. Replaying the old one inside the 10-second grace window answers the same child. Replaying it after the window is `400 invalid_grant`; the suite polls until it is. |
 | `012-reuse-ends-the-session` | That reuse ended Dana's session: every refresh token of the family is dead and her newest access token is `401`. Theo, whose session it was not, is still signed in. |
 
@@ -1295,6 +1295,7 @@ And where the product answered differently from the plan's first wording (each p
   as anonymous" (`010`).
 - **An app token sent as `Authorization: Bearer` is the generic `401 invalid_token`** (`010`): *"The presented bearer
   token could not be used. …"*. It does not say the secret belongs in `X-Alvo-Api-Key`; the tokens guide says it.
+  (Since #539 it does: the detail names the header — see *Not in S6, and owed*.)
 
 ### Not in S6, and owed
 
@@ -1302,8 +1303,17 @@ And where the product answered differently from the plan's first wording (each p
   [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538):** Alvo fills the column from the tenant the request acts
   in, and a `tenant_id` naming any other tenant is refused with a `403` whose detail says to remove it (option 1 of the
   issue; the structured `422` of option 2 was not needed once the column is filled).
-- **A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.** The `401` could name `X-Alvo-Api-Key` as its
-  fix. A DX follow-up: [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).
+- ~~**A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.**~~ **Done in
+  [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).** `CallerResolution.Read` reads a well-formed Bearer with a
+  reserved prefix (`AppTokenSecret.IsAppTokenId`, the one test of it) as its own channel and drops its value, so no
+  resolver is handed it. Every site that reads a Bearer — the Data API, commands and `.WithAlvoCaller()`, the
+  self-service routes, the sign-in package's `/user` and `/logout` — answers it with one 401: the same
+  `Bearer error="invalid_token"` challenge and `unauthenticated` type, and the fixed detail *"Personal and service
+  tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, not as 'Authorization: Bearer'."*
+  (the header is the configured one). The sentence is identical for every such string — personal or service, live,
+  revoked or made up — and echoes none of it, so it is no oracle. The fix is in `detail`, not `violations`: an
+  `AlvoViolation` points into the body or a query parameter, never a header. Management still never reads
+  `Authorization`, and a data surface with no person resolver still leaves it to the host.
 - **An `eval-assistant` run on the v10 prompt and the tenth skill** is owed (it costs tokens and is in no ring). Two
   smaller gaps sit beside it: `SkillAreas.AreaOf("/tenancy", …)` does not look for a `selfService` inside an added
   value, and the base prompt's "You can change" list names neither `auth` nor `tenancy.selfService`. All three are

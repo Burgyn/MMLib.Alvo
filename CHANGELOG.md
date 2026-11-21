@@ -182,8 +182,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget);
     its `eval-assistant` run is owed (#540).
   - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
-    by policy." and names no field (#538, since fixed: see *Changed*); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
-    hint to use `X-Alvo-Api-Key` (#539). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+    by policy." and names no field (#538, since fixed: see *Changed*); an app token sent as `Authorization: Bearer` is
+    `401 invalid_token` with no hint to use `X-Alvo-Api-Key` (#539, since fixed: see *Changed*). **Docs:**
+    `docs/architecture/accounts.md`, *The demo (S6)*.
 - **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
   - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
     transaction, every personal and service token the person minted and every invitation they created, in any tenant,
@@ -992,6 +993,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An app token sent as `Authorization: Bearer` is told where it belongs** (#539). A personal or service token
+  (`alvo_pat_…`/`alvo_svc_…`) presented as a Bearer is still `401` `unauthenticated` with `Bearer
+  error="invalid_token"`, and is still never authenticated, but its detail is now one fixed sentence naming the API-key
+  header: *"Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, not as
+  'Authorization: Bearer'."* The same answer on the Data API, commands, `.WithAlvoCaller()` endpoints, the self-service
+  routes and `/auth/v1/user` and `/logout`, for every such token, and it repeats none of it. The OpenAPI Bearer scheme
+  says so too. **Docs:** the tokens guide, `docs/architecture/accounts.md`.
 - **A create on a tenant-scoped entity no longer needs `tenant_id`** (#538). Left out of a `POST` (single, keyed or
   batch) or a typed create, the row is placed in the tenant the call acts in, exactly as a `PUT` that creates already
   did. A body may still name it, and the caller's own tenant keeps working unchanged; any other value, `null` included,
