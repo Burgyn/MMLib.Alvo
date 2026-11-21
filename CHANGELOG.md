@@ -672,10 +672,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Google sign-in refuses an ID token whose `azp` is not a configured client id** (#544). When a token carries `azp`
   — the OAuth client the person signed in through — it must be one of `Alvo:Accounts:Providers:Google:ClientIds`, as
   every `aud` already had to be. A Google Cloud service account can mint a Google-signed ID token for any `aud`, ours
-  included, but its `azp` is its own numeric id, so under `signUp: open` it could create accounts by script; it no
-  longer can. **An app that signs in from Android or iOS must list those client ids beside the web one**, or its people
-  are refused. A token without `azp` behaves as before, and a mismatch answers the same `invalid_request` as another
-  app's `aud`.
+  included, so under `signUp: open` it could create accounts by script; Google service-account ID tokens, which carry
+  `azp` (the account's own numeric id), are now refused. A token without `azp` still passes on `aud` alone — what
+  closes the hole is Google's own behaviour of putting `azp` in every service-account token, not anything Alvo can
+  require of a token that omits it. **An app that signs in from Android or iOS must list those client ids beside the
+  web one**, or its people are refused. An `azp` that is empty or JSON `null` is refused, never read as absent; a
+  mismatch answers the same `invalid_request` as another app's `aud`, and the operator's log (event 6403, Information)
+  says which claim it was and for which provider, never its value.
 
 - **The operator's user routes check `{project}`, and `…/users/{id}/disabled` refuses `{}`** (#526). All seven
   `{management}/projects/{project}/users…` routes answered for any project name, served or not; an unknown one is now

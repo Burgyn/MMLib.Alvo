@@ -99,6 +99,10 @@ public sealed class TestOidcIssuer : IDisposable
     /// <param name="notBefore">The <c>nbf</c>, or none.</param>
     /// <param name="audiences">Several <c>aud</c> values as an array, in place of <paramref name="audience"/>.</param>
     /// <param name="azp">The <c>azp</c> (authorized party), or none.</param>
+    /// <param name="rawClaims">
+    /// Payload claims written verbatim over every other, so a token can carry what no typed parameter allows — an empty
+    /// string, a number, an array, JSON <c>null</c>.
+    /// </param>
     public string Mint(
         string subject,
         string? email = "ada@gmail.com",
@@ -113,7 +117,8 @@ public sealed class TestOidcIssuer : IDisposable
         string? issuer = null,
         DateTimeOffset? notBefore = null,
         string[]? audiences = null,
-        string? azp = null)
+        string? azp = null,
+        IReadOnlyDictionary<string, object?>? rawClaims = null)
     {
         var iat = issuedAt ?? _clock.GetUtcNow();
         var claims = Claims(subject, email, emailVerified, hd, jti);
@@ -121,6 +126,11 @@ public sealed class TestOidcIssuer : IDisposable
         if (audiences is not null)
         {
             claims["aud"] = audiences;
+        }
+
+        foreach (var (name, value) in rawClaims ?? new Dictionary<string, object?>())
+        {
+            claims[name] = value!;
         }
 
         var descriptor = new SecurityTokenDescriptor
