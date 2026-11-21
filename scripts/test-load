@@ -211,8 +211,9 @@ cleanup() {
     fi
     # A hooks arm that died mid-way (a k6 threshold, a refused probe) left the hooks image serving: the kept stack must
     # be the head composition the run reports, and a running container would also keep the image below from going.
+    # In a subshell, because a failed swap ends in `die`, which here would end the trap itself.
     if [ "${HOOKS_SERVING:-0}" -eq 1 ] && [ "$KEEP" -eq 1 ]; then
-        use_image "$IMAGE_HEAD" >/dev/null 2>&1 \
+        ( use_image "$IMAGE_HEAD" ) >/dev/null 2>&1 \
             || say "could not put $IMAGE_HEAD back after the hooks arm failed: the kept stack still serves $IMAGE_HOOKS"
     fi
     if [ "$KEEP" -eq 0 ]; then
