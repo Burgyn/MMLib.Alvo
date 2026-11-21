@@ -123,10 +123,12 @@ and on SQLite the database's one writer lock with it, past even the write's 30-s
 exception escaping a hook fails the write with 500 `hook-failed`, reason `exception`; its message stays in your log.
 
 A hook's first run after the host starts is slower than every run after it: it also pays for JIT compilation, type
-loading and its first queries. So two runs of each hook get **ten times** its limit — at most 5 s, never less than the
-limit itself (2.5 s for the 250 ms default): its first run (and any run that starts before that one ends), and its first
-run that calls through `write.Transaction`, from that call on — a hook that returned early on its first run meets its
-first queries later. Every other run has the limit you set. A cold run admitted past its limit is logged at
+loading and its first queries. So a hook's cold runs get **ten times** its limit — at most 5 s, never less than the
+limit itself (2.5 s for the 250 ms default). A run is cold if it starts before the hook's first run has ended
+(concurrent first runs share the allowance), and from its first call through `write.Transaction` if no run that made
+such a call has ended yet — a hook that returned early on its first run meets its first queries later. A run your caller
+cancelled ends neither. Every other run has the limit you set. The allowance at the first call cannot rescue a run whose
+work *before* that call already took longer than the limit. A cold run admitted past its limit is logged at
 `Information`, so a slow first path stays visible. A timed-out run is never retried: that would run your code twice.
 
 A hook's `when` has a limit of its own: the [custom CEL functions](/guides/custom-cel-functions/) it calls share one

@@ -235,6 +235,31 @@ public sealed class WriteExtensionRunnerTests
     }
 
     [Fact]
+    public async Task A_first_run_the_caller_cancelled_leaves_the_hook_cold()
+    {
+        var clock = new FakeTimeProvider();
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var runs = 0;
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("cold", (BeforeWrite<AlvoRecord> _, CancellationToken ct) =>
+        {
+            if (Interlocked.Increment(ref runs) == 1)
+            {
+                caller.Cancel();
+                ct.ThrowIfCancellationRequested();
+            }
+
+            clock.Advance(TimeSpan.FromSeconds(2));
+            return ValueTask.CompletedTask;
+        })), clock);
+
+        await Should.ThrowAsync<OperationCanceledException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), caller.Token));
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        var third = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        third.Reason.ShouldBe(HookFailedException.Timeout);
+    }
+
+    [Fact]
     public async Task A_run_that_starts_before_the_first_run_ends_shares_its_cold_start_allowance()
     {
         var clock = new FakeTimeProvider();

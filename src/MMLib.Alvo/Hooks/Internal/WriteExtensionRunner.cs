@@ -233,31 +233,46 @@ internal sealed class WriteExtensionRunner(
         }
         finally
         {
-            _coldStart.Ended(hook.Id, called: run.Operations > 0);
+            EndColdStart(hook, run, cancellationToken);
         }
 
         var elapsed = deadline.Elapsed;
-        return await ConcludedAsync(run, hook, catalog, activity, elapsed, Overran(hook, elapsed, deadline)).ConfigureAwait(false);
+        var overran = Overran(elapsed, deadline);
+        if (!overran)
+        {
+            LogIfAdmittedCold(hook, elapsed);
+        }
+
+        return await ConcludedAsync(run, hook, catalog, activity, elapsed, overran).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A run ends the hook's cold start however it ends — a throw or a timeout included — unless the caller cancelled the
+    /// write: a client that disconnects mid-run must not spend the allowance the next caller's cold run needs.
+    /// </summary>
+    private void EndColdStart(BoundWriteHook hook, HookRun run, CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            _coldStart.Ended(hook.Id, called: run.Operations > 0);
+        }
     }
 
     /// <summary>A run's first call through the transaction: the hook's first such run gets the cold-start allowance from its start.</summary>
     private void ColdAtFirstCall(BoundWriteHook hook, HookDeadline deadline) =>
         deadline.ExtendTo(_coldStart.AtFirstCall(hook.Id, hook.Registration.Settings.Timeout));
 
-    /// <summary>
-    /// Whether a run that returned overran the time it was given — its deadline fired, or it returned past it having ignored its
-    /// token. A cold run admitted past the hook's own timeout is logged, so a slow first path stays visible.
-    /// </summary>
-    private bool Overran(BoundWriteHook hook, TimeSpan elapsed, HookDeadline deadline)
+    /// <summary>Whether a run that returned overran the time it was given — its deadline fired, or it returned past it having ignored its token.</summary>
+    private static bool Overran(TimeSpan elapsed, HookDeadline deadline) => deadline.Passed || elapsed > deadline.Budget;
+
+    /// <summary>Logs a run admitted past the hook's own timeout under the cold-start allowance, so a slow cold path stays visible.</summary>
+    private void LogIfAdmittedCold(BoundWriteHook hook, TimeSpan elapsed)
     {
-        var overran = deadline.Passed || elapsed > deadline.Budget;
         var timeout = hook.Registration.Settings.Timeout;
-        if (!overran && elapsed > timeout)
+        if (elapsed > timeout)
         {
             HookLog.ColdRunAdmitted(logger, hook.Id, elapsed.TotalMilliseconds, timeout.TotalMilliseconds);
         }
-
-        return overran;
     }
 
     /// <summary>What an exception escaping a hook becomes (Ruling 12): its run's own failure, depth or a nested hook's failure unchanged, a timeout, or <c>exception</c>.</summary>

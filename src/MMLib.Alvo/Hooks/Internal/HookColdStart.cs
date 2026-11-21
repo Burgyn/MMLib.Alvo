@@ -8,7 +8,9 @@ namespace MMLib.Alvo.Hooks.Internal;
 /// because they also pay for the JIT, the type loading, the DI activation and the first query compilation of their path —
 /// work no later run repeats. Two runs are cold, once per hook per host: every run until the hook's first run has ended,
 /// and the first run that calls through <c>write.Transaction</c>, which earns the allowance at that first call — the same
-/// cost, deferred past a first run that returned early. A run ends a cold start however it ends, a timeout included.
+/// cost, deferred past a first run that returned early. Every run until such a run has ended shares it, so concurrent
+/// cold runs do too. A run ends a cold start however it ends, a throw or a timeout included, except a run the caller
+/// cancelled, which leaves it for the next caller.
 /// </summary>
 /// <remarks>
 /// Held by the runner, so it lives as long as the host's service provider: one process in production, one host in a test

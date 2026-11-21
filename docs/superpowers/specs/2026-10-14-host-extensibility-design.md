@@ -433,17 +433,20 @@ write after a deploy can fail the same way. Measured locally under eight concurr
 `visit-within-service-hours` in a host took 16.7 ms on average (max 95.7 ms) against 0.9 ms (max 7.7 ms) for its later
 runs, and `within-service-hours` took up to 148.8 ms on its first run that read the customer — its second.
 
-- **Rule 1 — the first run.** Until a hook's first run in a host has *ended* — succeeded, refused or failed, a timeout
-  included — its runs get `min(Timeout × 10, 5 s)`, never less than `Timeout`. Every run that *starts before* the
-  first one ends shares it: a burst of concurrent writes right after a deploy stalls on the same JIT and type-loading
-  locks as the first run, so granting only the first started run would still fail the rest of the burst (a refinement
-  of the ruling's "first invocation", recorded as such).
-- **Rule 2 — the first run that calls through `write.Transaction`** (second ruling, the same day). Until a run that
-  made a call through `write.Transaction` has ended, a run's first such call extends its deadline to the allowance,
-  measured from the run's start (`HookDeadline.ExtendTo`; a deadline that already fired stays fired). Why: the same
-  cause — JIT, type loading and first query compilation on the data path — merely deferred past a first run that
-  returned early, which is CI job 132438816663 exactly. Once per hook per host: a hook whose first run already called
-  through the transaction gets one cold run in all. Every other run has `Timeout`.
+- **Rule 1 — until the first run has ended.** Every run that *starts* before the hook's first run in a host has ended
+  gets `min(Timeout × 10, 5 s)`, never less than `Timeout`; concurrent first runs therefore share the allowance — a
+  burst right after a deploy stalls on the same JIT and type-loading locks as the first run, so granting only the
+  first started run would still fail the rest of the burst (a refinement of the ruling's "first invocation", recorded
+  as such). A run ends the cold start however it ends — succeeded, refused, thrown or timed out — **except a run the
+  caller cancelled** (review of #565): a client that disconnects mid-run must not spend the allowance the next
+  caller's cold run needs.
+- **Rule 2 — until a run that called `write.Transaction` has ended** (second ruling, the same day). A run whose
+  *first* call through `write.Transaction` comes before any run that made such a call has ended has its deadline
+  extended to the allowance at that call, measured from the run's start (`HookDeadline.ExtendTo`; a deadline that
+  already fired stays fired). Concurrent such runs share it, and the same caller-cancellation exception applies. Why:
+  the same cause — JIT, type loading and first query compilation on the data path — merely deferred past a first run
+  that returned early, which is CI job 132438816663 exactly. A hook whose first run already called the transaction
+  ends both cold starts with that run. Every other run has `Timeout`.
 - **Where it lives.** The state is on the singleton runner (`HookColdStart`), so "a host" is one service provider: one
   process in production, one host in a test process that starts several. Per process would not have covered job
   136797919907, whose process had been warmed in another host. A cold run admitted past its `Timeout` is logged at
@@ -465,11 +468,14 @@ runs, and `within-service-hours` took up to 148.8 ms on its first run that read 
   sample's warm-up, 28 of 36 — every failure `within-service-hours` on its first run that read the customer; rules 1
   and 2 with the warm-up, 36 of 36; rules 1 and 2 without it, 36 of 36. The warm-up no longer helps, so the sample's
   test world dropped it (one more round as committed: 12 of 12).
-- **Cost.** (1) If the rule is wrong, up to two runs per hook per host — the first, and the first that calls the
-  transaction — may hold the write's row locks, and on SQLite the writer lock, up to the cap: 2.5 s by default instead
-  of 250 ms. (2) A hook whose cold path sits behind a *second* data path (a branch reaching a query no earlier run
-  compiled) still meets that path with `Timeout`; the allowance covers the first run and the first data-calling run,
-  not the first run of every code path. (3) A test that asserts a timeout from a hook's cold run must overrun the
+- **Cost.** (1) If the rule is wrong, the cold runs of each hook per host — those that start before its first run
+  ends, and those whose first transaction call comes before a calling run ends; in a quiet host one run each — may
+  hold the write's row locks, and on SQLite the writer lock, up to the cap: 2.5 s by default instead of 250 ms. (2)
+  Rule 2 extends the deadline only at the first call, so it cannot help a run whose cold work *before* that call (DI
+  activation of a dependency, a time-zone lookup) already exceeds the base `Timeout`; such work belongs in the first
+  run or at start. (3) A hook whose cold path sits behind a *second* data path (a branch reaching a query no earlier
+  run compiled) still meets that path with `Timeout`; the allowance covers the first run and the first data-calling
+  run, not the first run of every code path. (4) A test that asserts a timeout from a hook's cold run must overrun the
   allowance, not the `Timeout` (`WriteExtensionRunnerTests`, `WriteHookFacts`).
 
 #### 4.4.5 Network and data-port ban for in-transaction host code
