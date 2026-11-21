@@ -1,6 +1,7 @@
 # End-user accounts, hardening: lock order and a banned sole owner, undoing a stolen session, signing-key rotation, the sweep — design
 
-**Status:** design approved — every §9 question ruled on the maintainer's behalf (2026-11-21); #543 (slices 1 and 3)
+**Status:** design approved — every §9 question ruled on the maintainer's behalf, scope ruled (§9.2: #543, #544 `azp`,
+#527 now; #544 rotation and #546 deferred) (2026-11-21); #543 (slices 1 and 3)
 implemented on this branch; every slice is `needs-deep-review` · **Date:** 2026-11-21 ·
 **Branch:** `debt/p3-accounts-hardening-design` · **Issues:** [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543),
 [#546](https://github.com/Burgyn/MMLib.Alvo/issues/546), [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544),
@@ -645,11 +646,18 @@ as today (`RefreshTokenFormat.cs:10-40`).
 
 ### 5.3 The sweep
 
-**Where it lives: a framework `BackgroundService`, `AccountsSweeper`, in `MMLib.Alvo.Accounts`.** It is registered by
-`AddAlvoAccounts` and follows `LedgerSweeper` (hourly, `PeriodicTimer` on the injected `TimeProvider`, failures logged
-and retried next tick, host stop ends it quietly). This is **a deviation from the issue's "an Alvo scheduled job"**:
-Alvo's schedules are descriptor-declared and run per tenant as the system actor, while this is infrastructure. The
-precedent is the ledger sweep, not a schedule. Every replica runs it, and the deletes are idempotent.
+**Where it lives: ONE internal framework sweeper, with pluggable, batched, per-table sweep jobs** (controller ruling
+2026-11-21, §9.2). It is a single hosted `BackgroundService` in the core, following `LedgerSweeper`'s shape: hourly,
+`PeriodicTimer` on the injected `TimeProvider`, failures logged and retried next tick, host stop ends it quietly. It
+runs every registered **sweep job** — an internal contract naming one table, its predicate's thresholds and its batch
+bound. Each job deletes at most `batch × maxBatches` rows a tick, in short transactions of its own, and one failing job
+never stops the others. Everything is `internal`: jobs are registered with `TryAddEnumerable` by the package that owns
+the table (Accounts registers the four of this section from `AddAlvoAccounts` through Abstractions' existing
+`InternalsVisibleTo` grants), and no type joins the public API. `LedgerSweeper`'s two ledgers are its first two jobs, so
+a host still runs one sweep timer, not two. **The Apps line's N6** (a row `retention` trait; pruning `alvo_outbox`, #154,
+and `alvo_idempotency`, #115) **adds jobs to this sweeper**, never a second one. This is **a deviation from the issue's
+"an Alvo scheduled job"**: Alvo's schedules are descriptor-declared and run per tenant as the system actor, while this
+is infrastructure. Every replica runs it, and the deletes are idempotent.
 
 **What it deletes.** Each threshold is computed in C# and bound as a parameter, so the SQL text is one for both
 engines. `R` is the retention, default 30 days, configurable as `Alvo:Accounts:RetentionDays` (min 1; Q9).
@@ -710,7 +718,7 @@ contract refuses to do. Q10.
   `InvitationStoreFacts.The_sweep_deletes_dead_invitations_and_members_keep_their_provenance`.
 - `…Each_tick_deletes_at_most_its_bound` (seed 12 000 dead rows; one tick deletes 10 000).
   `PostgreSqlAccountStoreTests.Two_replicas_sweeping_at_once_never_fail_a_tick`.
-- `AccountsSweeperTests` (LedgerSweeper's shape): it runs hourly, a failure is logged and retried, stopping is quiet,
+- `FrameworkSweeperTests` (LedgerSweeper's shape, the ledgers' two jobs folded in): it runs hourly, a failure is logged and retried, stopping is quiet,
   and it is absent without `AddAlvoAccounts`.
 - `TokenRoutesTests.The_list_pages_with_limit_and_after`, `…A_forged_cursor_is_an_empty_page`; the same for
   invitations; `AccountsOpenApiTests` snapshots move.
@@ -852,6 +860,18 @@ every recommendation above is accepted as written. One line each, with the cost 
 11. **Q11 — the session-bound refresh-token value.** Cost if wrong: every live refresh token dies once more on the
     revert; no users yet.
 
+### 9.2 Scope ruling
+
+**Controller ruling 2026-11-21 on the maintainer's behalf; why: budget + Apps line + no users; cost if wrong: rotation
+and step-up/undo land later, pre-v0.1, no deployments.**
+
+- Implement only **#543 → #544 `azp` → #527**, in that order (slices 1, 3; 2; 7, 8, 9).
+- **#527's sweeper is one internal framework sweeper** — a hosted background service with pluggable, batched, per-table
+  sweep jobs, internal, with no new public surface unless justified (§5.3). The Apps line's N6 (a row `retention`
+  trait; pruning `alvo_outbox`, #154, and `alvo_idempotency`, #115) will add jobs to it.
+- **#544's key rotation (slices 10, 11) and #546 (slices 4, 5, 6) are accepted but DEFERRED.** Their design stands as
+  written; they are not built now.
+
 ## 10. Slices — ordered, each independently mergeable, each `needs-deep-review`
 
 Each slice runs the `alvo-security-core-review` checklist plus reviewer passes standing in for `/security-review` and
@@ -863,21 +883,22 @@ working days for one implementer, tests included.
 | 1 | **The race fact, then the lock order.** First commit: §2.5's race fact and the deterministic lock-order fact, run on `main`, with the result written into the PR. Then the "one person, one mutex" order (§2.3), the order table in `accounts.md`, and the security-core checklist line | #543 | — | 1.5 |
 | 2 | **`azp`**: the check, the refusal, `TestIssuer.csx`, the guide sentence, the S2 deviation withdrawn | #544 | — | 0.5 |
 | 3 | **A banned sole owner**: `OwnersSql` counts enabled owners; the Management ownership grant; the ban answers `orphanedTenants` | #543 | 1 | 1.5 |
-| 4 | **Session attribution** (§3.4): the four columns, the exact reuse sweep, the rewritten A-I1 facts | #546 | 1 | 1 |
-| 5 | **Step-up** (§3.5): `StepUpMinutes`, the in-transaction check, RFC 9470 answer, `013-step-up` | #546 | 4 | 1.5 |
-| 6 | **The ownership undo** (§3.6): T1 marker, the fixed-point undo, the reuse log line, `012` grows | #546 | 4 (5 recommended first) | 2 |
+| 4 | **DEFERRED** — **Session attribution** (§3.4): the four columns, the exact reuse sweep, the rewritten A-I1 facts | #546 | 1 | 1 |
+| 5 | **DEFERRED** — **Step-up** (§3.5): `StepUpMinutes`, the in-transaction check, RFC 9470 answer, `013-step-up` | #546 | 4 | 1.5 |
+| 6 | **DEFERRED** — **The ownership undo** (§3.6): T1 marker, the fixed-point undo, the reuse log line, `012` grows | #546 | 4 (5 recommended first) | 2 |
 | 7 | **Session-bound refresh values** (§5.2 B): the format, the swept-ancestor-is-reuse rule | #527 | — | 1 |
-| 8 | **The sweeper** (§5.3): `AccountsSweeper`, the indexes, the bounded deletes, finishing owed undos | #527 | 7 (and 6 for the undo half — or it lands without it and 6 adds it) | 1.5 |
+| 8 | **The sweeper** (§5.3): the one internal framework sweeper with per-table jobs (the ledgers folded in), the accounts' four jobs, the indexes, the bounded deletes | #527 | 7 | 2 |
 | 9 | **Paged lists** (§5.4): `GET /tokens`, `GET …/invitations`, the TeaPie and guide changes | #527 | — | 1 |
-| 10 | **Key lifecycle** (§4.4): `activates_at`, the refresher, scheduled rotation, retirement in validation | #544 | — | 2 |
-| 11 | **Emergency rotation** (§4.5): the Management route, the lost-key-file boot line, the production runbook | #544 | 10 | 1.5 |
+| 10 | **DEFERRED** — **Key lifecycle** (§4.4): `activates_at`, the refresher, scheduled rotation, retirement in validation | #544 | — | 2 |
+| 11 | **DEFERRED** — **Emergency rotation** (§4.5): the Management route, the lost-key-file boot line, the production runbook | #544 | 10 | 1.5 |
 
-**Total ≈ 15 days.** The numbers above name the slices; **the order they land in was ruled by value and risk**
-(2026-11-21, on the maintainer's behalf): **#543 (1, 3) → #544 `azp` (2) → #527 (7, 8, 9) → #544 rotation (10, 11) →
-#546 (4, 5, 6).** Slice 1 goes first: its lock order is the rule every later multi-row write (6, 8, 11) is written
-against. Because #527 now lands before #546, slice 8 ships without "finishing owed undos", and slice 6 adds that half
-to the sweeper. Each slice moves the CHANGELOG lines of §7 that it lands, and closes its issue only with its last slice
-(#543 → 3, #544 → 11, #527 → 9, #546 → 6).
+**Total ≈ 15 days; ≈ 7.5 days are in scope now** (§9.2). The numbers above name the slices; **the order they land in
+was ruled by value and risk** (2026-11-21, on the maintainer's behalf): **#543 (1, 3) → #544 `azp` (2) → #527 (7, 8,
+9)**; then, deferred, #544 rotation (10, 11) and #546 (4, 5, 6). Slice 1 goes first: its lock order is the rule every
+later multi-row write (6, 8, 11) is written against. Because #527 lands before #546, slice 8 ships without "finishing
+owed undos", and slice 6 adds that job to the sweeper. Each slice moves the CHANGELOG lines of §7 that it lands, and
+closes its issue only with its last slice (#543 → 3, #527 → 9). #544 stays open after slice 2 for its deferred
+rotation, and #546 stays open whole.
 
 ## 11. Sources
 
