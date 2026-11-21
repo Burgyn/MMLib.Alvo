@@ -212,6 +212,29 @@ public sealed class WriteExtensionRunnerTests
     }
 
     [Fact]
+    public async Task The_first_run_that_calls_through_the_transaction_after_an_early_return_gets_the_allowance_once()
+    {
+        var clock = new FakeTimeProvider();
+        var runs = 0;
+        await using var world = RunnerWorld.Start(alvo => alvo.Entity("tickets", t => t.BeforeWrite("deferred", async (BeforeWrite<AlvoRecord> write, CancellationToken ct) =>
+        {
+            if (Interlocked.Increment(ref runs) == 1)
+            {
+                return;
+            }
+
+            await write.Transaction.GetAsync("tickets", Guid.NewGuid(), ct);
+            clock.Advance(TimeSpan.FromSeconds(1));
+        })), clock);
+
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        await world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct);
+        var third = await Should.ThrowAsync<HookFailedException>(() => world.Runner.BeforeWriteAsync(world.Before(RunnerWorld.Ticket()), Ct));
+
+        third.Reason.ShouldBe(HookFailedException.Timeout);
+    }
+
+    [Fact]
     public async Task A_run_that_starts_before_the_first_run_ends_shares_its_cold_start_allowance()
     {
         var clock = new FakeTimeProvider();

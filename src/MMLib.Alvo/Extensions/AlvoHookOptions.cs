@@ -29,9 +29,9 @@ public sealed class AlvoHookOptions
     /// <summary>
     /// Gets or sets how long one run may take before its calls are cancelled and the write fails; <see langword="null"/> for
     /// the stage's default — 250 milliseconds inside the transaction, 5 seconds for a validate hook. At most 30 seconds inside
-    /// the transaction and 60 seconds for validate; a longer or non-positive timeout refuses the start. Until the hook's
-    /// first run in a host has ended, its runs get ten times this — at most 5 seconds, never less than it — because that
-    /// run also pays for JIT compilation and first use; no timed-out run is retried.
+    /// the transaction and 60 seconds for validate; a longer or non-positive timeout refuses the start. A hook's first run
+    /// in a host, and its first run that calls through the write's transaction, get ten times this — at most 5 seconds,
+    /// never less than it — because they also pay for JIT compilation and first queries; no timed-out run is retried.
     /// </summary>
     public TimeSpan? Timeout { get; set; }
 

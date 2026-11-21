@@ -145,7 +145,7 @@ assistant as metadata:
 | Q2 Registration | `Entity<T>(…)`, `Entity("name", …)`, `Entities([...], …)`, `Entity("*", …)` | X2, X14 |
 | Q3 Typed filter | predicate lambdas only (no `IQueryable`): `when` → CEL; queries/narrowing → `AlvoFilter` (X7) | untranslatable `when` fails at registration; an untranslatable query fails at its first call; translations cached per expression shape |
 | Q4 Before-write writes other entities | yes, via `write.Transaction`, each nested write under a savepoint, full in-transaction pipeline, depth + 1 | otherwise audits get written outside the transaction |
-| Q5 Before-write timeout | **250 ms** (after-write too), validate **5 s**, per registration; calibrated in HX-10 by a `scripts/test-load` scenario published in `docs/performance.md`. Calibrated in HX-10: `hook_read` p99 21.85 ms on an Apple M4 laptop under Docker Desktop (k6 2.2.0, PostgreSQL 16, 100 000 rows per tenant) — tenfold headroom 218.5 ms ≤ 250 ms, so 250 ms stays (Ruling 20) — `docs/performance.md`. A hook's first run in a host gets a cold-start allowance (×10, at most 5 s; #519, §4.4.4) | the page asks for a measured default |
+| Q5 Before-write timeout | **250 ms** (after-write too), validate **5 s**, per registration; calibrated in HX-10 by a `scripts/test-load` scenario published in `docs/performance.md`. Calibrated in HX-10: `hook_read` p99 21.85 ms on an Apple M4 laptop under Docker Desktop (k6 2.2.0, PostgreSQL 16, 100 000 rows per tenant) — tenfold headroom 218.5 ms ≤ 250 ms, so 250 ms stays (Ruling 20) — `docs/performance.md`. A hook's first run in a host, and its first run that calls through `write.Transaction`, get a cold-start allowance (×10, at most 5 s; #519, §4.4.4) | the page asks for a measured default |
 | Q6 csx trust | **out of scope (D3)**; ruling recorded on #34: trusted operator code; no tenant or assistant writes it without human approval | maintainer |
 | Q7 DLQ and per-record order | a dead delivery blocks later deliveries of the same handler for the same record by default; `Ordering = AlvoOrdering.None` opts out | order is correctness for state handlers |
 | Q8 Pattern subscriptions | **out of scope (D3)**, although the page recommended segment-end wildcards | the wildcard refusal stands; designed namespace + cross-tenant suite is N-2 |
@@ -423,47 +423,54 @@ Per invocation: `Timeout` (250 ms; validate 5 s) through a linked `CancellationT
 through `write.Transaction`; the 51st throws `AlvoBudgetExceededException`. **Timeout, budget and depth
 failures poison the unit**: even if host code catches the exception, the commit throws and rolls back (§4.5).
 
-**Cold-start allowance (#519, ruled 2026-11-21 by the debt-cleanup session on the maintainer's behalf).** The
-`Timeout` is wall-clock, so a hook's first run also pays for JIT compilation, type loading, DI activation and its
-first query compilation — work no later run repeats. In a fresh or loaded process that run overran 250 ms and the
-write answered 500 `timeout`: the field-service sample's tests failed so on CI — job 136797919907 on the *first*
-`within-service-hours` run in its host, job 132438816663 on the second, whose first had returned early before reading
-anything; both with a process-wide warm-up already done in another host — and a production host's first write after a
-deploy can fail the same way. Measured locally under eight concurrent test processes, the first run of
+**Cold-start allowance (#519, ruled 2026-11-21 by the debt-cleanup session on the maintainer's behalf, in two
+steps).** The `Timeout` is wall-clock, so a hook's first run also pays for JIT compilation, type loading, DI
+activation and its first query compilation — work no later run repeats. In a fresh or loaded process that run overran
+250 ms and the write answered 500 `timeout`: the field-service sample's tests failed so on CI — job 136797919907 on
+the *first* `within-service-hours` run in its host, job 132438816663 on the second, whose first had returned early
+before reading anything; both with a process-wide warm-up already done in another host — and a production host's first
+write after a deploy can fail the same way. Measured locally under eight concurrent test processes, the first run of
 `visit-within-service-hours` in a host took 16.7 ms on average (max 95.7 ms) against 0.9 ms (max 7.7 ms) for its later
-runs.
+runs, and `within-service-hours` took up to 148.8 ms on its first run that read the customer — its second.
 
-- **Rule.** Until a hook's first run in a host has *ended* — succeeded, refused or failed, a timeout included — its
-  runs get `min(Timeout × 10, 5 s)`, never less than `Timeout`; every run after that has `Timeout`. The state lives on
-  the singleton runner (`HookColdStart`), so "a host" is one service provider: one process in production, one host in
-  a test process that starts several. A cold run admitted past its `Timeout` is logged at `Information`.
+- **Rule 1 — the first run.** Until a hook's first run in a host has *ended* — succeeded, refused or failed, a timeout
+  included — its runs get `min(Timeout × 10, 5 s)`, never less than `Timeout`. Every run that *starts before* the
+  first one ends shares it: a burst of concurrent writes right after a deploy stalls on the same JIT and type-loading
+  locks as the first run, so granting only the first started run would still fail the rest of the burst (a refinement
+  of the ruling's "first invocation", recorded as such).
+- **Rule 2 — the first run that calls through `write.Transaction`** (second ruling, the same day). Until a run that
+  made a call through `write.Transaction` has ended, a run's first such call extends its deadline to the allowance,
+  measured from the run's start (`HookDeadline.ExtendTo`; a deadline that already fired stays fired). Why: the same
+  cause — JIT, type loading and first query compilation on the data path — merely deferred past a first run that
+  returned early, which is CI job 132438816663 exactly. Once per hook per host: a hook whose first run already called
+  through the transaction gets one cold run in all. Every other run has `Timeout`.
+- **Where it lives.** The state is on the singleton runner (`HookColdStart`), so "a host" is one service provider: one
+  process in production, one host in a test process that starts several. Per process would not have covered job
+  136797919907, whose process had been warmed in another host. A cold run admitted past its `Timeout` is logged at
+  `Information`. Validate hooks call no transaction and keep rule 1 only; with their 5 s default the allowance adds
+  nothing.
 - **Why ×10 and 5 s.** Ten times is the order of magnitude between the cold and warm runs measured above, and 2.5 s
   for the 250 ms default is more than twenty-five times the worst cold run measured under load locally. The cap is the
   validate stage's default, the longest any stage's default already trusts one run with; it bounds how long a cold run
-  can hold the write's row locks. A `Timeout` at or above 5 s (validate's default, or a long configured one) gets no
-  extra time: it already exceeds any cold start measured.
-- **Deliberate refinement of the ruling.** The ruling says "the first invocation"; every run that *starts before* the
-  first one ends shares the allowance too. A burst of concurrent writes right after a deploy stalls on the same JIT
-  and type-loading locks as the first run, so granting only the first started run would still fail the rest of the
-  burst.
+  can hold the write's row locks. A `Timeout` at or above 5 s gets no extra time: it already exceeds any cold start
+  measured.
 - **Not done, and why.** A timed-out hook is never retried: a retry runs the host's code twice. The budget is not
   moved to CPU time: a hook that waits on a row lock or the database holds the write open just as long whether or not
   it burns CPU, so wall-clock is what bounds the lock. Declarative before-hooks have no timeout (`IBeforeHookRunner`),
-  so nothing applies to them. Host CEL functions' `CelFunctionBudget` is one deadline per evaluation pass shared by
-  every function in it, not per function, and is left unchanged.
-- **Cost.** (1) A hook whose first run takes an early return reaches its cold path on a later run with the normal
-  `Timeout`: the measurement above saw `within-service-hours`, whose first run in a host returns early when no
-  `scheduled_for` is set, take up to 148.8 ms on its second run under load, and CI job 132438816663 failed exactly so.
-  The allowance covers the first run, not the first run of each code path; a later run on a starved machine can still
-  overrun, which no allowance tied to the first run removes. Measured on the sample's suite, twelve concurrent test
-  processes on a 10-core laptop, three rounds each: with no allowance and no test warm-up 24 of 36 processes passed;
-  with the allowance and no warm-up 36 of 36; with the allowance and the sample's warm-up (as committed) 28 of 36,
-  every failure `within-service-hours` timing out on its first run that read the customer, after a first run had
-  returned early. Covering that case means a second rule — e.g. the first run that calls through `write.Transaction`
-  also gets the allowance — which this ruling does not make; it is left open on #519. (2) A hook that genuinely hangs
-  holds the write, and on SQLite the writer lock, up to ten times longer once per host. (3) A test that asserts a
-  timeout from a hook's first run must overrun the allowance, not the `Timeout` (`WriteExtensionRunnerTests`,
-  `WriteHookFacts`).
+  so nothing applies to them. **Known, separate exposure:** host CEL functions' `CelFunctionBudget` (250 ms) is one
+  deadline per evaluation pass shared by every function in it; a function's first call pays the same cold costs, and
+  that budget is deliberately left unchanged here.
+- **Measured.** The sample's suite, twelve concurrent test processes on a 10-core laptop, three rounds per setup: no
+  allowance and no test warm-up, 24 of 36 processes passed; rule 1 only, no warm-up, 36 of 36; rule 1 only with the
+  sample's warm-up, 28 of 36 — every failure `within-service-hours` on its first run that read the customer; rules 1
+  and 2 with the warm-up, 36 of 36; rules 1 and 2 without it, 36 of 36. The warm-up no longer helps, so the sample's
+  test world dropped it (one more round as committed: 12 of 12).
+- **Cost.** (1) If the rule is wrong, up to two runs per hook per host — the first, and the first that calls the
+  transaction — may hold the write's row locks, and on SQLite the writer lock, up to the cap: 2.5 s by default instead
+  of 250 ms. (2) A hook whose cold path sits behind a *second* data path (a branch reaching a query no earlier run
+  compiled) still meets that path with `Timeout`; the allowance covers the first run and the first data-calling run,
+  not the first run of every code path. (3) A test that asserts a timeout from a hook's cold run must overrun the
+  allowance, not the `Timeout` (`WriteExtensionRunnerTests`, `WriteHookFacts`).
 
 #### 4.4.5 Network and data-port ban for in-transaction host code
 

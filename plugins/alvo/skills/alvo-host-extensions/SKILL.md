@@ -60,7 +60,7 @@ deliveries and the catalog.
   as that exception.
 - `write.Set(x => x.Field, value)` changes the row; it is judged again by the caller's rules and tenant.
 - `write.Transaction` writes other rows as the caller, one hop deeper; `.AsSystem()` stays in the caller's tenant.
-  Limits: 50 calls, chain depth 8 (508), no write to its own row, 250 ms (validate 5 s; a first run gets 10×, at most 5 s).
+  Limits: 50 calls, chain depth 8 (508), no write to its own row, 250 ms (validate 5 s; the first run and the first run calling `write.Transaction` get 10×, at most 5 s).
 - **ALVO1001** warns on a network call, a connection, a file or a second data port inside a before/after hook or an
   `AddCelFunction` delegate — https://alvo.burgyn.online/extending/analyzer-rules/.
 

@@ -1470,14 +1470,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A write hook's first run no longer fails a write by timing out on a cold start** (#519). A hook's timeout (250 ms
-  inside the transaction by default) is wall-clock, and its first run after the host starts also pays for JIT
-  compilation, type loading, DI activation and its first queries — work no later run repeats. In a fresh or loaded process
-  that run could overrun and the write answered 500 `hook-failed` (`timeout`): the first write after a deploy, and the
-  field-service sample's tests on CI. Until a hook's first run has ended, its runs now get ten times its
-  timeout, at most 5 s and never less than the timeout itself (2.5 s for the default); every run after that has the
-  timeout you set. A cold run admitted past its timeout is logged at `Information`. A timed-out run is still not retried,
-  since that would run the hook's code twice. Host CEL functions' `Alvo:Extensions:CelFunctionBudget` is unchanged.
+- **A write hook's cold runs no longer fail a write by timing out** (#519). A hook's timeout (250 ms inside the
+  transaction by default) is wall-clock, and its first run after the host starts also pays for JIT compilation, type
+  loading, DI activation and its first queries — work no later run repeats. In a fresh or loaded process that run could
+  overrun and the write answered 500 `hook-failed` (`timeout`): the first write after a deploy, and the field-service
+  sample's tests on CI. Two runs per hook now get ten times its timeout, at most 5 s and never less than the timeout
+  itself (2.5 s for the default): its first run (and any run that starts before that one ends), and its first run that
+  calls through `write.Transaction`, which earns the allowance at that call — a hook whose first run returns early meets
+  its first queries later. Every other run has the timeout you set. A cold run admitted past its timeout is logged at
+  `Information`. A timed-out run is still not retried, since that would run the hook's code twice. Host CEL functions'
+  `Alvo:Extensions:CelFunctionBudget` is unchanged.
 - **The standalone host exits 78 on a descriptor the boot refuses at stage 0, not 139** (#340, #547). A mounted
   descriptor that fails validation — mistyped, or written for a newer Alvo — or that the mapper refuses (a field naming
   an unknown format, a format pattern that is not a regular expression) used to escape `Main` unhandled, and the

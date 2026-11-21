@@ -215,12 +215,10 @@ internal sealed class WriteExtensionRunner(
     private async Task<HookRun> RunAsync(
         BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, CancellationToken cancellationToken)
     {
-        var budget = _coldStart.Budget(hook.Id, hook.Registration.Settings.Timeout);
-        using var deadline = new CancellationTokenSource(budget, time);
+        using var deadline = new HookDeadline(_coldStart.Budget(hook.Id, hook.Registration.Settings.Timeout), time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-        var run = NewRun(hook, invocation, stage, catalog, linked.Token);
+        var run = NewRun(hook, invocation, stage, catalog, () => ColdAtFirstCall(hook, deadline), linked.Token);
         using var activity = HookTelemetry.Start(hook.Id, invocation, stage);
-        var started = time.GetTimestamp();
         try
         {
             using (HeldRows.Hold(invocation.Entity, HeldRows.RowOf(invocation)))
@@ -230,25 +228,29 @@ internal sealed class WriteExtensionRunner(
         }
         catch (Exception escaped)
         {
-            HookTelemetry.Finish(activity, hook.Id, HookTelemetry.Failed, time.GetElapsedTime(started), run.Operations);
-            throw Escaped(run, escaped, deadline.IsCancellationRequested, cancellationToken);
+            HookTelemetry.Finish(activity, hook.Id, HookTelemetry.Failed, deadline.Elapsed, run.Operations);
+            throw Escaped(run, escaped, deadline.Passed, cancellationToken);
         }
         finally
         {
-            _coldStart.Ended(hook.Id);
+            _coldStart.Ended(hook.Id, called: run.Operations > 0);
         }
 
-        var elapsed = time.GetElapsedTime(started);
-        return await ConcludedAsync(run, hook, catalog, activity, elapsed, Overran(hook, elapsed, budget, deadline.IsCancellationRequested)).ConfigureAwait(false);
+        var elapsed = deadline.Elapsed;
+        return await ConcludedAsync(run, hook, catalog, activity, elapsed, Overran(hook, elapsed, deadline)).ConfigureAwait(false);
     }
+
+    /// <summary>A run's first call through the transaction: the hook's first such run gets the cold-start allowance from its start.</summary>
+    private void ColdAtFirstCall(BoundWriteHook hook, HookDeadline deadline) =>
+        deadline.ExtendTo(_coldStart.AtFirstCall(hook.Id, hook.Registration.Settings.Timeout));
 
     /// <summary>
     /// Whether a run that returned overran the time it was given — its deadline fired, or it returned past it having ignored its
     /// token. A cold run admitted past the hook's own timeout is logged, so a slow first path stays visible.
     /// </summary>
-    private bool Overran(BoundWriteHook hook, TimeSpan elapsed, TimeSpan budget, bool deadlinePassed)
+    private bool Overran(BoundWriteHook hook, TimeSpan elapsed, HookDeadline deadline)
     {
-        var overran = deadlinePassed || elapsed > budget;
+        var overran = deadline.Passed || elapsed > deadline.Budget;
         var timeout = hook.Registration.Settings.Timeout;
         if (!overran && elapsed > timeout)
         {
@@ -290,11 +292,16 @@ internal sealed class WriteExtensionRunner(
         return run;
     }
 
-    private HookRun NewRun(BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, CancellationToken token)
+    private HookRun NewRun(
+        BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage, PolicyCatalog? catalog, Action firstCall, CancellationToken token)
     {
         var data = stage == WriteHookStage.Validate ? services.GetRequiredService<IAlvoSessions>().For(OneHopDeeper(invocation.Caller)) : null;
         var entity = Entity(catalog, invocation.Entity);
-        var run = new HookRun(hook.Id, invocation, Pointable(catalog, entity), transaction: null, data, token) { Derived = Derived(entity) };
+        var run = new HookRun(hook.Id, invocation, Pointable(catalog, entity), transaction: null, data, token)
+        {
+            Derived = Derived(entity),
+            FirstCall = firstCall,
+        };
         if (invocation.Transaction is { } inner)
         {
             run.Attach(new HookTransaction(inner, run, hook, logger));
