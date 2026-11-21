@@ -196,6 +196,7 @@ The token endpoint follows the same pattern:
 | A host without accounts maps no `/auth` route, needs no key file and ignores `Authorization` (it does get the five empty `_auth_*` tables and the CORS services); `Alvo:Auth:HeaderName = Authorization` is refused beside accounts (Review Focus 4) | `HostAccountsTests`; `OpenApiDocumentTests.Without_a_person_resolver_there_is_no_bearer_scheme`; `AccountsOptionsTests.An_api_key_header_named_authorization_is_refused_beside_accounts` |
 | An `http://` provider authority needs `AllowHttpMetadata`, and `AllowHttpMetadata` is refused at startup outside Development, exactly as an unset `Issuer` is, naming the setting and why; in Development it starts with a warning on every start. It exists for the end-to-end stack's test issuer only, and only Accounts reads the host environment, so that stack can run Development safely (spec §11.2) | `AccountsOptionsTests.Allowing_http_metadata_is_refused_outside_development_naming_the_setting`, `…An_http_authority_is_refused_unless_allowed_in_development_and_then_warned_on_every_start` |
 | An API key beside sign-in works exactly as before; a key and a Bearer together are 401 ambiguous | `AccountsEngineFacts.An_api_key_beside_sign_in_behaves_exactly_as_before`; `CredentialReadingTests` |
+| An ID token's `azp`, when present, names a configured client id — a service account's own id or another app's is refused exactly as another app's `aud`; an empty or JSON-`null` one is refused, a number or an array is malformed; an absent one requires a single `aud`. The operator's log names the provider and which claim — `aud` or `azp` — failed, never its value (#544) | `OidcIdTokenVerifierTests.An_id_token_is_refused` (`azp …` cases), `…An_azp_naming_a_configured_client_or_none_is_accepted`, `…A_token_without_azp_and_several_audiences_is_refused`, `…A_json_null_azp_is_refused_never_read_as_absent`, `…An_audience_refusal_tells_the_operator_which_claim_failed_and_nothing_it_said`; `TokenExchangeTests.An_azp_naming_another_client_is_refused_exactly_as_another_audience` |
 | Clock boundaries: `iat` 5 min in, 5 min + 1 s out; ID-token `exp` ± 2 min; access token 30 s past `exp` in, 31 s out; reuse at 10 s replays, at 11 s kills (Review Focus 5) | `OidcIdTokenVerifierTests.The_boundaries_are_accepted`, `…An_id_token_is_refused`; `AccessTokensTests.A_token_validates_within_30_seconds_past_exp_and_not_31`; `RefreshGrantTests.A_reuse_at_exactly_ten_seconds_answers_the_same_child` |
 | An ID token starts at most one session; an account is found by `(provider, subject)`, never by email | `TokenExchangeTests.A_replayed_id_token_starts_no_second_session`; `AccountStoreFacts.A_second_sign_in_finds_the_account_by_provider_and_subject_never_by_email` |
 | Two people never see each other's rows | `AccountsEngineFacts.Two_people_never_see_each_other_s_rows` |
@@ -241,7 +242,21 @@ D1 (a tenant registry) and D8 (no tenant header means the personal tenant) are S
 The S2 plan adds its own recorded deviations:
 
 - **Two metadata URLs** for one document (D7).
-- **`azp` is not checked.** Google's mobile flow carries the mobile client in `azp`; see `OidcIdTokenVerifier`.
+- ~~**`azp` is not checked.**~~ **Withdrawn by [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544).** An ID token's
+  `azp`, when present, must be one of the provider's configured `ClientIds` (OIDC Core §3.1.3.7 item 5, read as the set
+  of client ids the deployment configures). `aud` alone let a Google Cloud service account — which mints ID tokens for
+  any `aud` it chooses, with its own numeric id in `azp` — sign up under `signUp: open` by script. Google service-account
+  ID tokens, which carry `azp`, are refused. A token without `azp` must carry a single `aud` (§3.1.3.7 item 4); **a
+  single-audience token without `azp` still passes on `aud` alone**: what closes the hole is
+  Google's own behaviour — it puts `azp` in every service-account ID token — not a rule Alvo can apply to a token that
+  omits the claim. Google's mobile flow carries the mobile client in `azp` while `aud` names the web client, so **an app
+  that signs in from Android or iOS must list those client ids too**. An empty or JSON-`null` `azp` is refused, never
+  read as absent (a number or an array never reaches the check: IdentityModel refuses the token as malformed). A
+  mismatch is refused as another app's `aud` is: one answer, no oracle. The operator alone learns which claim failed —
+  an Information line (event 6403) naming the provider and `aud` or `azp`, never the value — so a mobile client id
+  missing from `ClientIds` can be told from a stranger's token. This is option A of the design's §4.6 (ruling Q8), with
+  one deliberate deviation: the design's `IdTokenRefusal.AuthorizedParty` value was not added — an `azp` refusal reuses
+  `Audience`, so the two are indistinguishable to a caller (no oracle), and the operator's log tells them apart. Design: `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md` §4.6, ruling Q8.
 - **Endpoint filters instead of CORS and rate-limit middleware** (D3; see `data-api.md`, *CORS and rate limits*).
 - **The display name is not refreshed from later sign-ins** (D8).
 - **`/logout` ends the bearer's session.** Alvo does not implement RFC 7009 revocation (D16).
@@ -251,8 +266,8 @@ The S2 plan adds its own recorded deviations:
 - Tenants, memberships and every `selfService` refusal — S3, below.
 - Invitations (S4).
 - Personal and service tokens — S5, [below](#tokens-for-integrators-personal-and-service-tokens-s5).
-- Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation, and checking a Google ID
-  token's `azp`: [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544).
+- Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation:
+  [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544) (its `azp` half is done, see *Deviations* above).
 - Auth events and role-change audit (spec D9).
 - A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
   yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
@@ -448,6 +463,8 @@ has one member and refuses any other, so spacing is not a different request.
 | A self-made `dispatcher` cannot write a global entity, directly or through a relation term (Review Focus 5) | `TenancyEngineFacts.A_self_made_dispatcher_cannot_write_global_regions`; `AccessTenantRoleRefusalTests`; `GlobalWriteWarningsTests` |
 | A tenant role never reaches Management | `TenancyEngineFacts.A_tenant_role_never_reaches_management`; `AccessTenantRoleRefusalTests.An_assignable_role_in_any_access_level_is_refused` |
 | Owner is never a role; a stored name outside `assignableRoles` is no role either | `TenancyEngineFacts.The_owner_flag_is_never_a_role`; `MembershipRulesTests.A_stored_role_no_longer_assignable_is_dropped`; `MemberRoutesTests.Members_show_display_names_and_never_an_email` |
+| A tenant never loses its last *enabled* owner: a co-owner cannot leave, be demoted or be removed beside a banned owner, who keeps the flag but stands in for nobody (#543) | `TenantStoreFacts.A_co_owner_cannot_leave_a_banned_owner_alone`, `…An_enabled_owner_demotes_and_removes_a_banned_co_owner` (both engines) |
+| An operator makes an account an owner of a shared tenant — joining it if needed, roles kept or set — without enabling a banned sole owner; a disabled account, an unknown one, an unknown tenant and a personal tenant are refused and nothing is written; the ban names the tenants it orphaned (#543) | `TenantStoreFacts.An_operator_makes_an_account_owner_of_a_tenant_whose_only_owner_is_banned`, `…Granting_an_owner_again_changes_only_the_roles_it_names`, `…An_ownership_grant_refuses_what_it_cannot_do_and_writes_nothing`, `…The_orphaned_tenants_are_those_no_enabled_owner_can_manage` (both engines); `OwnershipGrantTests` over HTTP |
 | A tenant never loses its last owner, also when two owners act at once (Review Focus 2) | `TenantStoreFacts.Two_owners_demoting_each_other_at_once_leave_exactly_one_owner`, `…removing…`, `…leaving…` (20 iterations, both engines); `TenancyEngineFacts.The_last_owner_cannot_leave_be_removed_or_be_demoted` |
 | Never more than `maxPerAccount` shared tenants, also in parallel (Review Focus 3) | `TenantStoreFacts.Concurrent_creates_at_the_cap_never_exceed_it`; `TenancyEngineFacts.Creating_tenants_stops_at_the_cap` (five at once over HTTP) |
 | Two devices signing a new person in at once: one account, one personal tenant, one owner (Review Focus 4) | `AccountStoreFacts.Two_concurrent_first_sign_ins_create_one_personal_tenant` |
@@ -501,7 +518,11 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
 - **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. S5 D15 made
   minting draw on it too; **#542 item 3 split it again**: `POST /tenants` is charged `Alvo:Api:RateLimits:Tenants`.
-- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
+- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them. **Since #543** an operator
+  can also make an account an owner through Management — the one way into a tenant that is not an invitation.
+- **#543** — the last owner is the last *enabled* owner (`TenantTables.OtherEnabledOwnersSql`). Stricter than spec §6.4's
+  "the last owner", never looser: a banned owner keeps the flag, so enabling them restores it, but cannot be the owner a
+  co-owner leaves the tenant to.
 
 And where the implementation answered differently from the plan's first wording:
 
@@ -761,9 +782,10 @@ And where the implementation answered differently from the plan's first wording,
 - Membership events — spec D9 defers them.
 - Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.
-- Recovering a tenant whose only owner is banned. A ban leaves memberships, and no operator route grants ownership, so
-  nobody can manage it until the account is enabled again; and the lock order of an owner's removal racing their ban:
-  [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543).
+- ~~Recovering a tenant whose only owner is banned, and the lock order of an owner's removal racing their ban.~~ **Done
+  in [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543):** the ban answers the tenants it orphaned, an operator
+  makes another account an owner (`management-api.md`, *Making an end user an owner of a tenant*), and every sweep of a
+  person's credentials takes their account row first ([*The lock order*](#the-lock-order-543)).
 
 ## Tokens for integrators: personal and service tokens (S5)
 
@@ -1394,11 +1416,9 @@ defects that no slice could see, because each sits where two slices meet. Each f
   the reuse's revocation waits for it to commit and its sweep then revokes what it wrote, or the reuse revokes the row
   first, and the write finds no live session and writes nothing: `MintTokenStatus.SessionEnded` /
   `MemberChangeStatus.SessionEnded`, answered as the dead session's own `401 invalid_token`. SQLite's write gate
-  serialises the two outright. **Lock order**: a mint takes the account row, then the session, then the tenant; an
-  invitation's creation takes the session, then the tenant (before its version bump); a refresh takes the session, then
-  the personal tenant it ensures; reuse takes the session, then invitations, then `_api_keys`; a ban takes the account
-  row first, then the same three in the same order. No pair takes two
-  of these rows in opposite orders. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
+  serialises the two outright. **Lock order**: every one of these writes takes the person's account row first — see
+  [*The lock order*](#the-lock-order-543) below, which #543 made the rule after this table of orders proved
+  incomplete. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
   `…A_mint_racing_a_reuse_of_its_session_never_outlives_it`, `…An_invitation_racing_a_reuse_of_its_session_never_outlives_it`
   (20 iterations; red on both engines without the re-read), and over HTTP `CredentialWritesMidReuseTests` (the store
   ends the session between the route's check and its own transaction; red when the route drops the session).
@@ -1426,8 +1446,54 @@ defects that no slice could see, because each sits where two slices meet. Each f
   other role it declares is named in an `access` level, and a tenant role there is refused.
 
 Still open after these fixes, each filed (the HTTP contract's coherence before v0.1,
-[#542](https://github.com/Burgyn/MMLib.Alvo/issues/542), is done since): a banned sole owner's tenant and the owner-removal × ban
-lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
-sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
-race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+[#542](https://github.com/Burgyn/MMLib.Alvo/issues/542), is done since): signing-key rotation ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
 stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).
+The design for all four is `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`.
+
+## The lock order (#543)
+
+Four transactions sweep a person's invitations and `_api_keys` rows with unordered multi-row `UPDATE`s: a ban, a
+refresh-token reuse, a removal (or leaving) and a demotion. Visiting the *tables* in one order (invitations before
+tokens) was not enough. A PostgreSQL `UPDATE … WHERE …` locks rows in the order its plan reaches them. The removal's
+`tenant_id = …` sweep walks the `tenant_id` index, while the ban's `created_by = …` sweep (no index) scans the heap.
+After one HOT update, an index entry still points at the row's *root* line pointer while the heap holds its live
+tuple further on, so the two statements met one person's two invitations in opposite orders. Each could hold one and
+wait on the other: a `40P01`, and a 500 that rolled back. That was reasoned in the whole-stack review and **measured**
+here: `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` stages exactly that (the plans
+and the heap order are asserted, then a held lock releases both rows at once) and deadlocked in 9 of 10 iterations
+before the fix.
+
+**The rule: one person, one mutex.** Every transaction that sweeps or hands out a person's credentials first takes
+that person's `_auth_accounts` row with a write that changes nothing (`AuthTables.LockAccountRowSql`, S3 D3's idiom,
+one SQL text for both engines). Two sweeps of one person then never run at once, whatever order their statements would
+meet the rows in. The order every accounts and tenancy transaction keeps:
+
+```
+_auth_accounts (at most ONE account row per transaction)
+  → _auth_sessions
+  → _tenants (version bump)
+  → _tenant_members
+  → _tenant_invitations
+  → _api_keys
+```
+
+| Transaction | Account row it takes first |
+|---|---|
+| Ban, enable | the account's own (`DisableAccountSql` / `EnableAccountSql`) |
+| Refresh-token reuse | the session's account, before the session is revoked |
+| Remove, leave | the member removed — never the acting owner, whose liveness is their session |
+| Demote (`isOwner: false`) | the member demoted; a role-only change takes none |
+| Mint | the minter (`LockAccountSql`, which also refuses a disabled one) |
+| Create an invitation | the creator, before their session |
+| Accept, sign-in | the person accepting or signing in |
+
+"At most one account row per transaction" is the load-bearing clause. A future write that needs two must take them in
+ascending `id` order and say so. Ordering the rows inside each statement instead (`… WHERE pk IN (SELECT … ORDER BY pk
+FOR UPDATE)`) was rejected: SQLite has no `FOR UPDATE`, so it would need a per-engine statement for a problem SQLite's
+write gate cannot have (design §2.3).
+
+| Invariant | Held by |
+|---|---|
+| An owner's removal and her ban at once never deadlock, and leave one state: banned, gone, no live invitation, the other owner still owning | `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` (10 staged iterations; 9 deadlocks before the fix); `TenantStoreFacts.An_owner_s_removal_and_her_ban_at_once_leave_one_consistent_state` (20 iterations, both engines) |
+| A removal, leaving and a demotion take the member's account row before any of her credentials, and hold none while they wait for it | `PostgreSqlTenantStoreTests.A_member_write_that_sweeps_takes_the_member_s_account_row_before_their_credentials` (red on all three before the fix) |
+| A reuse and an invitation's creation take the account row before the session | `PostgreSqlAccountStoreTests.A_reuse_or_an_invitation_takes_the_account_row_before_the_session` (red on both before the fix) |

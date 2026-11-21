@@ -79,6 +79,11 @@ run** before merge — not the checklist alone.
   everything (or nothing looking like success). If a new code path can reach
   data without going through an explicit policy check, that's a finding
   regardless of whether today's policies happen to cover it.
+- **A write over a person's credentials takes their account row first.** Any transaction that sweeps or hands out
+  a person's sessions, invitations or app tokens locks that person's `_auth_accounts` row before any of those rows, and
+  at most one account row per transaction (`docs/architecture/accounts.md`, *The lock order*). A multi-row `UPDATE`
+  locks rows in its plan's order, so two sweeps that skip the account row can deadlock on PostgreSQL (#543); prove a new
+  one with a held-lock fact in `PostgreSqlTenantStoreTests`' shape.
 - **Before-hooks are in-transaction, time-budgeted, network-forbidden.** This
   must be structurally enforced (the hook context/API must make a network
   call inexpressible, not merely discouraged by convention or code review).

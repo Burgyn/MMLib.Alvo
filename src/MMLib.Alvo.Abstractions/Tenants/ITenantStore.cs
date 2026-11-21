@@ -151,7 +151,61 @@ internal interface ITenantStore
     /// <param name="request">The code's hash, the person and the instant.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Makes an account an owner of a shared tenant — an operator's act, never a member's (#543): it joins the tenant if it
+    /// is not a member, and keeps its membership otherwise. In one transaction, in the lock order every accounts and tenancy
+    /// write keeps: the account's row (which also refuses a disabled one), then the tenant's version bump, then the
+    /// membership. It revokes nothing.
+    /// </summary>
+    /// <param name="grant">The tenant, the account, the roles to set (or <see langword="null"/> to keep them) and the instant.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<OwnershipGrantOutcome> GrantOwnershipAsync(OwnershipGrant grant, CancellationToken ct);
+
+    /// <summary>
+    /// The shared tenants <paramref name="account"/> owns in which no owner's account is enabled — the tenants a ban of it
+    /// left nobody to manage (#543), by name and then id. A tenant the account merely belongs to is never listed.
+    /// </summary>
+    /// <param name="account">The account.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<IReadOnlyList<OrphanedTenant>> ListOrphanedTenantsAsync(UserId account, CancellationToken ct);
 }
+
+/// <summary>An operator making an account an owner of a shared tenant (#543).</summary>
+/// <param name="Tenant">The tenant.</param>
+/// <param name="Account">The account to make an owner.</param>
+/// <param name="Roles">The tenant roles to store, already checked against <c>assignableRoles</c>; <see langword="null"/> keeps a member's roles, and a new member holds none.</param>
+/// <param name="Now">When a new member joins.</param>
+internal sealed record OwnershipGrant(TenantId Tenant, UserId Account, IReadOnlyList<string>? Roles, DateTimeOffset Now);
+
+/// <summary>What an ownership grant did; every status but <see cref="Granted"/> wrote nothing.</summary>
+internal enum OwnershipGrantStatus
+{
+    /// <summary>The account owns the tenant now — also when it already did.</summary>
+    Granted,
+
+    /// <summary>There is no such tenant.</summary>
+    NoSuchTenant,
+
+    /// <summary>There is no such account.</summary>
+    NoSuchAccount,
+
+    /// <summary>The account is disabled; a banned person is never made an owner.</summary>
+    AccountDisabled,
+
+    /// <summary>The tenant is a personal one, which has exactly one member forever (spec §6.1).</summary>
+    PersonalTenant,
+}
+
+/// <summary>An ownership grant's status and, when granted, the membership as stored.</summary>
+/// <param name="Status">What the grant did.</param>
+/// <param name="Membership">The account's membership, for <see cref="OwnershipGrantStatus.Granted"/>.</param>
+internal readonly record struct OwnershipGrantOutcome(OwnershipGrantStatus Status, StoredMembership? Membership);
+
+/// <summary>A shared tenant no enabled owner can manage (#543).</summary>
+/// <param name="Id">The tenant.</param>
+/// <param name="Name">Its name.</param>
+internal sealed record OrphanedTenant(TenantId Id, string Name);
 
 /// <summary>What kind of tenant a registry tenant is.</summary>
 internal enum TenantKind

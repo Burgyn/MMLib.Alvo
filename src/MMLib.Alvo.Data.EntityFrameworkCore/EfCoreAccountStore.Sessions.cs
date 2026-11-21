@@ -128,6 +128,9 @@ internal sealed partial class EfCoreAccountStore
             return token.Child is { } child ? token.Answer(RefreshStatus.Replayed, child) : _refused;
         }
 
+        await ExecuteAsync(
+            connection, transaction, _tables.LockAccountRowSql, command => Bind(command, ("@account_id", Id(token.Account))), ct)
+            .ConfigureAwait(false);
         await RevokeAsync(connection, transaction, token.Session, SessionRevocations.Reuse, request.Now, ct).ConfigureAwait(false);
         await RevokeMintedSinceAsync(connection, transaction, token.Account, token.SessionStartedAt, request.Now, ct).ConfigureAwait(false);
         return new RefreshOutcome(RefreshStatus.Reused, null, null, null, null);
@@ -138,8 +141,9 @@ internal sealed partial class EfCoreAccountStore
     /// <paramref name="account"/> created since <paramref name="since"/> — the session's start (stack review A-I1). Reuse is
     /// the one signal that a refresh token was stolen, and nothing ties a token or an invitation to the session that minted
     /// it, so the sweep takes all of them from that instant on, including any the person's other sessions created
-    /// meanwhile. What was created before the session started is not the thief's and lives on. The ban's lock order:
-    /// the session, then invitations, then tokens.
+    /// meanwhile. What was created before the session started is not the thief's and lives on. The ban's lock order
+    /// (hardening design §2.3): the account row — taken by the caller before the session's revocation — then the session,
+    /// then invitations, then tokens.
     /// </summary>
     private async Task RevokeMintedSinceAsync(
         DbConnection connection, DbTransaction transaction, UserId account, DateTimeOffset since, DateTimeOffset now, CancellationToken ct)
