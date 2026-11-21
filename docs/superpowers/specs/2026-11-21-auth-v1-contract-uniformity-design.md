@@ -36,10 +36,14 @@ stays).
 > **Implemented** (slice 2; recommendation A accepted, and the token's 201 as its list item ruled in scope). Wire as in
 > §2.5. `PersonReference`/`PersonName` (`Tenants/SelfService/PersonReference.cs`) back the two OpenAPI components
 > `authPersonReference`/`authPersonName`; `InvitationView.CreatorName` is read by the list's own left join, and an
-> invitation's 201 is read back with it after the creation commits (the token mint's precedent, outside its transaction
-> here). `InvitationPreview.InviterName` was renamed `CreatorName` internally. Held by
-> `InvitationStoreFacts.An_invitation_names_its_creator_by_their_current_display_name` (both engines) and
-> `AppTokenResponseTests` (the 201 equals the list item member for member, plus `token`/`header`; a null name).
+> invitation's 201 is read back with that query **inside the creation's transaction**, as the token mint reads its own,
+> so nothing can fail between the durable write and the one answer that carries the code.
+> `InvitationPreview.InviterName` was renamed `CreatorName` internally. Held by
+> `InvitationStoreFacts.An_invitation_names_its_creator_by_their_current_display_name` and
+> `…An_invitation_whose_creator_has_no_account_row_is_still_listed_with_no_name` (both engines; the second pins the left
+> join) and `AppTokenResponseTests` (the 201 equals the list item member for member, plus `token`/`header`; a null name).
+> **Recorded:** the owners' invitation list names a creator by their *current* display name, also after they have left
+> the tenant — the token list's precedent (`AppTokenTables.ListSql` joins the minter's account the same way).
 
 ### 2.1 Current state
 
@@ -835,5 +839,9 @@ Item 4's name is asked in §5. Beyond it:
 3. **Retention of the three new record families.** The recommendation inherits #115 (none yet). Should these routes
    instead get the command ledger's 24-hour window now? That would mean a per-family sweep, because the shared table
    has none.
-4. **The token 201 as the list item (item 1).** It is a small shape change outside the issue's literal wording, made so
-   that a replay and a list share one shape. Is it in scope for #542, or a follow-up?
+4. ~~**The token 201 as the list item (item 1).**~~ **Ruled in scope (2026-11-21, on the maintainer's behalf),
+   implemented in slice 2.**
+
+Settled since the note was written (2026-11-21, on the maintainer's behalf): **item 2's recommendation (§3.3 A) and item
+1's recommendation (§2.3 A) were accepted, and both are implemented** (slices 1 and 2). Questions 1–3 and item 4's name
+stay open; slice 5a (item 5 on `POST /tenants`) may follow.

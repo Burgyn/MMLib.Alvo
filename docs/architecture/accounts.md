@@ -708,7 +708,9 @@ From the plan (`2026-11-13-accounts-s4-invitations.md`, D1–D15), one line each
 - **D11** — create answers 201 with the code and no `Location` (there is no single-invitation `GET`). **Deviation:** the
   201 also carries `revokedAt: null`, so a client parses one shape for created and listed invitations. **Revised by #542
   item 1:** `createdBy` is the creator as a person, `{ id, name }` (it was a bare id), read back with the list's own
-  query; the anonymous preview's `inviterName` became `createdBy: { name }` — the same key and path, and still no id.
+  query inside the creation's transaction; the anonymous preview's `inviterName` became `createdBy: { name }` — the same
+  key and path, and still no id. The list names a creator by their current display name, also after they left the
+  tenant, as the token list names a minter.
 - **D12** — `created_at` is a column the spec's model does not list. It orders the list.
 - **D13** — `Alvo:Api:RateLimits:Invitations`, 20 per client per minute, on all five routes. The exchange with a code
   stays on the `Token` budget.
