@@ -137,6 +137,10 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   generated sign-in reference, and a tenth descriptor skill, `alvo-descriptor-accounts`
   (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are complete as stacked PRs #524, #525, #528, #529,
   #530, #537 and S6's; a whole-stack review precedes the merge. Follow-ups: #523, #526, #527, #536,
+  ~~#543~~ (done: every sweep of a person's credentials takes their account row first, so an owner's removal and her
+  ban no longer deadlock, and an operator gives a tenant whose only owner is banned a new owner), #544 and #546
+  designed (`docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`: `azp` next; key rotation and
+  #546 deferred),
   ~~#538~~ (done: a scoped create without `tenant_id` is placed in the tenant the call acts in), ~~#539~~ (done: on every surface where Alvo reads a Bearer, an app token sent as `Authorization: Bearer` gets a
   401 naming the API-key header), ~~#542~~ (done: one `/auth/v1` contract — `createdBy: { id, name }`, a 401 Bearer
   challenge for any API key on a person-only route, `auth.apiTokens`, one rate budget per route, and `Idempotency-Key` on

@@ -448,6 +448,8 @@ has one member and refuses any other, so spacing is not a different request.
 | A self-made `dispatcher` cannot write a global entity, directly or through a relation term (Review Focus 5) | `TenancyEngineFacts.A_self_made_dispatcher_cannot_write_global_regions`; `AccessTenantRoleRefusalTests`; `GlobalWriteWarningsTests` |
 | A tenant role never reaches Management | `TenancyEngineFacts.A_tenant_role_never_reaches_management`; `AccessTenantRoleRefusalTests.An_assignable_role_in_any_access_level_is_refused` |
 | Owner is never a role; a stored name outside `assignableRoles` is no role either | `TenancyEngineFacts.The_owner_flag_is_never_a_role`; `MembershipRulesTests.A_stored_role_no_longer_assignable_is_dropped`; `MemberRoutesTests.Members_show_display_names_and_never_an_email` |
+| A tenant never loses its last *enabled* owner: a co-owner cannot leave, be demoted or be removed beside a banned owner, who keeps the flag but stands in for nobody (#543) | `TenantStoreFacts.A_co_owner_cannot_leave_a_banned_owner_alone`, `…An_enabled_owner_demotes_and_removes_a_banned_co_owner` (both engines) |
+| An operator makes an account an owner of a shared tenant — joining it if needed, roles kept or set — without enabling a banned sole owner; a disabled account, an unknown one, an unknown tenant and a personal tenant are refused and nothing is written; the ban names the tenants it orphaned (#543) | `TenantStoreFacts.An_operator_makes_an_account_owner_of_a_tenant_whose_only_owner_is_banned`, `…Granting_an_owner_again_changes_only_the_roles_it_names`, `…An_ownership_grant_refuses_what_it_cannot_do_and_writes_nothing`, `…The_orphaned_tenants_are_those_no_enabled_owner_can_manage` (both engines); `OwnershipGrantTests` over HTTP |
 | A tenant never loses its last owner, also when two owners act at once (Review Focus 2) | `TenantStoreFacts.Two_owners_demoting_each_other_at_once_leave_exactly_one_owner`, `…removing…`, `…leaving…` (20 iterations, both engines); `TenancyEngineFacts.The_last_owner_cannot_leave_be_removed_or_be_demoted` |
 | Never more than `maxPerAccount` shared tenants, also in parallel (Review Focus 3) | `TenantStoreFacts.Concurrent_creates_at_the_cap_never_exceed_it`; `TenancyEngineFacts.Creating_tenants_stops_at_the_cap` (five at once over HTTP) |
 | Two devices signing a new person in at once: one account, one personal tenant, one owner (Review Focus 4) | `AccountStoreFacts.Two_concurrent_first_sign_ins_create_one_personal_tenant` |
@@ -501,7 +503,11 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
 - **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. S5 D15 made
   minting draw on it too; **#542 item 3 split it again**: `POST /tenants` is charged `Alvo:Api:RateLimits:Tenants`.
-- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
+- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them. **Since #543** an operator
+  can also make an account an owner through Management — the one way into a tenant that is not an invitation.
+- **#543** — the last owner is the last *enabled* owner (`TenantTables.OtherEnabledOwnersSql`). Stricter than spec §6.4's
+  "the last owner", never looser: a banned owner keeps the flag, so enabling them restores it, but cannot be the owner a
+  co-owner leaves the tenant to.
 
 And where the implementation answered differently from the plan's first wording:
 
@@ -761,9 +767,10 @@ And where the implementation answered differently from the plan's first wording,
 - Membership events — spec D9 defers them.
 - Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.
-- Recovering a tenant whose only owner is banned. A ban leaves memberships, and no operator route grants ownership, so
-  nobody can manage it until the account is enabled again; and the lock order of an owner's removal racing their ban:
-  [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543).
+- ~~Recovering a tenant whose only owner is banned, and the lock order of an owner's removal racing their ban.~~ **Done
+  in [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543):** the ban answers the tenants it orphaned, an operator
+  makes another account an owner (`management-api.md`, *Making an end user an owner of a tenant*), and every sweep of a
+  person's credentials takes their account row first ([*The lock order*](#the-lock-order-543)).
 
 ## Tokens for integrators: personal and service tokens (S5)
 
@@ -1394,11 +1401,9 @@ defects that no slice could see, because each sits where two slices meet. Each f
   the reuse's revocation waits for it to commit and its sweep then revokes what it wrote, or the reuse revokes the row
   first, and the write finds no live session and writes nothing: `MintTokenStatus.SessionEnded` /
   `MemberChangeStatus.SessionEnded`, answered as the dead session's own `401 invalid_token`. SQLite's write gate
-  serialises the two outright. **Lock order**: a mint takes the account row, then the session, then the tenant; an
-  invitation's creation takes the session, then the tenant (before its version bump); a refresh takes the session, then
-  the personal tenant it ensures; reuse takes the session, then invitations, then `_api_keys`; a ban takes the account
-  row first, then the same three in the same order. No pair takes two
-  of these rows in opposite orders. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
+  serialises the two outright. **Lock order**: every one of these writes takes the person's account row first — see
+  [*The lock order*](#the-lock-order-543) below, which #543 made the rule after this table of orders proved
+  incomplete. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
   `…A_mint_racing_a_reuse_of_its_session_never_outlives_it`, `…An_invitation_racing_a_reuse_of_its_session_never_outlives_it`
   (20 iterations; red on both engines without the re-read), and over HTTP `CredentialWritesMidReuseTests` (the store
   ends the session between the route's check and its own transaction; red when the route drops the session).
@@ -1426,8 +1431,54 @@ defects that no slice could see, because each sits where two slices meet. Each f
   other role it declares is named in an `access` level, and a tenant role there is refused.
 
 Still open after these fixes, each filed (the HTTP contract's coherence before v0.1,
-[#542](https://github.com/Burgyn/MMLib.Alvo/issues/542), is done since): a banned sole owner's tenant and the owner-removal × ban
-lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
-sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
-race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+[#542](https://github.com/Burgyn/MMLib.Alvo/issues/542), is done since): signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
 stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).
+The design for all four is `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`.
+
+## The lock order (#543)
+
+Four transactions sweep a person's invitations and `_api_keys` rows with unordered multi-row `UPDATE`s: a ban, a
+refresh-token reuse, a removal (or leaving) and a demotion. Visiting the *tables* in one order (invitations before
+tokens) was not enough. A PostgreSQL `UPDATE … WHERE …` locks rows in the order its plan reaches them. The removal's
+`tenant_id = …` sweep walks the `tenant_id` index, while the ban's `created_by = …` sweep (no index) scans the heap.
+After one HOT update, an index entry still points at the row's *root* line pointer while the heap holds its live
+tuple further on, so the two statements met one person's two invitations in opposite orders. Each could hold one and
+wait on the other: a `40P01`, and a 500 that rolled back. That was reasoned in the whole-stack review and **measured**
+here: `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` stages exactly that (the plans
+and the heap order are asserted, then a held lock releases both rows at once) and deadlocked in 9 of 10 iterations
+before the fix.
+
+**The rule: one person, one mutex.** Every transaction that sweeps or hands out a person's credentials first takes
+that person's `_auth_accounts` row with a write that changes nothing (`AuthTables.LockAccountRowSql`, S3 D3's idiom,
+one SQL text for both engines). Two sweeps of one person then never run at once, whatever order their statements would
+meet the rows in. The order every accounts and tenancy transaction keeps:
+
+```
+_auth_accounts (at most ONE account row per transaction)
+  → _auth_sessions
+  → _tenants (version bump)
+  → _tenant_members
+  → _tenant_invitations
+  → _api_keys
+```
+
+| Transaction | Account row it takes first |
+|---|---|
+| Ban, enable | the account's own (`DisableAccountSql` / `EnableAccountSql`) |
+| Refresh-token reuse | the session's account, before the session is revoked |
+| Remove, leave | the member removed — never the acting owner, whose liveness is their session |
+| Demote (`isOwner: false`) | the member demoted; a role-only change takes none |
+| Mint | the minter (`LockAccountSql`, which also refuses a disabled one) |
+| Create an invitation | the creator, before their session |
+| Accept, sign-in | the person accepting or signing in |
+
+"At most one account row per transaction" is the load-bearing clause. A future write that needs two must take them in
+ascending `id` order and say so. Ordering the rows inside each statement instead (`… WHERE pk IN (SELECT … ORDER BY pk
+FOR UPDATE)`) was rejected: SQLite has no `FOR UPDATE`, so it would need a per-engine statement for a problem SQLite's
+write gate cannot have (design §2.3).
+
+| Invariant | Held by |
+|---|---|
+| An owner's removal and her ban at once never deadlock, and leave one state: banned, gone, no live invitation, the other owner still owning | `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` (10 staged iterations; 9 deadlocks before the fix); `TenantStoreFacts.An_owner_s_removal_and_her_ban_at_once_leave_one_consistent_state` (20 iterations, both engines) |
+| A removal, leaving and a demotion take the member's account row before any of her credentials, and hold none while they wait for it | `PostgreSqlTenantStoreTests.A_member_write_that_sweeps_takes_the_member_s_account_row_before_their_credentials` (red on all three before the fix) |
+| A reuse and an invitation's creation take the account row before the session | `PostgreSqlAccountStoreTests.A_reuse_or_an_invitation_takes_the_account_row_before_the_session` (red on both before the fix) |
