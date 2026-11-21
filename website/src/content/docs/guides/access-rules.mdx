@@ -225,8 +225,7 @@ express, an embedded host adds a query narrowing in C# ([Shape what reads return
 A rule Alvo cannot compile is refused when the descriptor is applied, and the container does not come back: an
 undeclared role, a field the entity does not have, a function call, or a rule wrapped in an extra pair of quotes
 (`"'author_id == @user.id'"` is one string literal, and the refusal says *Remove the outer quotes*). The reason is at
-the end of `docker compose logs alvo`; in this build that refusal ends the process with exit code 139 instead of 78
-([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+the end of `docker compose logs alvo`, and the process exits with code 78.
 
 ## Reference
 

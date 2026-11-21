@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Host.Internal;
 using MMLib.Alvo.Identity;
 using MMLib.Alvo.Migrations;
@@ -327,6 +328,71 @@ public class AlvoHostConfigurationRefusalTests
         exitCode.ShouldBe(78);
         captured.ToString().ShouldContain("Alvo__Admin__BootstrapPasswordFile");
     }
+
+    [Theory]
+    [InlineData("host-boot-from-a-newer-alvo.alvo.json", "/auth/passkeys")]
+    [InlineData("host-boot-unknown-format.alvo.json", "no-such-format")]
+    public async Task A_descriptor_stage_zero_refuses_exits_seventy_eight_naming_the_problem_and_the_fix(string fixture, string named)
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        using var captured = new StringWriter();
+        int exitCode;
+
+        try
+        {
+            exitCode = await RunCapturingStderrAsync(captured, Ephemeral, DescriptorArgumentFor(fixture), SqliteAt(databasePath));
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+
+        exitCode.ShouldBe(78);
+        var reported = captured.ToString();
+        reported.ShouldContain("Alvo cannot start: this build (");
+        reported.ShouldContain(named);
+        reported.ShouldContain("newer Alvo");
+    }
+
+    [Fact]
+    public void Only_a_descriptor_refusal_the_boot_tagged_as_stage_zero_is_a_misconfiguration()
+    {
+        var untagged = RowsBreakACheck();
+        var tagged = RowsBreakACheck();
+        tagged.Data[AlvoHostExit.StartupRefusalDataKey] = "Alvo cannot start: the operator's text.";
+
+        AlvoHostExit.IsConfigurationFailure(untagged).ShouldBeFalse();
+        AlvoHostExit.IsConfigurationFailure(tagged).ShouldBeTrue();
+        AlvoHostExit.Describe(tagged).ShouldBe("Alvo cannot start: the operator's text.");
+    }
+
+    [Fact]
+    public void The_host_reads_the_tag_under_the_key_the_boot_writes_it()
+        => AlvoHostExit.StartupRefusalDataKey.ShouldBe(MMLib.Alvo.Migrations.Internal.DescriptorBootPlan.StartupRefusalDataKey);
+
+    private static DescriptorValidationException RowsBreakACheck() => new(new DescriptorValidationResult(
+        [new("/entities/orders/fields/total/validations/0", "3 rows break it.", FixSuggestion: null, DescriptorValidationSeverity.Error)]));
+
+    private static async Task<int> RunCapturingStderrAsync(StringWriter captured, params string[] args)
+    {
+        var original = Console.Error;
+
+        try
+        {
+            Console.SetError(TextWriter.Synchronized(captured));
+            return await AlvoHost.RunAsync(args).WaitAsync(_startMustNotSucceed, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+    }
+
+    private static string DescriptorArgumentFor(string fixture) =>
+        $"--Alvo:DescriptorPath={AlvoHostWorld.DescriptorPath(fixture)}";
+
+    private static string SqliteAt(string databasePath) =>
+        $"--Alvo:Database:SqliteConnectionString={AlvoHostWorld.ConnectionStringFor(databasePath)}";
 
     /// <summary>An address with no secret beside it — the way half a bootstrap is configured by hand.</summary>
     private const string BootstrapEmailOnly = "--Alvo:Admin:BootstrapEmail=admin@example.test";
