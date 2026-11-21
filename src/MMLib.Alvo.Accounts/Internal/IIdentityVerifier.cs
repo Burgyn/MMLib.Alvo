@@ -20,7 +20,10 @@ internal enum IdTokenRefusal
     /// <summary>Its <c>alg</c> is not one its provider signs with — <c>none</c> and every <c>HS*</c> never are.</summary>
     Algorithm,
 
-    /// <summary>Its <c>aud</c> names none of the configured client ids.</summary>
+    /// <summary>
+    /// Its <c>aud</c> names a client id this deployment did not configure, or its <c>azp</c> does (#544) — one refusal for
+    /// both, so the answer tells nobody which claim failed.
+    /// </summary>
     Audience,
 
     /// <summary>Its <c>exp</c> is more than the skew in the past, or absent.</summary>

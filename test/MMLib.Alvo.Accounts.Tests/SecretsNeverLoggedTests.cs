@@ -483,7 +483,7 @@ public sealed class SecretsNeverLoggedTests
                 $"/management/projects/time-tracker/accounts/{new JsonWebToken(live).Subject}/disabled",
                 AccountsWorld.Operator,
                 body: new JsonObject { ["disabled"] = true }),
-            HttpStatusCode.NoContent);
+            HttpStatusCode.OK);
         await ExpectAsync(world.AsPersonAsync(HttpMethod.Get, Entries, live), HttpStatusCode.Unauthorized);
         await ExpectAsync(world.ExchangeAsync(secrets.Jwt(world.IdToken("bob"))), HttpStatusCode.Forbidden);
     }

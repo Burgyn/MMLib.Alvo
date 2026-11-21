@@ -207,8 +207,32 @@ internal sealed class TenantTables(string schemaPrefix)
     /// </summary>
     internal string BumpVersionSql => $"UPDATE {Tenants} SET version = version + 1 WHERE id = @tenant_id";
 
-    /// <summary>Gets the statement counting one tenant's owners.</summary>
-    internal string OwnersSql => $"SELECT COUNT(*) FROM {Members} WHERE tenant_id = @tenant_id AND is_owner = 1";
+    /// <summary>
+    /// Gets the statement counting one tenant's owners other than <c>@user_id</c> whose account is not disabled (#543): a
+    /// banned owner keeps the flag but manages nothing, so they never stand in for the last owner. <c>NOT EXISTS …
+    /// disabled</c>, as <see cref="HonouredMembershipSql"/>, so an owner without an account row still counts.
+    /// </summary>
+    internal string OtherEnabledOwnersSql =>
+        $"SELECT COUNT(*) FROM {Members} m WHERE m.tenant_id = @tenant_id AND m.is_owner = 1 AND m.user_id <> @user_id{HonouredAccount}";
+
+    /// <summary>Gets the statement reading one tenant's kind.</summary>
+    internal string KindSql => $"SELECT kind FROM {Tenants} WHERE id = @tenant_id";
+
+    /// <summary>
+    /// Gets the statement listing the shared tenants <c>@user_id</c> owns in which no owner's account is enabled — what a
+    /// ban of the account orphaned (#543) — by name and then id. An owner without an account row counts as enabled, as in
+    /// <see cref="OtherEnabledOwnersSql"/>.
+    /// </summary>
+    internal string OrphanedOwnedSql =>
+        $"""
+        SELECT t.id, t.name FROM {Tenants} t JOIN {Members} m ON m.tenant_id = t.id
+         WHERE m.user_id = @user_id AND m.is_owner = 1 AND t.kind = '{SharedKind}'
+           AND NOT EXISTS (
+               SELECT 1 FROM {Members} o
+                WHERE o.tenant_id = t.id AND o.is_owner = 1
+                  AND NOT EXISTS (SELECT 1 FROM {Accounts} d WHERE d.id = o.user_id AND d.disabled_at IS NOT NULL))
+         ORDER BY t.name, t.id
+        """;
 
     /// <summary>Gets the statement renaming one tenant.</summary>
     internal string RenameSql => $"UPDATE {Tenants} SET name = @name WHERE id = @tenant_id";

@@ -40,7 +40,7 @@ public sealed class AccountAdministrationTests
         using var refreshed = await world.RefreshAsync(refresh);
         using var exchanged = await world.ExchangeAsync(world.IdToken("sub-1"));
 
-        disabled.StatusCode.ShouldBe(HttpStatusCode.NoContent, await disabled.ReadTextAsync());
+        disabled.StatusCode.ShouldBe(HttpStatusCode.OK, await disabled.ReadTextAsync());
         await PersonResolverTests.InvalidTokenAsync(data);
         await TokenExchangeTests.RefusalAsync(refreshed, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_grant");
         await TokenExchangeTests.RefusalAsync(exchanged, HttpStatusCode.Forbidden, AlvoProblemTypes.SignInRefused, "access_denied");
@@ -60,7 +60,7 @@ public sealed class AccountAdministrationTests
         var (again, _) = await world.SignInAsync("sub-1");
         using var newData = await world.AsPersonAsync(HttpMethod.Get, Entries, again);
 
-        enabled.StatusCode.ShouldBe(HttpStatusCode.NoContent, await enabled.ReadTextAsync());
+        enabled.StatusCode.ShouldBe(HttpStatusCode.OK, await enabled.ReadTextAsync());
         await PersonResolverTests.InvalidTokenAsync(oldData);
         await TokenExchangeTests.RefusalAsync(oldRefresh, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_grant");
         AccountOf(again).ShouldBe(account, "enabling restores the account, not a new one");
@@ -78,6 +78,23 @@ public sealed class AccountAdministrationTests
 
         refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await refused.ReadTextAsync());
         data.StatusCode.ShouldBe(HttpStatusCode.OK, "a refused disable changes nothing");
+    }
+
+    /// <summary>
+    /// #543: granting a tenant's ownership is the ban's operation, so a caller below <c>admin</c> is refused before anything
+    /// is read — a stranger learns nothing about the tenant or the account.
+    /// </summary>
+    [Fact]
+    public async Task A_developer_cannot_grant_ownership()
+    {
+        await using var world = await StartAsync();
+        var (access, _) = await world.SignInAsync("sub-1");
+
+        using var refused = await world.Api.SendAsync(
+            HttpMethod.Put, $"/management/projects/time-tracker/tenants/{Guid.NewGuid()}/owners/{AccountOf(access)}", _developer, body: []);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
     }
 
     [Fact]

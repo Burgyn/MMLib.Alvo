@@ -426,6 +426,12 @@ public sealed class PersonResolverTests
         public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
             Calls.Count(nameof(AcceptInvitationAsync), inner.AcceptInvitationAsync(request, ct));
 
+        public Task<OwnershipGrantOutcome> GrantOwnershipAsync(OwnershipGrant grant, CancellationToken ct) =>
+            Calls.Count(nameof(GrantOwnershipAsync), inner.GrantOwnershipAsync(grant, ct));
+
+        public Task<IReadOnlyList<OrphanedTenant>> ListOrphanedTenantsAsync(UserId account, CancellationToken ct) =>
+            Calls.Count(nameof(ListOrphanedTenantsAsync), inner.ListOrphanedTenantsAsync(account, ct));
+
         public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
             Calls.Count(nameof(CreateInvitationAsync), inner.CreateInvitationAsync(request, ct));
 

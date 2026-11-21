@@ -85,6 +85,12 @@ internal sealed class RecordingMembershipStore : ITenantStore
     public Task<AcceptInvitationOutcome> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken ct) =>
         throw new NotSupportedException();
 
+    public Task<OwnershipGrantOutcome> GrantOwnershipAsync(OwnershipGrant grant, CancellationToken ct) =>
+        throw new NotSupportedException();
+
+    public Task<IReadOnlyList<OrphanedTenant>> ListOrphanedTenantsAsync(UserId account, CancellationToken ct) =>
+        throw new NotSupportedException();
+
     public Task<CreateInvitationOutcome> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken ct) =>
         throw new NotSupportedException();
 

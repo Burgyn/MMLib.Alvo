@@ -2,6 +2,7 @@
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Tenants;
 using MMLib.Alvo.Tests.Ef;
 using Shouldly;
 using System.Data.Common;
@@ -31,6 +32,46 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
 
     /// <inheritdoc/>
     public ValueTask InitializeAsync() => _fixture.InitializeAsync();
+
+    /// <summary>
+    /// The lock order of the hardening design (§2.3): a refresh-token reuse sweeps the person's credentials, and creating an
+    /// invitation hands one out, so each takes the person's account row before the session — the order a ban takes them
+    /// in. With the account row held, each must queue, holding no session row while it waits.
+    /// </summary>
+    /// <param name="write">The write.</param>
+    [Theory]
+    [InlineData("a reuse")]
+    [InlineData("an invitation")]
+    public async Task A_reuse_or_an_invitation_takes_the_account_row_before_the_session(string write)
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        var tenants = services.GetRequiredService<ITenantStore>();
+        var tenant = new TenantId(Guid.NewGuid());
+        (await tenants.CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", account, [], 5, Start), Ct)).Status
+            .ShouldBe(CreateTenantStatus.Created);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        await using var holder = await PostgresRowLocks.HoldAsync(
+            services,
+            $"UPDATE {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} SET last_sign_in_at = last_sign_in_at WHERE id = '{account.Value:D}'");
+
+        Task call = write == "a reuse"
+            ? store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(2)), Ct)
+            : tenants.CreateInvitationAsync(
+                new CreateInvitationRequest(
+                    Guid.NewGuid(), tenant, account, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"), [], GrantsOwner: true,
+                    null, 1, Start.AddDays(7), Start.AddMinutes(2), session.SessionId),
+                Ct);
+        await PostgresRowLocks.UntilWaitingAsync(services, 1, $"{write} went ahead without the person's account row", call);
+
+        (await PostgresRowLocks.FreeAsync(
+            services,
+            $"SELECT 1 FROM {TableOf(services, AlvoFrameworkTables.AuthSessionsSuffix)} WHERE id = '{session.SessionId:D}' FOR UPDATE NOWAIT"))
+            .ShouldBeTrue($"{write} holds the session while it waits for the account");
+        await holder.CommitAsync(Ct);
+        await call;
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(write == "a reuse" ? SessionRevocations.Reuse : null);
+    }
 
     [Theory]
     [InlineData("a sign-out")]
