@@ -1463,6 +1463,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A declared rename no longer leaves an index or a primary key under its old name** (#523). Both engines carry an
+  index's and a key's names through `RENAME`, while EF names them from the table and column names — so after renaming an
+  entity or a field, a later plan that dropped the field's `unique` or `indexed` index named an index the database did
+  not have (both engines), and an entity or field that later took an old name collided with the index still holding it
+  (both engines) or, on PostgreSQL, with the renamed table's primary key. The rename's plan now also renames each such
+  index (`ALTER INDEX … RENAME` on PostgreSQL; a drop and a create on SQLite, which cannot rename an index) and, on
+  PostgreSQL, the primary key; an index the same plan drops is dropped by the name the database holds. A database
+  renamed before this fix keeps the old names. Pinned on both engines by `RenamedConstraintNameFacts`, and the tenant-guard
+  facts now apply every rename with `AllowDestructive = false`.
 - **The standalone host exits 78 on a descriptor the boot refuses at stage 0, not 139** (#340, #547). A mounted
   descriptor that fails validation — mistyped, or written for a newer Alvo — or that the mapper refuses (a field naming
   an unknown format, a format pattern that is not a regular expression) used to escape `Main` unhandled, and the

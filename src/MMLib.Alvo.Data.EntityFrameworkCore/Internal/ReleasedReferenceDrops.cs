@@ -26,23 +26,16 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 internal static class ReleasedReferenceDrops
 {
     /// <summary>The drops, foreign keys first, then their indexes, then the alternate keys left without a referrer.</summary>
-    /// <param name="renames">The declared renames, as <see cref="RenamePrePass"/> computed them.</param>
-    /// <param name="current">Builds the model of the schema the database holds, before the renames — only when there are any.</param>
+    /// <param name="names">The declared renames' lookups.</param>
+    /// <param name="current">The model of the schema the database holds, before the renames.</param>
     /// <param name="aligned">The model of <see cref="RenamePrePass.Result.AlignedCurrent"/>.</param>
-    internal static IReadOnlyList<RenamePrePass.RenameEntry> For(
-        IReadOnlyList<RenamePrePass.RenameEntry> renames, Func<IModel> current, IModel aligned)
+    internal static IReadOnlyList<RenamePrePass.RenameEntry> For(RenamedNames names, IModel current, IModel aligned)
     {
-        if (renames.Count == 0)
-        {
-            return [];
-        }
-
-        var names = RenamedNames.From(renames);
         var kept = aligned.GetEntityTypes()
             .SelectMany(type => type.GetForeignKeys())
-            .Select(RenamedNames.None.Signature)
+            .Select(key => RenamedNames.None.Signature(key))
             .ToHashSet(StringComparer.Ordinal);
-        var released = current().GetEntityTypes()
+        var released = current.GetEntityTypes()
             .SelectMany(type => type.GetForeignKeys())
             .Where(key => !kept.Contains(names.Signature(key)))
             .ToList();
@@ -92,51 +85,5 @@ internal static class ReleasedReferenceDrops
 
     private static RenamePrePass.RenameEntry Entry(MigrationOperation operation) => new(operation, DestructiveScan.Classify(operation));
 
-    private static string Table(IReadOnlyEntityType type) => type.GetTableName()!;
-
-    /// <summary>
-    /// The declared renames as lookups from a current table or column name to its aligned one, and the signatures — table
-    /// and columns, never a constraint's name — two models' keys and indexes are compared by.
-    /// </summary>
-    private sealed class RenamedNames
-    {
-        /// <summary>No renames: the signatures of a model already aligned.</summary>
-        internal static RenamedNames None { get; } = new();
-
-        private readonly Dictionary<string, string> _tables = new(StringComparer.Ordinal);
-
-        private readonly Dictionary<(string Table, string Column), string> _columns = [];
-
-        internal static RenamedNames From(IReadOnlyList<RenamePrePass.RenameEntry> renames)
-        {
-            var names = new RenamedNames();
-            foreach (var rename in renames.Select(entry => entry.Operation))
-            {
-                if (rename is RenameTableOperation table)
-                {
-                    names._tables[table.Name] = table.NewName!;
-                }
-                else if (rename is RenameColumnOperation column)
-                {
-                    names._columns[(column.Table, column.Name)] = column.NewName;
-                }
-            }
-
-            return names;
-        }
-
-        internal string Table(string table) => _tables.GetValueOrDefault(table, table);
-
-        internal string Columns(string table, IReadOnlyList<IProperty> properties)
-        {
-            var aligned = Table(table);
-            var columns = properties.Select(property => property.GetColumnName())
-                .Select(column => _columns.GetValueOrDefault((aligned, column), column));
-            return $"{aligned}({string.Join(',', columns)})";
-        }
-
-        internal string Signature(IForeignKey key) =>
-            $"{Columns(ReleasedReferenceDrops.Table(key.DeclaringEntityType), key.Properties)}>"
-            + $"{Columns(ReleasedReferenceDrops.Table(key.PrincipalEntityType), key.PrincipalKey.Properties)}";
-    }
+    private static string Table(IReadOnlyEntityType type) => RenamedNames.TableOf(type);
 }

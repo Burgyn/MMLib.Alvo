@@ -74,16 +74,16 @@ public sealed class PostgreSqlTenantGuardMigrationTests(PostgresFixture fixture)
     }
 
     /// <summary>
-    /// After a rename the reference's foreign key, its index and the target's alternate key carry exactly the names the
-    /// model gives them — none left behind under an old name, none missing — so every later plan names a constraint the
-    /// database really holds. The primary key keeps its old name, which no plan ever drops on its own.
+    /// After a rename the reference's foreign key, its index, the target's alternate key and each table's primary key carry
+    /// exactly the names the model gives them — none left behind under an old name, none missing — so every later plan names
+    /// a constraint the database really holds, and no old name stays taken (#523).
     /// </summary>
     /// <param name="renames"><c>entity</c>, <c>field</c> or <c>both</c>.</param>
-    /// <param name="expected">The foreign key, unique constraint and <c>IX_</c> index names, sorted.</param>
+    /// <param name="expected">The foreign key, unique constraint, primary key and <c>IX_</c> index names, sorted.</param>
     [Theory]
-    [InlineData("entity", "AK_jobs_tenant_id_id,FK_visits_jobs_tenant_id_work_order_id,IX_visits_tenant_id_work_order_id")]
-    [InlineData("field", "AK_work_orders_tenant_id_id,FK_visits_work_orders_tenant_id_job_id,IX_visits_tenant_id_job_id")]
-    [InlineData("both", "AK_jobs_tenant_id_id,FK_visits_jobs_tenant_id_job_id,IX_visits_tenant_id_job_id")]
+    [InlineData("entity", "AK_jobs_tenant_id_id,FK_visits_jobs_tenant_id_work_order_id,IX_visits_tenant_id_work_order_id,PK_jobs,PK_visits")]
+    [InlineData("field", "AK_work_orders_tenant_id_id,FK_visits_work_orders_tenant_id_job_id,IX_visits_tenant_id_job_id,PK_visits,PK_work_orders")]
+    [InlineData("both", "AK_jobs_tenant_id_id,FK_visits_jobs_tenant_id_job_id,IX_visits_tenant_id_job_id,PK_jobs,PK_visits")]
     public async Task After_a_rename_the_guard_holds_only_the_names_the_model_gives_it(string renames, string expected)
     {
         Assert.SkipUnless(Runnable, "PostgreSQL Testcontainers requires a Linux Docker daemon.");
@@ -94,7 +94,7 @@ public sealed class PostgreSqlTenantGuardMigrationTests(PostgresFixture fixture)
         (await ScalarAsync<string>(
             """
             SELECT string_agg(name, ',' ORDER BY name) FROM (
-                SELECT conname::text AS name FROM pg_constraint WHERE contype IN ('f', 'u') AND connamespace = 'public'::regnamespace
+                SELECT conname::text AS name FROM pg_constraint WHERE contype IN ('f', 'u', 'p') AND connamespace = 'public'::regnamespace
                 UNION ALL
                 SELECT indexname::text FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'IX%') AS names
             """)).ShouldBe(expected);
