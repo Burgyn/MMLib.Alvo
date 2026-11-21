@@ -1436,20 +1436,20 @@ public sealed class InMemoryAlvoData : IAlvoData
     {
         var judged = new List<AlvoRecord>(rows.Count);
         var refusals = new List<AlvoRowRefusal>();
+        var schema = FindEntity(entity) ?? throw new AlvoAuthorizationException(UndeclaredPayloadFieldMessage);
 
         for (var index = 0; index < rows.Count; index++)
         {
             var values = rows[index];
-            var schema = FindEntity(entity);
             if ((PayloadRefusal(entity, values, decision, isUpdate: false)
-                ?? AlvoTenantPlacement.Refusal(values, schema!, context)) is { } refused)
+                ?? AlvoTenantPlacement.Refusal(values, schema, context)) is { } refused)
             {
                 refusals.Add(Forbidden(index, refused));
                 continue;
             }
 
             var postImage = new AlvoRecord(
-                new Dictionary<string, object?>(CreatedRow(schema!, values, context), StringComparer.Ordinal) { [IdField] = Guid.NewGuid() });
+                new Dictionary<string, object?>(CreatedRow(schema, values, context), StringComparer.Ordinal) { [IdField] = Guid.NewGuid() });
 
             if (WriteRefusal(decision, postImage, previous: null, context) is { } rejected)
             {

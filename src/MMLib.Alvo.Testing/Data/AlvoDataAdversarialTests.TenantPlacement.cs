@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Schema;
 using Shouldly;
 using Xunit;
@@ -112,6 +113,43 @@ public abstract partial class AlvoDataAdversarialTests
         refusal.Code.ShouldBe("forbidden");
         refusal.Message.ShouldBe(AlvoAuthorizationException.ForeignTenant);
     }
+
+    /// <summary>
+    /// The replace route's create branch places an unseen id's row in the caller's tenant too — the same helper as
+    /// <c>POST</c> — so it lands in Acme and Globex cannot read it.
+    /// </summary>
+    [Fact]
+    public async Task A_replace_creating_an_unseen_id_without_tenant_id_lands_in_the_callers_own_tenant()
+    {
+        var fixture = await DocumentsFixtureAsync(Replaceable);
+        var id = Guid.NewGuid();
+
+        var result = await fixture.Data.ReplaceAsync("documents", id, Untenanted("upserted"), NewContext(fixture.Acme));
+
+        result.Created.ShouldBeTrue();
+        result.Row[AlvoManagedColumns.TenantId].ShouldBe(fixture.Acme.Value);
+        await ShouldBeAcmesOnlyAsync(fixture, id);
+    }
+
+    /// <summary>
+    /// The replace guard still refuses <c>tenant_id</c> on both branches, even naming the caller's own tenant — the
+    /// placement on <c>POST</c> did not open the column on this route, where accepting it would answer "does this row
+    /// exist?".
+    /// </summary>
+    [Fact]
+    public async Task A_replace_payload_carrying_tenant_id_is_still_refused_even_naming_the_callers_tenant()
+    {
+        var fixture = await DocumentsFixtureAsync(Replaceable);
+        var id = Guid.NewGuid();
+
+        var refused = await Should.ThrowAsync<AlvoAuthorizationException>(() => fixture.Data.ReplaceAsync(
+            "documents", id, Tenanted("upserted", fixture.Acme.Value), NewContext(fixture.Acme)));
+
+        refused.Message.ShouldBe($"Field 'tenant_id' {AlvoManagedColumns.RefusalReason(AlvoManagedColumns.TenantId, isUpdate: true)}.");
+        (await fixture.Data.GetAsync("documents", id, NewContext(fixture.Acme))).ShouldBeNull();
+    }
+
+    private static AccessRules Replaceable => new() { List = "true", Get = "true", Create = "true", Update = "true" };
 
     private static async Task ShouldBeAcmesOnlyAsync(DocumentsFixture fixture, Guid id)
     {

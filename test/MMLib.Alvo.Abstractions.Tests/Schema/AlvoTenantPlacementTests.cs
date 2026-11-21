@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Data;
 using MMLib.Alvo.Schema;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Abstractions.Tests.Schema;
 
@@ -19,23 +20,58 @@ public class AlvoTenantPlacementTests
         => AlvoTenantPlacement.Placed(Payload(), Entity(TenancyMode.Scoped), _acmeCaller)[AlvoManagedColumns.TenantId]
             .ShouldBe(_acme.Value);
 
-    [Fact]
-    public void The_callers_own_tenant_spelled_as_text_is_accepted_and_stored_as_a_guid()
+    /// <summary>Every recognised shape of the caller's own tenant: accepted, and stored as the <see cref="Guid"/>.</summary>
+    public static TheoryData<string, object> CallersOwnTenant => new()
     {
-        var payload = Payload(_acme.Value.ToString("D").ToUpperInvariant());
+        { "the Guid", _acme.Value },
+        { "a TenantId", _acme },
+        { "text, lower case", _acme.Value.ToString("D") },
+        { "text, upper case", _acme.Value.ToString("D").ToUpperInvariant() },
+        { "text, in braces", _acme.Value.ToString("B") },
+        { "text, no hyphens", _acme.Value.ToString("N") },
+    };
 
-        AlvoTenantPlacement.Refusal(payload, Entity(TenancyMode.Scoped), _acmeCaller).ShouldBeNull();
+    /// <summary>Values that name no tenant, or another one: refused.</summary>
+    public static TheoryData<string, object?> NotTheCallersTenant => new()
+    {
+        { "null", null },
+        { "another Guid", Guid.NewGuid() },
+        { "another TenantId", TenantId.New() },
+        { "text that is no uuid", "not-a-tenant" },
+        { "the all-zero uuid", Guid.Empty.ToString("D") },
+        { "an int", 42 },
+        { "a JsonElement carrying the caller's tenant", JsonSerializer.SerializeToElement(_acme.Value) },
+    };
+
+    [Theory]
+    [MemberData(nameof(CallersOwnTenant))]
+    public void The_callers_own_tenant_in_any_recognised_shape_is_accepted_and_stored_as_a_guid(string shape, object named)
+    {
+        var payload = Payload(named);
+
+        AlvoTenantPlacement.Refusal(payload, Entity(TenancyMode.Scoped), _acmeCaller).ShouldBeNull(shape);
         AlvoTenantPlacement.Placed(payload, Entity(TenancyMode.Scoped), _acmeCaller)[AlvoManagedColumns.TenantId]
-            .ShouldBe(_acme.Value);
+            .ShouldBe(_acme.Value, shape);
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("not-a-tenant")]
-    [InlineData("00000000-0000-0000-0000-000000000000")]
-    public void Any_value_but_the_callers_tenant_is_refused(string? named)
+    [MemberData(nameof(NotTheCallersTenant))]
+    public void Any_value_but_the_callers_tenant_is_refused(string shape, object? named)
         => AlvoTenantPlacement.Refusal(Payload(named), Entity(TenancyMode.Scoped), _acmeCaller)
-            .ShouldBe(AlvoAuthorizationException.ForeignTenant);
+            .ShouldBe(AlvoAuthorizationException.ForeignTenant, shape);
+
+    /// <summary>The tenant guard denies this caller before any payload is read; placement must not invent a tenant.</summary>
+    [Theory]
+    [MemberData(nameof(NotTheCallersTenant))]
+    [MemberData(nameof(CallersOwnTenant))]
+    public void A_caller_with_no_tenant_is_left_alone_whatever_the_payload_names(string shape, object? named)
+    {
+        var payload = Payload(named);
+        var tenantless = Caller(tenant: null);
+
+        AlvoTenantPlacement.Refusal(payload, Entity(TenancyMode.Scoped), tenantless).ShouldBeNull(shape);
+        AlvoTenantPlacement.Placed(payload, Entity(TenancyMode.Scoped), tenantless).ShouldBeSameAs(payload, shape);
+    }
 
     [Fact]
     public void Another_tenants_guid_is_refused_with_an_exception_that_does_not_echo_it()
@@ -60,9 +96,8 @@ public class AlvoTenantPlacementTests
         AlvoTenantPlacement.Placed(payload, Entity(tenancy), _acmeCaller).ShouldBeSameAs(payload);
     }
 
-    /// <summary>The tenant guard denies this caller before any payload is read; placement must not invent a tenant.</summary>
     [Fact]
-    public void A_caller_with_no_tenant_is_left_to_the_policy_engine()
+    public void A_caller_with_no_tenant_gets_no_tenant_placed()
     {
         var payload = Payload(Guid.NewGuid());
         var tenantless = Caller(tenant: null);

@@ -1653,8 +1653,9 @@ The framework then has to supply the value, because the tenant scope *checks* a 
 produces one: a created row lands in the caller's own tenant. Since #538 `POST` does the same when its body
 leaves `tenant_id` out, through the one helper every create path shares (`AlvoTenantPlacement`); a `POST` body
 may still name the column, but only as the caller's own tenant — any other value, `null` included, is refused
-with a `403` that says to remove it. No create, on either route, can reach another tenant, which the
-synthesized scope already guaranteed and now the answer says.
+with a `403` that says to remove it. Placement is a convenience and a clearer
+answer, not the guarantee: on either route the synthesized tenant scope still judges the stored row, exactly
+as it did before #538.
 
 ### What a replace discloses, and why it cannot disclose less
 

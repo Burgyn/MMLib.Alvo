@@ -1543,7 +1543,7 @@ public abstract partial class AlvoDataAdversarialTests
         return new NotesFixture(data, alice, bob, tenant, aliceRow1, aliceRow2, bobRow);
     }
 
-    private async Task<DocumentsFixture> DocumentsFixtureAsync()
+    private async Task<DocumentsFixture> DocumentsFixtureAsync(AccessRules? rules = null)
     {
         var acme = TenantId.New();
         var globex = TenantId.New();
@@ -1558,7 +1558,7 @@ public abstract partial class AlvoDataAdversarialTests
         {
             ["title"] = new() { Type = DescField.String, Required = true },
         };
-        var rules = new AccessRules { List = "true", Get = "true", Create = "true" };
+        rules ??= new AccessRules { List = "true", Get = "true", Create = "true" };
         var (descriptor, schema) = BuildFixture("documents", fields, EntityTenancy.Scoped, rules);
 
         var acmeRow = Guid.NewGuid();

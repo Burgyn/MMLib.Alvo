@@ -99,12 +99,15 @@ internal static class AlvoTenantPlacement
     }
 
     /// <summary>
-    /// Whether a payload value names <paramref name="tenant"/>: the <see cref="Guid"/> itself, or text that parses as
-    /// it — the two shapes a uuid travels through this port as.
+    /// Whether a payload value names <paramref name="tenant"/>. Three shapes are recognised: the <see cref="Guid"/>
+    /// itself, a <see cref="TenantId"/> carrying it, and text that <see cref="Guid.TryParse(string, out Guid)"/> reads
+    /// as it (any of its formats, any case). Every other value — <see langword="null"/>, a number, a
+    /// <c>JsonElement</c> — names no tenant, so it is not the caller's.
     /// </summary>
     private static bool Names(object? value, TenantId tenant) => value switch
     {
         Guid id => id == tenant.Value,
+        TenantId named => named == tenant,
         string text => Guid.TryParse(text, out var id) && id == tenant.Value,
         _ => false,
     };
