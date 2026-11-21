@@ -154,7 +154,7 @@ internal sealed class AppTokenTables(string schemaPrefix)
 
     /// <summary>Gets the statement deleting tokens revoked or expired before <c>@dead_before</c> (#527), at most <c>@limit</c>.</summary>
     internal string SweepDeadSql =>
-        $"DELETE FROM {ApiKeys} WHERE key_id IN (SELECT key_id FROM {ApiKeys} WHERE revoked_at < @dead_before OR expires_at < @dead_before LIMIT @limit)";
+        $"DELETE FROM {ApiKeys} WHERE key_id IN (SELECT key_id FROM {ApiKeys} WHERE revoked_at < @dead_before OR expires_at < @dead_before ORDER BY key_id LIMIT @limit)";
 
     /// <summary>Gets the sweep of a disabled account (D10): every live token it minted, personal or service, in any tenant.</summary>
     internal string RevokeMintedByAccountSql =>

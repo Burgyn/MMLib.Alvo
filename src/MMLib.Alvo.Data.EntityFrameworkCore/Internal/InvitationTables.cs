@@ -88,7 +88,7 @@ internal sealed class InvitationTables(string schemaPrefix)
         DELETE FROM {Invitations} WHERE id IN (
             SELECT id FROM {Invitations}
              WHERE revoked_at < @dead_before OR expires_at < @dead_before OR (uses >= max_uses AND created_at < @dead_before)
-             LIMIT @limit)
+             ORDER BY id LIMIT @limit)
         """;
 
     /// <summary>Gets the statement reading every invitation of one tenant, newest first, then by id.</summary>

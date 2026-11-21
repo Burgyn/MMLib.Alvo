@@ -108,7 +108,7 @@ internal static class InboundWebhookTable
                 connection,
                 null,
                 $"DELETE FROM {table} WHERE (receiver, webhook_id) IN "
-                + $"(SELECT receiver, webhook_id FROM {table} WHERE received_at < @before LIMIT @limit)",
+                + $"(SELECT receiver, webhook_id FROM {table} WHERE received_at < @before ORDER BY receiver, webhook_id LIMIT @limit)",
                 null,
                 [("@before", StoredInstant.Text(before)), ("@limit", limit)]),
             ct);

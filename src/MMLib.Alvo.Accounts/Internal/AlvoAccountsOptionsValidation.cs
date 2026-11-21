@@ -44,6 +44,8 @@ internal sealed class AlvoAccountsOptionsValidation(
 
     private const int MaxAccessTokenMinutes = 60;
 
+    private const int MaxRetentionDays = 3650;
+
     private const int MaxGraceSeconds = 60;
 
     /// <summary>The providers this build can verify an ID token from; S2 ships the Google preset alone.</summary>
@@ -104,9 +106,9 @@ internal sealed class AlvoAccountsOptionsValidation(
             yield return OutOfRange(nameof(AlvoAccountsOptions.RefreshIdleDays), options.RefreshIdleDays, "at least 1");
         }
 
-        if (options.RetentionDays < 1)
+        if (options.RetentionDays is < 1 or > MaxRetentionDays)
         {
-            yield return OutOfRange(nameof(AlvoAccountsOptions.RetentionDays), options.RetentionDays, "at least 1");
+            yield return OutOfRange(nameof(AlvoAccountsOptions.RetentionDays), options.RetentionDays, $"1 to {MaxRetentionDays}");
         }
 
         if (options.SessionLifetimeDays < options.RefreshIdleDays)

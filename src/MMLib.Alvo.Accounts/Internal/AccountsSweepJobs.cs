@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Sweeping;
 
@@ -24,11 +23,10 @@ internal static class AccountsSweepJobs
     /// <param name="services">The host's services.</param>
     internal static void Add(IServiceCollection services)
     {
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, SessionsJob>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, RotatedRefreshTokensJob>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, AppTokensJob>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, InvitationsJob>());
-        services.AddAlvoFrameworkSweeper();
+        services.AddAlvoSweepJob<SessionsJob>()
+            .AddAlvoSweepJob<RotatedRefreshTokensJob>()
+            .AddAlvoSweepJob<AppTokensJob>()
+            .AddAlvoSweepJob<InvitationsJob>();
     }
 
     /// <summary>Sessions revoked, expired or idle past the retention, with their refresh tokens.</summary>

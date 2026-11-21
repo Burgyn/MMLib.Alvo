@@ -21,7 +21,7 @@ public sealed class AccountsSweepTests
     {
         await using var world = await AccountsWorld.StartAsync(_engine);
 
-        world.Api.Services.GetServices<ISweepJob>().Select(job => job.Name).ShouldBe(
+        world.Api.Services.GetServices<ISweepJobRegistration>().Select(registration => registration.Resolve(world.Api.Services).Name).ShouldBe(
             ["inbound webhook ids", "command keys", "end-user sessions", "rotated refresh tokens", "app tokens", "invitations"],
             ignoreOrder: true);
         world.Api.Services.GetServices<IHostedService>().OfType<FrameworkSweeper>().Count().ShouldBe(1);

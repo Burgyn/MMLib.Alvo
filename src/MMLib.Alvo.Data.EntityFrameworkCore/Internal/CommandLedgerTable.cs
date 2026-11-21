@@ -138,7 +138,7 @@ internal static class CommandLedgerTable
                 connection,
                 null,
                 $"DELETE FROM {table} WHERE (scope, idempotency_key) IN "
-                + $"(SELECT scope, idempotency_key FROM {table} WHERE claimed_at < @before LIMIT @limit)",
+                + $"(SELECT scope, idempotency_key FROM {table} WHERE claimed_at < @before ORDER BY scope, idempotency_key LIMIT @limit)",
                 null,
                 [("@before", StoredInstant.Text(claimedBefore)), ("@limit", limit)]),
             ct);

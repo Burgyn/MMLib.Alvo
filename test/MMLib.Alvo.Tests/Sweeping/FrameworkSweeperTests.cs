@@ -24,8 +24,8 @@ public sealed class FrameworkSweeperTests : IDisposable
     {
         _factory = LoggerFactory.Create(logging => logging.AddProvider(_logs).SetMinimumLevel(LogLevel.Trace));
         _services = new ServiceCollection()
-            .AddSingleton<ISweepJob>(_first)
-            .AddSingleton<ISweepJob>(_second)
+            .AddSingleton<ISweepJobRegistration>(new Registered(_first))
+            .AddSingleton<ISweepJobRegistration>(new Registered(_second))
             .BuildServiceProvider();
     }
 
@@ -67,6 +67,39 @@ public sealed class FrameworkSweeperTests : IDisposable
 
         _logs.Entries.ShouldContain(entry => entry.Level == LogLevel.Warning && entry.Exception is TaskCanceledException && entry.Message.Contains("first", StringComparison.Ordinal));
         _second.Limits.ShouldBe([SweepLimits.BatchSize]);
+    }
+
+    /// <summary>
+    /// #527 review: a job that cannot even be resolved — a constructor that throws — is logged under its registration's
+    /// name, and the jobs after it still run.
+    /// </summary>
+    [Fact]
+    public async Task A_job_that_cannot_be_resolved_is_logged_and_the_others_still_run()
+    {
+        _second.Batches.Enqueue(4);
+        using var services = new ServiceCollection()
+            .AddSingleton<ISweepJobRegistration>(new Unresolvable())
+            .AddSingleton<ISweepJobRegistration>(new Registered(_second))
+            .BuildServiceProvider();
+        var sweeper = new FrameworkSweeper(services, new FakeTimeProvider(), _factory.CreateLogger<FrameworkSweeper>());
+
+        (await sweeper.SweepOnceAsync(TestContext.Current.CancellationToken)).ShouldBe(4);
+
+        _logs.Entries.ShouldContain(entry => entry.Level == LogLevel.Warning && entry.Exception is InvalidOperationException && entry.Message.Contains("Broken", StringComparison.Ordinal));
+    }
+
+    /// <summary>#527 review: a batch that loses a deadlock to another replica's sweep is retried once, at Debug.</summary>
+    [Fact]
+    public async Task A_deadlocked_batch_is_retried_once()
+    {
+        _first.Failures.Enqueue(new DeadlockException());
+        _first.Batches.Enqueue(5);
+
+        (await Sweeper().SweepOnceAsync(TestContext.Current.CancellationToken)).ShouldBe(5);
+
+        _first.Limits.Count.ShouldBe(2);
+        _logs.Entries.ShouldContain(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("deadlock", StringComparison.Ordinal));
+        _logs.Entries.ShouldNotContain(entry => entry.Level >= LogLevel.Warning);
     }
 
     [Fact]
@@ -112,7 +145,8 @@ public sealed class FrameworkSweeperTests : IDisposable
         var services = new ServiceCollection().AddLogging().AddAlvoInboundWebhooks().AddAlvoFrameworkSweeper();
         using var provider = services.BuildServiceProvider();
 
-        provider.GetServices<ISweepJob>().Select(job => job.Name).ShouldBe(["inbound webhook ids", "command keys"]);
+        provider.GetServices<ISweepJobRegistration>().Select(registration => registration.Resolve(provider).Name)
+            .ShouldBe(["inbound webhook ids", "command keys"]);
         provider.GetServices<IHostedService>().OfType<FrameworkSweeper>().Count().ShouldBe(1);
     }
 
@@ -125,6 +159,44 @@ public sealed class FrameworkSweeperTests : IDisposable
 
     private FrameworkSweeper Sweeper() => new(_services, new FakeTimeProvider(), _factory.CreateLogger<FrameworkSweeper>());
 
+    /// <summary>A registration of an instance the fact holds.</summary>
+    private sealed class Registered(ISweepJob job) : ISweepJobRegistration
+    {
+        public string Name => job.Name;
+
+        public ISweepJob Resolve(IServiceProvider services) => job;
+    }
+
+    /// <summary>A registration whose job's constructor throws.</summary>
+    private sealed class Unresolvable : ISweepJobRegistration
+    {
+        public string Name => "Broken";
+
+        public ISweepJob Resolve(IServiceProvider services) => throw new InvalidOperationException("a dependency that cannot be built");
+    }
+
+    /// <summary>The engine breaking a deadlock: <c>40P01</c>.</summary>
+#pragma warning disable RCS1194 // A test double: DbException's serialization constructor is obsolete.
+    private sealed class DeadlockException : System.Data.Common.DbException
+#pragma warning restore RCS1194
+    {
+        public DeadlockException()
+        {
+        }
+
+        public DeadlockException(string message)
+            : base(message)
+        {
+        }
+
+        public DeadlockException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+
+        public override string? SqlState => "40P01";
+    }
+
     /// <summary>A job whose batches are the fact's.</summary>
     private sealed class ScriptedJob(string name) : ISweepJob
     {
@@ -136,6 +208,8 @@ public sealed class FrameworkSweeperTests : IDisposable
 
         internal Exception? Failure { get; set; }
 
+        internal Queue<Exception> Failures { get; } = new();
+
         internal TaskCompletionSource Swept { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public string Name => name;
@@ -144,6 +218,11 @@ public sealed class FrameworkSweeperTests : IDisposable
         {
             Limits.Add(limit);
             Swept.TrySetResult();
+            if (Failures.Count > 0)
+            {
+                return Task.FromException<int>(Failures.Dequeue());
+            }
+
             return Failure is { } failure
                 ? Task.FromException<int>(failure)
                 : Task.FromResult(Always ?? (Batches.Count > 0 ? Batches.Dequeue() : 0));

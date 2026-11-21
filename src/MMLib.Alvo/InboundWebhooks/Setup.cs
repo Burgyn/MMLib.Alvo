@@ -11,8 +11,6 @@ internal static class InboundWebhooksSetup
     internal static IServiceCollection AddAlvoInboundWebhooks(this IServiceCollection services)
     {
         services.TryAddSingleton<WebhookReceivers>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, InboundWebhookLedgerSweepJob>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ISweepJob, CommandLedgerSweepJob>());
-        return services.AddAlvoFrameworkSweeper();
+        return services.AddAlvoSweepJob<InboundWebhookLedgerSweepJob>().AddAlvoSweepJob<CommandLedgerSweepJob>();
     }
 }

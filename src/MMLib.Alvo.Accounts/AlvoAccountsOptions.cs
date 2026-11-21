@@ -69,7 +69,7 @@ public sealed class AlvoAccountsOptions
     public int RefreshReuseGraceSeconds { get; set; } = 10;
 
     /// <summary>
-    /// Gets or sets how long, in days, a dead row is kept before the framework sweep deletes it — at least 1 (#527): a
+    /// Gets or sets how long, in days, a dead row is kept before the framework sweep deletes it — 1 to 3650 (#527): a
     /// session revoked, expired or idle, an app token revoked or expired, an invitation revoked, expired or used up.
     /// </summary>
     /// <remarks>

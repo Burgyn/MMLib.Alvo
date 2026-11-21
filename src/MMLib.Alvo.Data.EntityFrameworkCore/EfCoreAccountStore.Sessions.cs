@@ -174,12 +174,17 @@ internal sealed partial class EfCoreAccountStore
     private async Task<RefreshOutcome> SweptAncestorAsync(
         DbConnection connection, DbTransaction transaction, RefreshRequest request, CancellationToken ct)
     {
+        if (request.Session == Guid.Empty)
+        {
+            return _refused;
+        }
+
         var live = await RelationalSqlBatch.ReadRowsAsync(
             connection, transaction, _tables.LiveSessionByIdSql,
             command => Bind(command, ("@session_id", Id(request.Session)), ("@now", Instant(request.Now))),
             reader => (Account: UserIdOf(reader.GetString(0)), StartedAt: StoredInstant.Of(reader.GetString(1))),
             ct).ConfigureAwait(false);
-        if (request.Session == Guid.Empty || live.Count == 0)
+        if (live.Count == 0)
         {
             return _refused;
         }

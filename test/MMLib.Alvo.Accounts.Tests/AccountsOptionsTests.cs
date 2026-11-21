@@ -188,6 +188,7 @@ public sealed class AccountsOptionsTests : IDisposable
     [InlineData(nameof(AlvoAccountsOptions.AccessTokenMinutes), 61)]
     [InlineData(nameof(AlvoAccountsOptions.RefreshIdleDays), 0)]
     [InlineData(nameof(AlvoAccountsOptions.RetentionDays), 0)]
+    [InlineData(nameof(AlvoAccountsOptions.RetentionDays), 3651)]
     [InlineData(nameof(AlvoAccountsOptions.SessionLifetimeDays), 29)]
     [InlineData(nameof(AlvoAccountsOptions.RefreshReuseGraceSeconds), -1)]
     [InlineData(nameof(AlvoAccountsOptions.RefreshReuseGraceSeconds), 61)]

@@ -1431,8 +1431,11 @@ here — it would turn the ban's invitation sweep into an index scan and invalid
 (`PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks`, which asserts the ban plans a heap
 scan); add it together with an adjusted fact. **Deviation from the issue's wording** ("an Alvo scheduled job"): Alvo's
 schedules are descriptor-declared and per tenant; this is infrastructure, so it is a hosted service. Every replica
-sweeps; the deletes are idempotent, and two replicas deleting overlapping batches at worst fail one job's tick, which
-is logged and retried. **The Apps line's N6** — a row `retention` trait, pruning `alvo_outbox` (#154) and
+sweeps; the deletes are idempotent. A batch that loses a deadlock (`40P01`) to another replica's sweep is retried once
+at Debug; a job that still fails — or cannot even be resolved — is logged and retried next tick while the other jobs
+run. The session job reads its dead ids once and deletes the tokens and the sessions by them, so a concurrent commit
+cannot shift what the second delete names (`AccountStoreFacts.Two_replicas_sweeping_at_once_leave_no_orphan_token`,
+both engines). Every `IN (SELECT … LIMIT)` orders by the primary key. **The Apps line's N6** — a row `retention` trait, pruning `alvo_outbox` (#154) and
 `alvo_idempotency` (#115) — adds jobs to this sweeper, never a second one.
 
 | Invariant | Held by |

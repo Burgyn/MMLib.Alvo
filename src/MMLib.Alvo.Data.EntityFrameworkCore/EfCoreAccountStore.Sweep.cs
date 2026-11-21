@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Accounts;
+using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
 using System.Data.Common;
 
@@ -27,8 +28,16 @@ internal sealed partial class EfCoreAccountStore
         return InTransactionAsync(
             async (connection, transaction, token) =>
             {
-                await ExecuteAsync(connection, transaction, _tables.SweepSessionTokensSql, bind, token).ConfigureAwait(false);
-                return await ExecuteAsync(connection, transaction, _tables.SweepSessionsSql, bind, token).ConfigureAwait(false);
+                var dead = await RelationalSqlBatch.ReadRowsAsync(
+                    connection, transaction, _tables.DeadSessionIdsSql, bind, reader => reader.GetString(0), token).ConfigureAwait(false);
+                if (dead.Count == 0)
+                {
+                    return 0;
+                }
+
+                var ids = (DbCommand command) => Bind(command, [.. dead.Select((id, index) => ("@s" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), (object?)id))]);
+                await ExecuteAsync(connection, transaction, _tables.SweepSessionTokensSql(dead.Count), ids, token).ConfigureAwait(false);
+                return await ExecuteAsync(connection, transaction, _tables.SweepSessionsSql(dead.Count), ids, token).ConfigureAwait(false);
             },
             _ => true,
             ct);

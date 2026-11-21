@@ -269,10 +269,13 @@ internal sealed class AuthTables(string schemaPrefix)
         """;
 
     /// <summary>
-    /// The sessions a sweep deletes (#527): dead past the retention — revoked, expired, or idle — and started before the
-    /// ID-token window, the first <c>@limit</c> by id, so the two statements of one sweep pick the same sessions.
+    /// Gets the statement reading the sessions a sweep deletes (#527): dead past the retention — revoked, expired, or idle —
+    /// and started before the ID-token window, the first <c>@limit</c> by id. Read once, so the two deletes of one sweep
+    /// name the same sessions: a <c>LIMIT</c> sub-select re-evaluated per statement could pick other rows once a
+    /// concurrent replica's sweep committed between them, and orphan their tokens. Dead is monotonic — a revoked, expired
+    /// or idle session never comes back, and none of them gets a new refresh token — so the ids stay dead until deleted.
     /// </summary>
-    private string DeadSessionsSql =>
+    internal string DeadSessionIdsSql =>
         $"""
         SELECT id FROM {Sessions}
          WHERE (revoked_at < @revoked_before OR expires_at < @expired_before OR COALESCE(last_refreshed_at, created_at) < @idle_before)
@@ -280,18 +283,25 @@ internal sealed class AuthTables(string schemaPrefix)
          ORDER BY id LIMIT @limit
         """;
 
-    /// <summary>Gets the statement deleting the refresh tokens of the sessions a sweep deletes, run first.</summary>
-    internal string SweepSessionTokensSql => $"DELETE FROM {RefreshTokens} WHERE session_id IN ({DeadSessionsSql})";
+    /// <summary>Gets the statement deleting the refresh tokens of <paramref name="count"/> sessions named <c>@s0…</c>, run first.</summary>
+    /// <param name="count">How many session ids the statement binds.</param>
+    internal string SweepSessionTokensSql(int count) => $"DELETE FROM {RefreshTokens} WHERE session_id IN ({Ids(count)})";
 
-    /// <summary>Gets the statement deleting the sessions a sweep deletes, run after their tokens.</summary>
-    internal string SweepSessionsSql => $"DELETE FROM {Sessions} WHERE id IN ({DeadSessionsSql})";
+    /// <summary>Gets the statement deleting <paramref name="count"/> sessions named <c>@s0…</c>, run after their tokens.</summary>
+    /// <param name="count">How many session ids the statement binds.</param>
+    internal string SweepSessionsSql(int count) => $"DELETE FROM {Sessions} WHERE id IN ({Ids(count)})";
+
+    /// <summary>The parameter names <c>@s0, @s1, …</c> of <paramref name="count"/> ids — one text on every engine.</summary>
+    /// <param name="count">How many.</param>
+    internal static string Ids(int count) =>
+        string.Join(", ", Enumerable.Range(0, count).Select(index => "@s" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
     /// <summary>
     /// Gets the statement deleting refresh tokens rotated before <c>@rotated_before</c> (#527): a value names its session,
     /// so a presented ancestor whose row is gone is still recognised as a reuse; the unrotated tip stays.
     /// </summary>
     internal string SweepRotatedTokensSql =>
-        $"DELETE FROM {RefreshTokens} WHERE id IN (SELECT id FROM {RefreshTokens} WHERE rotated_at < @rotated_before LIMIT @limit)";
+        $"DELETE FROM {RefreshTokens} WHERE id IN (SELECT id FROM {RefreshTokens} WHERE rotated_at < @rotated_before ORDER BY id LIMIT @limit)";
 
     /// <summary>Gets the statement revoking every live session of one account.</summary>
     internal string RevokeAccountSessionsSql =>

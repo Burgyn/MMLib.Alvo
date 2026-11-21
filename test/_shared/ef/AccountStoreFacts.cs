@@ -834,6 +834,30 @@ public abstract class AccountStoreFacts : IAsyncDisposable
     }
 
     /// <summary>
+    /// #527 review: two replicas sweeping sessions at once — on PostgreSQL they really overlap — finish with every dead
+    /// session gone and not one refresh token left naming a deleted session. Each sweep reads its dead ids once and deletes
+    /// the tokens and the sessions by them, so a concurrent commit cannot shift what the second delete names. A deadlock
+    /// between the two is the framework sweeper's one retry, reproduced here.
+    /// </summary>
+    [Fact]
+    public async Task Two_replicas_sweeping_at_once_leave_no_orphan_token()
+    {
+        var (store, services) = await StoreAsync();
+        for (var index = 0; index < 30; index++)
+        {
+            var (_, session) = await SignedInAsync(store);
+            await store.RefreshAsync(Refresh(session.RefreshTokenId, _now.AddMinutes(1)), Ct);
+            await store.RevokeSessionAsync(session.SessionId, SessionRevocations.Logout, _now.AddMinutes(2), Ct);
+        }
+
+        var sweep = new SessionSweep(_now.AddMinutes(3), _now.AddMinutes(3), _now.AddDays(-60), _now.AddMinutes(1), Limit: 4);
+        await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() => DrainAsync(store, sweep), Ct)));
+
+        (await CountOfAsync(services, AlvoFrameworkTables.AuthSessionsSuffix)).ShouldBe(0);
+        (await CountOfAsync(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)).ShouldBe(0, "no token outlives its session");
+    }
+
+    /// <summary>
     /// #527: rotated refresh tokens past the grace go; the unrotated tip stays and still refreshes — and a presented
     /// ancestor still kills the session (<see cref="A_swept_ancestor_presented_again_kills_its_live_session"/>).
     /// </summary>
@@ -1108,6 +1132,28 @@ public abstract class AccountStoreFacts : IAsyncDisposable
         var request = SignIn(Identity("sub-" + Guid.NewGuid().ToString("N")));
         var outcome = await store.SignInAsync(request, Ct);
         return (outcome.Account!.Value, request);
+    }
+
+    /// <summary>Sweeps sessions until a call deletes nothing, retrying a deadlock once as the framework sweeper does.</summary>
+    private static async Task DrainAsync(IAccountStore store, SessionSweep sweep)
+    {
+        while (true)
+        {
+            int deleted;
+            try
+            {
+                deleted = await store.SweepSessionsAsync(sweep, Ct);
+            }
+            catch (DbException failure) when (failure.SqlState == "40P01")
+            {
+                deleted = await store.SweepSessionsAsync(sweep, Ct);
+            }
+
+            if (deleted == 0)
+            {
+                return;
+            }
+        }
     }
 
     /// <summary>How many rows the framework table <paramref name="suffix"/> names holds.</summary>
