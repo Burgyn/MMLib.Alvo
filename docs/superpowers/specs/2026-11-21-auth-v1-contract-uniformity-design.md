@@ -622,14 +622,19 @@ same child (S2 D6). None of this changes.
 
 > **Decided by the maintainer 2026-11-21:** `POST /tenants` — supported as below, **implemented** (5a).
 > `POST /tokens` and `POST …/invitations` — **not supported**, option A, a recorded deviation: the roll below was not
-> taken. A header sent there is ignored. A client whose answer was lost lists (`GET /tokens`, `GET …/invitations`),
+> taken. A header sent there is **refused**, 422 `malformed-query` with the fix (`ShownOnceKey`; ruled 2026-11-21 on the
+> maintainer's behalf — a silently ignored key would let a retried mint leave a second live secret while the client
+> believed it replayed; the cost, a client that sends the header on every `POST` must drop it there). A client whose
+> answer was lost lists (`GET /tokens`, `GET …/invitations`),
 > revokes the one it cannot account for, and creates again, so no unseen secret is left live; the tokens and tenants
 > guides and `accounts.md` say so. Built as: the fingerprint is the operation id and the **validated name** rather than
 > the body's bytes (the body has one member and refuses any other, so spacing is not a different request), the scope is
 > `CreateTenantRequest.IdempotencyScopeOf` (`auth:tenants/<userId>`), the record is read after the account lock and
 > before the cap, and the 409 reuses the Management API's sentence (`ProblemResultFactory.IdempotencyKeySpent`, renamed
 > from `ManagementIdempotencyConflict`). Held by `TenantStoreFacts` (replay, conflict, two people's keys, five
-> concurrent creates with one key — both engines) and `TenantRoutesTests` (201 replay, 409, 422 ×3, the id-only replay).
+> concurrent creates with one key — both engines) and `TenantRoutesTests` (201 replay, 409, 422 `malformed-query` ×3 —
+> the Data API's slug for the same header — and the id-only replay); the refusal by `TokenRoutesTests` and
+> `InvitationRoutesTests.An_idempotency_key_is_refused_and_…`.
 
 #### `POST /tenants` — support, with the Data API's semantics
 
@@ -855,7 +860,7 @@ All **decided by the maintainer 2026-11-21**. Item 4's name: `auth.apiTokens` (�
 
 1. ~~**Split or share the creating budget (item 3).**~~ **Split**: `Tenants` and `ApiTokens` (§4).
 2. ~~**The roll on a keyed retry (item 5).**~~ **Not taken**: option A for tokens and invitations, a recorded deviation
-   (§6.3); `POST /tenants` takes the key.
+   (§6.3), and a key sent there is refused with 422, not ignored; `POST /tenants` takes the key.
 3. **Retention of the record family.** With only `POST /tenants` keyed, there is one new family, and it inherits the
    shared table's retention: none yet, #115. Not re-opened.
 4. ~~**The token 201 as the list item (item 1).**~~ **Ruled in scope (2026-11-21, on the maintainer's behalf),

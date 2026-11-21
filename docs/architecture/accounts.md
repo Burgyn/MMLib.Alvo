@@ -429,7 +429,8 @@ creation's own transaction (`TenantCreationKey`, `EfCoreTenantStore.RecordedAsyn
 requests make one tenant and four replays, and a replay at the cap still answers. A replay is 201 with the first
 `Location` and the creator's membership as it reads now — the Data API's "replay the state, never a stored rendering" —
 or, for a creator who has since left the tenant, `{ "tenantId" }` alone, the id the first 201 already gave them. The same
-key with another name is 409 `idempotency-conflict`; a key sent twice, blank or past `MaxIdempotencyKeyBytes` is 422.
+key with another name is 409 `idempotency-conflict`; a key sent twice, blank or past `MaxIdempotencyKeyBytes` is 422
+`malformed-query`, the Data API's slug for the same header.
 Recorded deviations from `draft-ietf-httpapi-idempotency-key-header-08`: 409, not §2.7's 422, for a reused key (Alvo's
 one meaning, commands Ruling 7); a concurrent duplicate waits on the lock and replays rather than §2.7's 409; and
 retention is the shared table's — none yet (#115). The fingerprint is the validated name, not the body's bytes: the body
@@ -663,7 +664,9 @@ For the owner routes, a member who is not an owner gets 403, and a non-member or
 **Creating an invitation takes no `Idempotency-Key`** — a recorded deviation (#542 item 5, decided by the maintainer).
 The answer carries the code, shown once and stored only as its hash, so a replay could not repeat it without storing a
 secret. A client whose 201 was lost lists the tenant's invitations (`GET …/invitations`, newest first), revokes the one
-it cannot account for (`DELETE …/invitations/{id}`) and creates a new one. A header sent anyway is ignored.
+it cannot account for (`DELETE …/invitations/{id}`) and creates a new one. A header sent anyway is **refused**, 422
+`malformed-query` with that fix (`ShownOnceKey`, ruled 2026-11-21): silently ignoring it would let a client believe a
+retry replayed when it created a second live code.
 **Create refuses rather than clamps.** `roles` is required, unique and within `assignableRoles` (`admin` never is). An
 owner-granting invitation must be single-use and live at most 7 days, or it is refused at `/maxUses` or `/expiresAt`.
 `expiresAt` is RFC 3339 with an offset, later than now and at most 30 days ahead. `email` is trimmed, at most 254
@@ -981,7 +984,8 @@ the registry.
 the secret, shown once and stored only as its hash, so a replay could not return it without storing it, which spec §14
 AC6 rules out. A client whose 201 was lost lists its tokens (`GET /tokens` — the lost one is there, with its name,
 `createdAt` and `lastUsedAt`), revokes it (`DELETE /tokens/{keyId}`) and mints again: an unseen secret is then never
-left live. A header sent anyway is ignored.
+left live. A header sent anyway is **refused**, 422 `malformed-query` with that fix (`ShownOnceKey`, ruled 2026-11-21):
+silently ignoring it would let a retried mint leave a second live secret behind while the client believed it replayed.
 
 **The body is refused, never clamped.** `name` is 1–100 characters under the display name's rules (`SelfServiceName`).
 `kind` is `personal` or `service`. `tenantId` is a UUID — optional for a personal token, required for a service one.
@@ -1085,8 +1089,8 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
   One budget for both, recorded; listing and revoking are not charged. **Reverted by #542 item 3:** each act has its own
   hard cap (`maxPerAccount`, 100 live tokens), so a shared budget only coupled them; minting is charged
   `Alvo:Api:RateLimits:ApiTokens` and tenant creation `Alvo:Api:RateLimits:Tenants`.
-- **D16** — public growth is exactly `ApiKeyKind`, `ApiKeyRecord.Kind`, `ApiKeyRecord.MintedBy`, `Auth.AccessTokens` and
-  `AuthApiTokens`. No new problem type.
+- **D16** — public growth is exactly `ApiKeyKind`, `ApiKeyRecord.Kind`, `ApiKeyRecord.MintedBy`, `Auth.ApiTokens` and
+  `AuthApiTokens` (renamed by #542 from `Auth.AccessTokens` and `AuthAccessTokens`). No new problem type.
 
 And where the implementation answered differently from the plan's first wording, or a test had to look further:
 

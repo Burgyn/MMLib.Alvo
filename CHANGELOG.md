@@ -16,8 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `idempotency-conflict`; a key sent twice, blank or too long is 422. Recorded in the Data API's idempotency table under
   the person's own scope, in the creation's transaction. **Not on `POST /auth/v1/tokens` or
   `POST /auth/v1/tenants/{id}/invitations`**, a recorded deviation: their answers carry a secret shown once and kept
-  only as a hash, so a replay could not repeat it. After a lost answer, list, revoke the one you cannot account for, and
-  create again. **Docs:** the tenants and tokens guides, `docs/architecture/accounts.md`.
+  only as a hash, so a replay could not repeat it. A key sent there is refused, 422 `malformed-query` with that fix, so a
+  retry is never mistaken for a replay. After a lost answer, list, revoke the one you cannot account for, and create
+  again. A bad key on `POST /auth/v1/tenants` (sent twice, blank, too long) is the same 422 `malformed-query`, the Data
+  API's slug for the header. **Docs:** the tenants and tokens guides, `docs/architecture/accounts.md`.
 - **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
   per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
   in the standalone host), a person can sign in through the app:
