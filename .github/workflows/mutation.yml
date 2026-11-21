@@ -661,19 +661,20 @@ name: Mutation
 #
 # RE-PROBED 2026-11-21, from CI's own logs: run 44834820709 (main 1512d5eb, after the accounts
 # stack) and the on-demand run 44850064624 (branch debt/mutation-legs, which adds only tests,
-# config fixes and two ProjectReferences). Three legs were cancelled at their budgets on the
-# first, which is the trigger the rule above names; the counts come from the discovery lines a
-# cancelled leg's uploaded log still carries (see the upload step).
+# config fixes and two ProjectReferences). Four legs were cancelled at their budgets on the
+# first, which is the trigger the rule above names; their counts come from the discovery lines
+# a cancelled leg's uploaded log still carries (see the upload step).
 #
 #   shard                     mutants: declared -> now    suite: declared -> now   outcome
 #   canary                           13 ->   13                 194 ->  230    0 K, honest
 #   expressions                    1949 -> 2591                3825 -> 5330    cancelled at 180
 #   rules, auth, rest              5715 -> 9557                3825 -> 5330    cancelled at 120
+#   data-ef-core                    584 ->  863                2156 -> 2903    cancelled at 240
 #   data-ef-rest                   1816 -> 2950                1286 -> 1560    cancelled at 120
 #   data-sqlite                      65 ->  122                 870 -> 1352    92.62 %, 52-56 min
 #   data-postgresql                  33 ->  122                 180 ->  262    94.26 %, 1.5 min
 #
-# THE THREE CANCELLED BUDGETS ARE NOT RE-SIZED HERE, for the 2026-10-30 reason: a cancelled
+# THE FOUR CANCELLED BUDGETS ARE NOT RE-SIZED HERE, for the 2026-10-30 reason: a cancelled
 # leg has no wall clock to double, only a lower bound. What the counts do say is that the
 # 360-minute ceiling is now the binding constraint, not the budget. rules/auth/rest at its last
 # measured cost (~6.2 s of runner time per mutant, against a suite 4.5x smaller) is ~990 min
@@ -1042,9 +1043,10 @@ jobs:
           - name: data-ef-core
             config: stryker-config.data-ef-core.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 584   # probed 2026-10-30 (was 459)
-            suite: 2156    # probed 2026-10-30 (was 1135); two test projects — the only leg that pays for a second one
-            timeout: 240   # RAISED WITH `additional-timeout`, and the two go together. Measured:
+            mutants: 863   # run 44834820709's own log, 2026-11-20 (was 584) — see RE-PROBED 2026-11-21
+            suite: 2903    # same run (was 2156); two test projects — the only data leg besides accounts-store that pays for a second one
+            timeout: 240   # CANCELLED AT THIS BUDGET on run 44834820709 — not re-sized, see RE-PROBED
+                           # 2026-11-21 in the header. Previously: RAISED WITH `additional-timeout`, and the two go together. Measured:
                            # 543 mutants took 60 min on CI while cutting 249 of them off at the
                            # timeout, and 74 min locally (10-core, --concurrency 4) once none were
                            # cut off. Letting a survivor run to completion cost ~2x on the one set
