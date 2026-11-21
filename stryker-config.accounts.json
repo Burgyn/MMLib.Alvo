@@ -12,9 +12,9 @@
       "!**/AssemblyInfo.cs"
     ],
     "thresholds": {
-      "high": 80,
-      "low": 40,
-      "break": 30
+      "high": 100,
+      "low": 99,
+      "break": 97
     },
     "reporters": [
       "progress",

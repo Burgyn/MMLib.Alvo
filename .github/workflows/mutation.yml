@@ -171,7 +171,8 @@ name: Mutation
 # where the reasoning lives. It asserts POSITIVELY — the run must not be vacuous, must
 # report the number of test projects the config declares, must not have lost 40 % of
 # either its mutants or its suite, and must not have spent more than 20 % of its mutants
-# on timeouts (check 6, above) — because the first version of the solution-mode check
+# on timeouts (check 6, above) or on RuntimeErrors (check 7, added 2026-11-21 after
+# commands-http printed 100.00 % on 1 Killed / 156 Errors and went green) — because the first version of the solution-mode check
 # was a negative `grep -q 'will mutate solution'`, which fails OPEN the moment a Stryker
 # release rewords that line. Note especially why the solution-mode check is the
 # TEST-PROJECT count and not the mutant count: solution mode leaves the mutant count
@@ -531,8 +532,29 @@ name: Mutation
 # ZERO RuntimeErrors: a TestHost suite is not by itself what turns commands-http's mutants into
 # errors. Its thresholds and matrix entry are no longer provisional: break = 80.36 − max(2 pp,
 # 0.71 pp) = 78.36 -> 78, `low` 80, `high` 90 (80 is passed); REAL SLACK
-# 225 − ceil(0.78 × 280) = 6. `timeout:` 210, 2x the job. accounts and accounts-store were
-# still running when this was written; they remain PROVISIONAL until their numbers land.
+# 225 − ceil(0.78 × 280) = 6. `timeout:` 210, 2x the job.
+#
+# ACCOUNTS IS MEASURED (same run): 1381 mutants (estimated 240 — the documentation files alone,
+# AccountsSchemas*.cs and AccountsDocumentation*.cs, are 740 of them), 398 tests, 1365 K / 12 S /
+# 0 T / 4 Errors, 99.13 %, a 186.5-minute job. Not provisional any more: break = 99.13 − max(2 pp,
+# 0.15 pp) = 97.13 -> 97, `low` 99, `high` 100; REAL SLACK 1365 − ceil(0.97 × 1377) = 29.
+# `timeout:` 340, which is NOT 2x: 373 is past the 360-minute ceiling (see the matrix entry).
+# The score was checked for #142's shape before it was believed, because 99 % is what that
+# defect produced: the 12 survivors are scattered through the run (ids 303-327, 1312-1318, 1454),
+# not bunched at the start of each test host as a process-poisoned suite would leave them; the
+# same suite scored self-service an ordinary 80.36 % in the same run; the canary was honest.
+# What the number does NOT say: most kills are by ~250 of the 398 tests at once (a mutant that
+# breaks host startup or the OpenAPI document fails every test that builds a host), and 732 of
+# the 1365 are documentation strings pinned by the document's snapshot. The 12 survivors are the
+# debt: 8 in AccountsDocumentation.Tenants.cs, 3 in OidcIdTokenVerifier.cs, 1 in PersonResolver.cs.
+#
+# ACCOUNTS-STORE TIMED OUT. It got past the two fixes above (the config key, then the direct
+# ProjectReference) and was cancelled at 300 minutes on run 44850064624 with 888 mutants and 1750
+# tests, so it has no report and no score: its thresholds stay PROVISIONAL. 300 minutes x 4
+# runners / 888 is more than 81 s of runner time per mutant; for comparison data-sqlite, on
+# Data.Sqlite.Tests alone, measured 102 s (122 mutants, 52 min). Two assemblies per mutant is the
+# data-ef-core cost again, and no budget under the ceiling holds it. The re-shard and the
+# measurement it needs are in RE-SHARDING THE LONG LEGS below.
 #
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
@@ -616,6 +638,23 @@ name: Mutation
 # trace") on just those legs, because a trace log of a big shard is far too large to keep.
 # scripts/test-assert-mutation-run now refuses any config key outside the allowed set, on the PR.
 #
+# #486's COMMANDS-HTTP HALF, CLOSED AS FAR AS ONE RUN CAN CLOSE IT. Run 44850064624 is the first
+# since 2026-11-12 to run this leg: 157 mutants, 1236 tests, 1 Killed / 0 Survived / 0 Timeout /
+# 156 Errors in 4 h 02 min, "100.00 %", exit 0 — a GREEN leg on one scored mutant. What it
+# settles: the json report gives every one of the 156 the same `statusReason`, "The test host
+# crashed or became unreachable while testing this mutant", so these are not test failures, and
+# not timeouts (Stryker would say Timeout): the MTP host process dies or stops answering, at
+# ~6 min per mutant per runner. What it does NOT settle is why. The trace log that was the point
+# of `--log-to-file` was written but not uploaded — the upload glob was `logs/*.log` and matched
+# nothing; it is `logs/**` now. Two leads, neither verified: memory (four Api.Tests hosts of 1236
+# tests on a 16 GB runner, where the honest 2026-10-30 run was on a 10-core box with 24 errors of
+# 145, and the Accounts.Tests legs in the same run had 0 and 4), and one test that kills its host
+# under any mutant. Next steps, in order: read `logs/` from the next run; then a single dispatch of
+# this leg at `--concurrency 2`, which separates the two. Meanwhile scripts/assert-mutation-run's
+# check 7 fails a leg whose errors exceed 20 % of its tested mutants, so this leg now goes RED
+# instead of green; its `break` 40 and `mutants`/`suite` floors are not re-cut from a run that
+# measured nothing.
+#
 # WHY data-ef IS TWO LEGS, AND WHY IT IS SPLIT BY *TEST PROJECT* RATHER THAN BY FILE.
 # The single data-ef leg was killed by `timeout-minutes: 120` on three consecutive main
 # commits (#205), and every shard's declared counts had gone stale. Re-probed
@@ -691,6 +730,44 @@ name: Mutation
 # for 9557 mutants; no budget fits that, and the lever is the re-shard #143 and #245 already
 # describe, or `mutation-level: Basic` (see TWO ONE-LINE LEVERS) — a decision, not a number.
 # data-sqlite was 4 min short of its 60 on both runs and is now 120.
+#
+# RE-SHARDING THE LONG LEGS — THE PLAN, NOT YET DONE, AND WHY IT NEEDS ONE MEASURING RUN FIRST.
+# Ruled 2026-11-21 on the maintainer's behalf: re-shard rather than lower `mutation-level`. Five
+# legs cannot finish under the ceiling (expressions, rules/auth/rest, data-ef-rest, data-ef-core,
+# accounts-store); a shard has to be sized from RUNNER SECONDS PER MUTANT on its suite, and for
+# none of those suites is that number known — every one was cancelled, so its log gives a LOWER
+# bound only (budget x 4 runners / mutants):
+#
+#   leg                 mutants  suite (assemblies)       lower bound    measured on a sibling
+#   expressions            2591  5330 (Alvo.Tests)         > 16.7 s        —
+#   rules, auth, rest      9557  5330 (Alvo.Tests)         >  3.0 s        —
+#   data-ef-rest           2950  1560 (EF.Tests)           >  9.8 s        2 min for 565 on 2026-09-14
+#   data-ef-core            863  2903 (EF + Sqlite.Tests)  > 66.7 s        66 min for 855 on 2026-11-12
+#   accounts-store          888  1750 (Sqlite + Accounts)  > 81.1 s        —
+#
+# and what the legs that DID finish in run 44850064624 measured, for scale: accounts 32 s
+# (99 % killed, so nearly every run bails early), self-service 87 s (80 %), data-sqlite 102 s.
+# Read across, survivors cost several times what kills do, so the per-mutant cost of a leg
+# depends on its own kill rate as much as on its suite. At the measured 30-100 s range,
+# rules/auth/rest alone is ~1200-4000 runner-minutes — 7 to 22 shards of ~180 minutes — and the
+# five legs together come to roughly 15-35 shards, against the 20 jobs a public repository runs
+# at once. That is a re-shard the size of a redesign, and guessing it would be the fabrication
+# this header keeps refusing. So:
+#   1. MEASURE FIRST: one on-demand run on a throwaway branch with each of the five configs cut
+#      to a ~150-mutant sample (one directory each: Expressions/Cel*, Rules/**, Internal/Sql*,
+#      EfAlvoData.cs, EfCoreTenantStore*.cs) and `--log-to-file`. ~1-2 h. It gives runner
+#      seconds per mutant per suite, and shows whether Stryker's trace log lists each mutant's
+#      file — which is the per-file count a split needs and a cancelled leg cannot otherwise give.
+#   2. SPLIT BY `mutate` GLOB along the partition #245 already uses for rules/auth/rest (Events,
+#      Migrations, Descriptor, Rules, Auth, Internal+root), and by store for accounts-store (the
+#      account store / the tenant registry / invitations + app tokens), each shard sized to
+#      <= ~180 measured minutes so a 300-360 budget is >= 1.7x — the data-ef precedent (#205),
+#      with membership re-checked by measurement, not by proxy.
+#   3. DECIDE THE CADENCE, which the numbers force: 15-35 legs cannot run on every push to main
+#      (a run would take two waves of 20 jobs, ~12 h, and merges would queue behind each other).
+#      Either the long legs move to a schedule (nightly or weekly) while the cheap ones stay per
+#      push, or they run with Stryker's `since` against the previous main commit, mutating only
+#      what the merge touched. Neither is a mutation-level change; both are a maintainer call.
 #
 # THE MODEL THAT ACTUALLY PREDICTS THE COST IS NOT mutants x test COUNT. Measured on
 # run 33593316805 — the last data-ef leg that SUCCEEDED: 888 mutants, mutation loop
@@ -1024,8 +1101,8 @@ jobs:
           - name: commands and webhooks over HTTP
             config: stryker-config.commands-http.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
-            mutants: 149    # 145 probed 2026-10-30 + ~4 ESTIMATED for ManagementCallerFilter (25 lines x 0.16)
-            suite: 1034
+            mutants: 157    # run 44850064624's own log, 2026-11-21 (was 149, partly estimated)
+            suite: 1236     # same run (was 1034)
             timeout: 280    # measured 102.7 min run to completion (10-core, --concurrency 4, 0
                             # timeouts, 24 runtime errors); ~139 min scaled to a 4-vCPU runner the
                             # way data-ef-core's was, and 2x that. Cut it to 2x a real post-merge
@@ -1090,35 +1167,25 @@ jobs:
             mutants: 122    # run 44850064624, 2026-11-21 (was 33; 68 by 2026-11-07, 110 by 11-12, unreported)
             suite: 262      # run 44850064624, 2026-11-21 (was 180)
             timeout: 30     # measured 2 min (1 min 31 s of Stryker on run 44850064624)
-          # THE ACCOUNTS LEGS — accounts and accounts-store UNMEASURED (self-service measured
-          # 2026-11-21). Every number on those two legs is an estimate, and so are their configs'
-          # thresholds; "THE ACCOUNTS LEGS" in the header says how each
-          # was derived and what the first real run must replace it with.
+          # THE ACCOUNTS LEGS — accounts and self-service measured 2026-11-21; accounts-store
+          # timed out and is still PROVISIONAL. "THE ACCOUNTS LEGS" in the header has each.
           - name: accounts
             config: stryker-config.accounts.json
             project: src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj
-            mutants: 240    # ESTIMATED lower bound, not a probe (code lines x 0.16); re-probe on the first run
-            suite: 237      # MTP's own count, 2026-11-14 — not yet Stryker's
-            timeout: 300    # MEASURING BUDGET for the first run that can start at all (the config
-                            # refused `log-to-file` until 2026-11-21). The estimate was 120: one ~11 s
-                            # assembly, up to ~765 mutants at concurrency 4 is ~45 min on a 10-core box,
-                            # ~60 on a 4-vCPU runner, and 2x that. Raised because a cancelled leg writes
-                            # no report, so no score and no first measurement, and commands-http's TestHost
-                            # suite spent ~6 min per mutant erroring. Cut to 2x the first run's wall clock.
+            mutants: 1381   # run 44850064624, 2026-11-21 (estimated 240) — see ACCOUNTS IS MEASURED
+            suite: 398      # same run (MTP's own count was 237 on 2026-11-14)
+            timeout: 340    # 2x the measured job (186.5 min) is 373, past GitHub's 360-minute ceiling;
+                            # 340 is 1.8x and the most the ceiling leaves room for. The next growth of
+                            # this leg is a split, not a budget — see ACCOUNTS IS MEASURED.
             debug-log: true
           - name: accounts-store
             config: stryker-config.accounts-store.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
-            mutants: 247    # ESTIMATED lower bound, not a probe (code lines x 0.16, account store
-                            # 70 + tenant registry 69 + invitations 54 — S4's three new files, 336
-                            # code lines — + app tokens 54, S5's two store files, 340 code
-                            # lines); still an estimate, re-probe on the first run
-            suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
-                            # (S3's tenant-store facts add to the first; a floor, so left as measured)
-            timeout: 300    # MEASURING BUDGET, as on `accounts` above. The estimate was 140: two
-                            # assemblies (~13 s + ~11 s a run), up to ~416 mutants at concurrency 4 is
-                            # ~52 min on a 10-core box, ~70 on a runner, and 2x that. Cut to 2x the
-                            # first run's wall clock.
+            mutants: 888    # run 44850064624's own log, 2026-11-21 (estimated 247)
+            suite: 1750     # same run: Data.Sqlite.Tests + Accounts.Tests (estimated 1465)
+            timeout: 300    # CANCELLED AT THIS BUDGET on run 44850064624 with no report, so it is still
+                            # unmeasured and its thresholds are still PROVISIONAL. Needs a re-shard, not
+                            # a budget — see ACCOUNTS-STORE TIMED OUT in the header.
             debug-log: true
           - name: self-service
             config: stryker-config.self-service.json
@@ -1234,13 +1301,15 @@ jobs:
           name: stryker-log-${{ matrix.name }}
           # `json` reporter -> mutation-report.json: one entry per mutant with file, line,
           # mutator, replacement and status, so a survivor is readable instead of only a
-          # per-file count (#486). `logs/` is Stryker's own debug log, written only by the legs
+          # per-file count (#486). `logs/**`, not `logs/*.log`: the narrower glob matched nothing
+          # on run 44850064624, so four legs ran with `--log-to-file` and uploaded no trace log
+          # (Stryker names its file by its own scheme; take the directory). `logs/` is Stryker's own debug log, written only by the legs
           # whose matrix entry sets `debug-log: true` (`--log-to-file`, see the step above) —
           # the only place a RuntimeError's cause can show up.
           path: |
             test/stryker-output.log
             test/StrykerOutput/**/reports/mutation-report.json
-            test/StrykerOutput/**/logs/*.log
+            test/StrykerOutput/**/logs/**
           if-no-files-found: ignore
           retention-days: 30
 
