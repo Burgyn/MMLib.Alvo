@@ -92,6 +92,22 @@ await tp.Test("A token signed by a key the issuer never published is refused.", 
     Equal(200, (int)tp.Responses["DanaSignIn"].StatusCode);
 });
 
+await tp.Test("An ID token whose azp names another client is invalid_request, answered exactly as another client's aud.", async () =>
+{
+    async Task<string> RefusalWithoutTraceId(string request)
+    {
+        var response = tp.Responses[request];
+        Equal(400, (int)response.StatusCode);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(await response.Content.ReadAsStringAsync()).AsObject();
+        Equal("invalid_request", body["error"]?.GetValue<string>());
+        body.Remove("traceId");
+        return body.ToJsonString();
+    }
+
+    // One answer for both: a caller learns nothing about which claim failed.
+    Equal(await RefusalWithoutTraceId("WrongAudienceSignIn"), await RefusalWithoutTraceId("ForeignAzpSignIn"));
+});
+
 await tp.Test("An ID token starts at most one session.", async () =>
 {
     var replay = tp.Responses["DanaReplaysIdToken"];

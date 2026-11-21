@@ -32,17 +32,24 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// Google Cloud service account can mint an ID token whose <c>aud</c> it chooses freely, ours included, signed by Google;
 /// its <c>azp</c> is the service account's own numeric id, so under <c>signUp: open</c> any GCP project could create
 /// accounts by script. A person's token carries the OAuth client they signed in through in <c>azp</c>, which a mobile app's
-/// configuration lists beside the web client. An absent <c>azp</c> changes nothing. A mismatch is refused as
-/// <see cref="IdTokenRefusal.Audience"/>, the answer another app's <c>aud</c> gets, so no caller learns which claim failed.
-/// An empty string or JSON <c>null</c> is refused here, never read as absent; a number or an array never gets here —
-/// IdentityModel reads <c>azp</c> as a string and refuses the token as malformed. A token with no <c>azp</c> still passes
-/// on <c>aud</c> alone: what closes the service-account hole is that Google puts one in every such token. This withdraws the S2 plan's recorded deviation ("<c>azp</c> is not checked").
+/// configuration lists beside the web client. <b>An absent <c>azp</c> requires a single <c>aud</c></b> (§3.1.3.7 item 4,
+/// "If the ID Token contains multiple audiences, the Client SHOULD verify that an azp Claim is present"); otherwise it
+/// changes nothing, and a single-audience token with no <c>azp</c> still passes on <c>aud</c> alone — what closes the
+/// service-account hole is that Google puts an <c>azp</c> in every such token. An empty string or JSON <c>null</c> is
+/// refused, never read as absent; a number or an array never gets here — IdentityModel reads <c>azp</c> as a string and
+/// refuses the token as malformed. This withdraws the S2 plan's recorded deviation ("<c>azp</c> is not checked") and
+/// implements option A of the hardening design's §4.6 (ruling Q8).
+/// </para>
+/// <para>
+/// <b>An <c>azp</c> refusal reuses <see cref="IdTokenRefusal.Audience"/></b>, the answer another app's <c>aud</c> gets.
+/// The design's separate <c>IdTokenRefusal.AuthorizedParty</c> was deliberately not added: one value keeps the two
+/// indistinguishable to a caller (no oracle on which claim failed), and the operator's log line tells them apart.
 /// </para>
 /// <para>
 /// <b>Nothing about the token is logged</b>: a refusal is a value, and IdentityModel's PII switch stays off. Two lines
 /// reach the operator only: an unreachable provider (its name and authority), and an audience refusal at Information
-/// naming the provider and <em>which</em> claim — <c>aud</c> or <c>azp</c> — named a client it is not configured with, never
-/// the claim's value. The caller's answer is the same either way; the line is how an operator tells a mobile client id
+/// naming the provider and <em>which</em> claim — <c>aud</c> or <c>azp</c> — failed to name a client it is configured with,
+/// never the claim's value. The caller's answer is the same either way; the line is how an operator tells a mobile client id
 /// missing from <c>ClientIds</c> from a stranger's token.
 /// </para>
 /// </remarks>
@@ -181,7 +188,7 @@ internal sealed partial class OidcIdTokenVerifier : IIdentityVerifier, IDisposab
     private static bool Publishes(OpenIdConnectConfiguration configuration, string kid)
         => configuration.SigningKeys.Any(key => string.Equals(key.KeyId, kid, StringComparison.Ordinal));
 
-    /// <summary>The claim — <c>aud</c> or <c>azp</c> — naming a client the provider is not configured with, if either does.</summary>
+    /// <summary>The claim — <c>aud</c> or <c>azp</c> — that fails to name a client the provider is configured with, if either does.</summary>
     private static string? ForeignClientClaim(OidcProvider provider, JsonWebToken token)
     {
         if (!OnlyOurAudiences(provider, token))
@@ -202,12 +209,13 @@ internal sealed partial class OidcIdTokenVerifier : IIdentityVerifier, IDisposab
         => token.Audiences.All(audience => provider.ClientIds.Contains(audience, StringComparer.Ordinal));
 
     /// <summary>
-    /// Whether the token's <c>azp</c> is absent or a string naming a configured client id — an empty one or JSON
-    /// <c>null</c> never is.
+    /// Whether the token's <c>azp</c> is a string naming a configured client id, or absent beside a single <c>aud</c> —
+    /// an empty one or JSON <c>null</c> never is.
     /// </summary>
     private static bool OurAuthorizedParty(OidcProvider provider, JsonWebToken token)
-        => !token.TryGetPayloadValue<object>(AuthorizedPartyClaim, out var azp)
-            || (azp is string party && provider.ClientIds.Contains(party, StringComparer.Ordinal));
+        => token.TryGetPayloadValue<object>(AuthorizedPartyClaim, out var azp)
+            ? azp is string party && provider.ClientIds.Contains(party, StringComparer.Ordinal)
+            : token.Audiences.Count() == 1;
 
     private static TokenValidationParameters Parameters(
         OidcProvider provider, OpenIdConnectConfiguration configuration, string[] algorithms) => new()
@@ -284,8 +292,9 @@ internal sealed partial class OidcIdTokenVerifier : IIdentityVerifier, IDisposab
     [LoggerMessage(
         EventId = 6403,
         Level = LogLevel.Information,
-        Message = "Identity provider {Provider} refused an ID token: its {Claim} names a client id the provider is not "
-            + "configured with. The caller was told only that the token was refused. If the token came from your own app "
-            + "signing in through another OAuth client (Android, iOS), add that client id to the provider's ClientIds.")]
+        Message = "Identity provider {Provider} refused an ID token on its {Claim} claim, which must name a client id the "
+            + "provider is configured with (a token without azp must have a single aud). The caller was told only that the "
+            + "token was refused. If the token came from your own app signing in through another OAuth client (Android, "
+            + "iOS), add that client id to the provider's ClientIds.")]
     private static partial void ClientRefused(ILogger logger, string provider, string claim);
 }

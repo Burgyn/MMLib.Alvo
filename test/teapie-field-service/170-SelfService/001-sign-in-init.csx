@@ -27,6 +27,11 @@ Person("Olga", "outsider", "olga", "Olga Outsider");
 // signature can tell this token from her real one.
 tp.SetVariable("OlgaForgedIdToken", IdTokenSignedByAnotherKey($"outsider-{Guid.NewGuid():N}", tp.GetVariable<string>("OlgaEmail"), "Olga Outsider"));
 
+// Two properly signed tokens minted for a client this Alvo does not list: one names it in `aud`, the other only in
+// `azp` (#544: a Google service account's token for our `aud` carries its own id there). Both refused, alike.
+tp.SetVariable("OlgaWrongAudienceIdToken", IdTokenForAnotherClient($"outsider-{Guid.NewGuid():N}", tp.GetVariable<string>("OlgaEmail"), "Olga Outsider", audience: "another-client"));
+tp.SetVariable("OlgaForeignAzpIdToken", IdTokenForAnotherClient($"outsider-{Guid.NewGuid():N}", tp.GetVariable<string>("OlgaEmail"), "Olga Outsider", azp: "another-client"));
+
 // The run's own region, so nothing here leans on 010-Seed's rows: `code` is unique and at most 12 characters.
 tp.SetVariable("RegionCode", "SS" + run.ToUpperInvariant());
 

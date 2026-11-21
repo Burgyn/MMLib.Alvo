@@ -673,7 +673,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — the OAuth client the person signed in through — it must be one of `Alvo:Accounts:Providers:Google:ClientIds`, as
   every `aud` already had to be. A Google Cloud service account can mint a Google-signed ID token for any `aud`, ours
   included, so under `signUp: open` it could create accounts by script; Google service-account ID tokens, which carry
-  `azp` (the account's own numeric id), are now refused. A token without `azp` still passes on `aud` alone — what
+  `azp` (the account's own numeric id), are now refused. A token without `azp` must carry a single `aud` (OIDC Core
+  §3.1.3.7 item 4); with one, it still passes on `aud` alone — what
   closes the hole is Google's own behaviour of putting `azp` in every service-account token, not anything Alvo can
   require of a token that omits it. **An app that signs in from Android or iOS must list those client ids beside the
   web one**, or its people are refused. An `azp` that is empty or JSON `null` is refused, never read as absent; a

@@ -34,6 +34,22 @@ Content-Type: application/x-www-form-urlencoded
 
 grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{OlgaForgedIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
 
+### A properly signed token minted for another client's `aud`
+# @name WrongAudienceSignIn
+## TEST-EXPECT-STATUS: [400]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{OlgaWrongAudienceIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
+### A properly signed token for our `aud` whose `azp` names another client (#544)
+# @name ForeignAzpSignIn
+## TEST-EXPECT-STATUS: [400]
+POST {{fsBaseUrl}}/auth/v1/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token={{OlgaForeignAzpIdToken}}&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aid_token
+
 ### Theo signs in
 # @name TheoSignIn
 ## TEST-EXPECT-STATUS: [200]

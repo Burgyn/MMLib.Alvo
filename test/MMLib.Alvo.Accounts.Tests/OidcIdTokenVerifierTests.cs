@@ -155,6 +155,27 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         (await verifier.VerifyAsync(token, AnyProvider, Ct)).ShouldBe(IdentityVerification.Refused(Enum.Parse<IdTokenRefusal>(expected)));
     }
 
+    /// <summary>
+    /// OIDC Core §3.1.3.7 item 4: a token for several audiences must say which one it was issued to. Both audiences here
+    /// are configured, so only the missing <c>azp</c> refuses it — and the operator's line names <c>azp</c>.
+    /// </summary>
+    [Fact]
+    public async Task A_token_without_azp_and_several_audiences_is_refused()
+    {
+        var log = new CapturingLogger();
+        var options = Options(TestOidcIssuer.Authority);
+        options.ClientIds.Add(MobileClientId);
+        using var verifier = Verifier(GooglePreset.From(options) with { Issuers = new HashSet<string> { TestOidcIssuer.Authority } }, log);
+
+        var withoutAzp = await verifier.VerifyAsync(_issuer.Mint("sub-1", audiences: [ClientId, MobileClientId]), AnyProvider, Ct);
+        var withAzp = await verifier.VerifyAsync(
+            _issuer.Mint("sub-1", audiences: [ClientId, MobileClientId], azp: MobileClientId), AnyProvider, Ct);
+
+        withoutAzp.ShouldBe(IdentityVerification.Refused(IdTokenRefusal.Audience));
+        log.Entries.ShouldHaveSingleItem().Properties.ShouldContainKeyAndValue("Claim", "azp");
+        withAzp.Refusal.ShouldBeNull();
+    }
+
     [Fact]
     public async Task A_json_null_azp_is_refused_never_read_as_absent()
     {
