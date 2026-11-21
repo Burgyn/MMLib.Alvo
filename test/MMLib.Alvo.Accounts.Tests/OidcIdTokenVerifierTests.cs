@@ -20,6 +20,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
 {
     private const string ClientId = "client-1";
 
+    private const string MobileClientId = "client-1-ios";
+
     private static readonly DateTimeOffset _now = new(2026, 11, 13, 9, 0, 0, TimeSpan.Zero);
 
     private readonly FakeTimeProvider _clock = new(_now);
@@ -63,6 +65,28 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
         verification.ToString().ShouldNotContain(verification.SubjectTokenId!);
     }
 
+    /// <summary>
+    /// #544: an <c>azp</c> names the OAuth client the person signed in through, so when present it must be one of the
+    /// configured client ids — a mobile client's beside the web one the backend verifies against — and its absence changes
+    /// nothing. A Google service account can mint an ID token for any <c>aud</c>, ours included, but its <c>azp</c> is its
+    /// own numeric id, so it signs nobody in (the refusal cases above).
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(ClientId)]
+    [InlineData(MobileClientId)]
+    public async Task An_azp_naming_a_configured_client_or_none_is_accepted(string? azp)
+    {
+        var options = Options(TestOidcIssuer.Authority);
+        options.ClientIds.Add(MobileClientId);
+        using var verifier = Verifier(GooglePreset.From(options) with { Issuers = new HashSet<string> { TestOidcIssuer.Authority } });
+
+        var verification = await verifier.VerifyAsync(_issuer.Mint("sub-1", azp: azp), AnyProvider, Ct);
+
+        verification.Refusal.ShouldBeNull();
+        verification.Identity!.Subject.ShouldBe("sub-1");
+    }
+
     [Fact]
     public async Task Without_a_jti_the_subject_token_id_is_the_issuer_and_the_token_s_hash()
     {
@@ -79,6 +103,8 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
     [InlineData("another app's client id", nameof(IdTokenRefusal.Audience))]
     [InlineData("ours beside another app's", nameof(IdTokenRefusal.Audience))]
     [InlineData("ours with a trailing slash", nameof(IdTokenRefusal.Audience))]
+    [InlineData("azp a service account's numeric id", nameof(IdTokenRefusal.Audience))]
+    [InlineData("azp another app's client id", nameof(IdTokenRefusal.Audience))]
     [InlineData("signed by another key", nameof(IdTokenRefusal.Signature))]
     [InlineData("alg none", nameof(IdTokenRefusal.Algorithm))]
     [InlineData("HS256", nameof(IdTokenRefusal.Algorithm))]
@@ -102,6 +128,9 @@ public sealed class OidcIdTokenVerifierTests : IDisposable
             "another app's client id" => _issuer.Mint("sub-1", audience: "another-app"),
             "ours beside another app's" => _issuer.Mint("sub-1", audiences: [ClientId, "another-app"]),
             "ours with a trailing slash" => _issuer.Mint("sub-1", audience: ClientId + "/"),
+            "azp a service account's numeric id" => _issuer.Mint(
+                "112233445566778899000", email: "ci@project.iam.gserviceaccount.com", azp: "112233445566778899000"),
+            "azp another app's client id" => _issuer.Mint("sub-1", azp: "another-app"),
             "signed by another key" => stranger.Mint("sub-1"),
             "alg none" => _issuer.Mint("sub-1", alg: "none"),
             "HS256" => _issuer.Mint("sub-1", alg: "HS256"),

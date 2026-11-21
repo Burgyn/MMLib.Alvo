@@ -26,10 +26,15 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// <c>aud: [another-app, ours]</c> for another relying party, and that token must not sign anyone in here.
 /// </para>
 /// <para>
-/// <b>Deviation: <c>azp</c> is not checked.</b> OIDC Core errata set 2 reworded §3.1.3.7 items 4–5 so that <c>azp</c> is
-/// validated only as the extension that introduced it says. Google's documented server-side check is
-/// <c>aud</c> alone, and an Android or iOS sign-in carries the mobile client's id in <c>azp</c> while <c>aud</c> names the
-/// web client the backend configured; requiring it would refuse Google's own mobile flow.
+/// <b>An <c>azp</c>, when present, must be a configured client id too</b> (#544; §3.1.3.7 item 5, "the Client SHOULD
+/// verify that its client_id is the Claim Value", read as the set of client ids this deployment configures — web, iOS,
+/// Android — since Alvo is one relying party fronting several OAuth clients). <c>aud</c> alone is not enough for Google: a
+/// Google Cloud service account can mint an ID token whose <c>aud</c> it chooses freely, ours included, signed by Google;
+/// its <c>azp</c> is the service account's own numeric id, so under <c>signUp: open</c> any GCP project could create
+/// accounts by script. A person's token carries the OAuth client they signed in through in <c>azp</c>, which a mobile app's
+/// configuration lists beside the web client. An absent <c>azp</c> changes nothing. A mismatch is refused as
+/// <see cref="IdTokenRefusal.Audience"/>, the answer another app's <c>aud</c> gets, so no caller learns which claim failed.
+/// This withdraws the S2 plan's recorded deviation ("<c>azp</c> is not checked").
 /// </para>
 /// <para>
 /// <b>Nothing about the token is logged</b>: a refusal is a value, the one log line (an unreachable provider) names the
@@ -40,6 +45,8 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
 {
     /// <summary>The named <see cref="HttpClient"/> discovery documents and keys are fetched with.</summary>
     internal const string HttpClientName = "alvo-accounts-oidc";
+
+    private const string AuthorizedPartyClaim = "azp";
 
     private static readonly TimeSpan _skew = TimeSpan.FromMinutes(2);
 
@@ -122,7 +129,7 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
             return IdentityVerification.Refused(RefusalOf(result.Exception));
         }
 
-        if (!OnlyOurAudiences(provider, token))
+        if (!OnlyOurAudiences(provider, token) || !OurAuthorizedParty(provider, token))
         {
             return IdentityVerification.Refused(IdTokenRefusal.Audience);
         }
@@ -165,6 +172,11 @@ internal sealed class OidcIdTokenVerifier : IIdentityVerifier, IDisposable
 
     private static bool OnlyOurAudiences(OidcProvider provider, JsonWebToken token)
         => token.Audiences.All(audience => provider.ClientIds.Contains(audience, StringComparer.Ordinal));
+
+    /// <summary>Whether the token's <c>azp</c> is absent or one of the configured client ids — an empty one never is.</summary>
+    private static bool OurAuthorizedParty(OidcProvider provider, JsonWebToken token)
+        => !token.TryGetPayloadValue<object>(AuthorizedPartyClaim, out var azp)
+            || (azp is string party && provider.ClientIds.Contains(party, StringComparer.Ordinal));
 
     private static TokenValidationParameters Parameters(
         OidcProvider provider, OpenIdConnectConfiguration configuration, string[] algorithms) => new()

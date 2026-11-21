@@ -196,6 +196,7 @@ The token endpoint follows the same pattern:
 | A host without accounts maps no `/auth` route, needs no key file and ignores `Authorization` (it does get the five empty `_auth_*` tables and the CORS services); `Alvo:Auth:HeaderName = Authorization` is refused beside accounts (Review Focus 4) | `HostAccountsTests`; `OpenApiDocumentTests.Without_a_person_resolver_there_is_no_bearer_scheme`; `AccountsOptionsTests.An_api_key_header_named_authorization_is_refused_beside_accounts` |
 | An `http://` provider authority needs `AllowHttpMetadata`, and `AllowHttpMetadata` is refused at startup outside Development, exactly as an unset `Issuer` is, naming the setting and why; in Development it starts with a warning on every start. It exists for the end-to-end stack's test issuer only, and only Accounts reads the host environment, so that stack can run Development safely (spec §11.2) | `AccountsOptionsTests.Allowing_http_metadata_is_refused_outside_development_naming_the_setting`, `…An_http_authority_is_refused_unless_allowed_in_development_and_then_warned_on_every_start` |
 | An API key beside sign-in works exactly as before; a key and a Bearer together are 401 ambiguous | `AccountsEngineFacts.An_api_key_beside_sign_in_behaves_exactly_as_before`; `CredentialReadingTests` |
+| An ID token's `azp`, when present, names a configured client id — a service account's own id or another app's is refused exactly as another app's `aud`; an absent one changes nothing (#544) | `OidcIdTokenVerifierTests.An_id_token_is_refused` (`azp …` cases), `…An_azp_naming_a_configured_client_or_none_is_accepted`; `TokenExchangeTests.An_azp_naming_another_client_is_refused_exactly_as_another_audience` |
 | Clock boundaries: `iat` 5 min in, 5 min + 1 s out; ID-token `exp` ± 2 min; access token 30 s past `exp` in, 31 s out; reuse at 10 s replays, at 11 s kills (Review Focus 5) | `OidcIdTokenVerifierTests.The_boundaries_are_accepted`, `…An_id_token_is_refused`; `AccessTokensTests.A_token_validates_within_30_seconds_past_exp_and_not_31`; `RefreshGrantTests.A_reuse_at_exactly_ten_seconds_answers_the_same_child` |
 | An ID token starts at most one session; an account is found by `(provider, subject)`, never by email | `TokenExchangeTests.A_replayed_id_token_starts_no_second_session`; `AccountStoreFacts.A_second_sign_in_finds_the_account_by_provider_and_subject_never_by_email` |
 | Two people never see each other's rows | `AccountsEngineFacts.Two_people_never_see_each_other_s_rows` |
@@ -241,7 +242,13 @@ D1 (a tenant registry) and D8 (no tenant header means the personal tenant) are S
 The S2 plan adds its own recorded deviations:
 
 - **Two metadata URLs** for one document (D7).
-- **`azp` is not checked.** Google's mobile flow carries the mobile client in `azp`; see `OidcIdTokenVerifier`.
+- ~~**`azp` is not checked.**~~ **Withdrawn by [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544).** An ID token's
+  `azp`, when present, must be one of the provider's configured `ClientIds` (OIDC Core §3.1.3.7 item 5, read as the set
+  of client ids the deployment configures). `aud` alone let a Google Cloud service account — which mints ID tokens for
+  any `aud` it chooses, with its own numeric id in `azp` — sign up under `signUp: open` by script. Google's mobile flow
+  carries the mobile client in `azp` while `aud` names the web client, so **an app that signs in from Android or iOS must
+  list those client ids too**. An absent `azp` changes nothing, and a mismatch is refused as another app's `aud` is: one
+  answer, no oracle. Design: `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md` §4.6, ruling Q8.
 - **Endpoint filters instead of CORS and rate-limit middleware** (D3; see `data-api.md`, *CORS and rate limits*).
 - **The display name is not refreshed from later sign-ins** (D8).
 - **`/logout` ends the bearer's session.** Alvo does not implement RFC 7009 revocation (D16).
@@ -251,8 +258,8 @@ The S2 plan adds its own recorded deviations:
 - Tenants, memberships and every `selfService` refusal — S3, below.
 - Invitations (S4).
 - Personal and service tokens — S5, [below](#tokens-for-integrators-personal-and-service-tokens-s5).
-- Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation, and checking a Google ID
-  token's `azp`: [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544).
+- Key rotation (D12): one key per purpose, generation 1. Scheduled and emergency rotation:
+  [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544) (its `azp` half is done, see *Deviations* above).
 - Auth events and role-change audit (spec D9).
 - A sweep of sessions and refresh tokens (spec D10). Nothing deletes a `_auth_sessions` or `_auth_refresh_tokens` row
   yet, so both tables only grow: a row per sign-in and per refresh. The sweep must keep a session's `subject_token_id`
@@ -1397,5 +1404,5 @@ Still open after these fixes, each filed: the HTTP contract's coherence before v
 ([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
 lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
 sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
-race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+race fact; signing-key rotation ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
 stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).
