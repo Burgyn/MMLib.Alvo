@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Tests.Data;
 using MMLib.Alvo.Tests.Ef;
 using Npgsql;
 
@@ -17,6 +18,11 @@ public sealed class PostgreSqlRenamedConstraintNameTests(PostgresFixture fixture
     protected override IServiceProvider Services => _services;
 
     protected override bool Runnable => !OperatingSystem.IsWindows();
+
+    protected override bool ListsThePrimaryKeyAsAnIndex => true;
+
+    protected override Task<IReadOnlyList<string>> IndexNamesAsync(string table) =>
+        CatalogQuery.NamesAsync(_services, "SELECT indexname::text FROM pg_indexes WHERE schemaname = 'public' AND tablename = @table", table);
 
     public async ValueTask InitializeAsync()
     {

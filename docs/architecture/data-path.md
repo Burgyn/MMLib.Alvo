@@ -1392,9 +1392,13 @@ is not renamed; the residual's drop is readdressed to the name the database hold
 is renamed through the dialect port's internal `RenamePrimaryKeyStatement` — `ALTER TABLE … RENAME CONSTRAINT` on
 PostgreSQL, nothing on SQLite, which keeps a key's name only in the table's stored definition. The released references'
 indexes and alternate keys are still dropped and re-created rather than renamed, which on a large table costs an index
-build; that is a cost, not a defect, and is left as is. `RenamedConstraintNameFacts` pins it on both engines: a rename
-plans non-destructively and replans empty, a later plan drops each index by its model name, a rename that drops the
-indexes in the same plan succeeds, and the old names are free for a new entity or field.
+build; that is a cost, not a defect, and is left as is. `RenamedConstraintNameFacts` pins it on both engines and judges
+each fact by the engine's own catalog: a rename plans non-destructively and leaves exactly the model's names, a later plan
+drops each index by its model name, a rename that drops an index or flips a unique one in the same plan succeeds, an
+entity-level composite unique index takes its new name, and the old names are free for a new entity or field. One fact
+adds a validation, because on SQLite the table rebuild a released CHECK constraint triggers re-creates every index under
+its model name and would hide the defect from the rest. A database renamed before #523 keeps its stale names; there is
+no repair step.
 
 **What it does not cover.** A `storage: dynamic` entity has no driver yet (F7, #41), and the shared `entity_records` store
 will have no foreign key at all; see the F7 section for the obligation that leaves.

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Tests.Data;
 using MMLib.Alvo.Tests.Ef;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
@@ -19,6 +20,9 @@ public sealed class SqliteRenamedConstraintNameTests : RenamedConstraintNameFact
     }
 
     protected override IServiceProvider Services => _services;
+
+    protected override Task<IReadOnlyList<string>> IndexNamesAsync(string table) => CatalogQuery.NamesAsync(
+        _services, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = @table AND name NOT LIKE 'sqlite_autoindex%'", table);
 
     public void Dispose()
     {
