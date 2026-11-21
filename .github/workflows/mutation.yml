@@ -496,7 +496,9 @@ name: Mutation
 # "PROVISIONAL". Check its timeout share against check 6 and its RuntimeError count too:
 # Accounts.Tests drives a real HTTP pipeline over TestHost the way Api.Tests does, and
 # commands-http's run on that kind of suite once came back all RuntimeError (run
-# 42335661278, above) — which is why both configs set `log-to-file`.
+# 42335661278, below) — which is why these legs, like commands-http, carry
+# `debug-log: true` in the matrix and so run Stryker with `--log-to-file`. See
+# "`log-to-file` IS A COMMAND-LINE FLAG" below for why it is not in their configs.
 #
 # DECLARED GAP: src/MMLib.Alvo/Api/** IS NOT UNDER MUTATION TODAY. It is excluded
 # from stryker-config.json and stryker-config.api.json has no matrix leg, so nothing
@@ -565,7 +567,20 @@ name: Mutation
 # Every test-host run under a mutant ended in a RuntimeError, where the 2026-10-30 probe had 24 of
 # 145; the suite itself passes under the Stryker environment variables (1133 / 0 failed, run by
 # hand). The cause is not in the log Stryker prints, so the leg now writes Stryker's debug log
-# (`log-to-file`) and uploads it with the json report; read `logs/` in `stryker-log-<shard>` first.
+# (`--log-to-file`) and uploads it with the json report; read `logs/` in `stryker-log-<shard>` first.
+# Runs 42386024356 and 43226956170 (2026-11-07 and 11-12) repeated it: 148 tested, 146 and 144
+# Errors, ~3 h 50 min each, and a "50.00 %" made of two scored mutants that passed `break` 40.
+#
+# `log-to-file` IS A COMMAND-LINE FLAG, NOT A CONFIG KEY, and putting it in the config cost this
+# leg every run since. #486 added `"log-to-file": true` to stryker-config.commands-http.json and
+# the three accounts configs copied it; Stryker 4.16 refuses the whole config at startup — "The
+# allowed keys for the "stryker-config" object are { … } but "log-to-file" was found" — so
+# commands-http has failed in ~30 s with no score on every run since 43280958743 (2026-11-12), the
+# three accounts legs on every run they have had (the first was 44834820709, 2026-11-20), and the
+# debug log they were all meant to write was never written. The key is gone from
+# all four; the matrix's `debug-log: true` passes `-L|--log-to-file` ("always uses loglevel
+# trace") on just those legs, because a trace log of a big shard is far too large to keep.
+# scripts/test-assert-mutation-run now refuses any config key outside the allowed set, on the PR.
 #
 # WHY data-ef IS TWO LEGS, AND WHY IT IS SPLIT BY *TEST PROJECT* RATHER THAN BY FILE.
 # The single data-ef leg was killed by `timeout-minutes: 120` on three consecutive main
@@ -959,6 +974,7 @@ jobs:
                             # timeouts, 24 runtime errors); ~139 min scaled to a 4-vCPU runner the
                             # way data-ef-core's was, and 2x that. Cut it to 2x a real post-merge
                             # run's wall clock once one exists.
+            debug-log: true # `--log-to-file` — RUN 42335661278 and "`log-to-file` IS A COMMAND-LINE FLAG" in the header
           # THE TWO HALVES OF THE OLD data-ef LEG. Split by test project, not by file —
           # see "WHY data-ef IS TWO LEGS" in the header for the measurement that decided
           # it and the rule that decides which leg a file lands on. 459 + 649 = 1108, the
@@ -1027,9 +1043,13 @@ jobs:
             project: src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj
             mutants: 240    # ESTIMATED lower bound, not a probe (code lines x 0.16); re-probe on the first run
             suite: 237      # MTP's own count, 2026-11-14 — not yet Stryker's
-            timeout: 120    # ESTIMATED: one ~11 s assembly, up to ~765 mutants at concurrency 4 is
-                            # ~45 min on a 10-core box, ~60 on a 4-vCPU runner (the 1.35x data-ef-core
-                            # scaling), and 2x that. Cut to 2x the first run's wall clock.
+            timeout: 300    # MEASURING BUDGET for the first run that can start at all (the config
+                            # refused `log-to-file` until 2026-11-21). The estimate was 120: one ~11 s
+                            # assembly, up to ~765 mutants at concurrency 4 is ~45 min on a 10-core box,
+                            # ~60 on a 4-vCPU runner, and 2x that. Raised because a cancelled leg uploads
+                            # no debug log, and commands-http's TestHost suite spent ~6 min per mutant
+                            # erroring. Cut to 2x the first run's wall clock.
+            debug-log: true
           - name: accounts-store
             config: stryker-config.accounts-store.json
             project: src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj
@@ -1039,19 +1059,22 @@ jobs:
                             # lines); still an estimate, re-probe on the first run
             suite: 1465     # MTP's own counts, 2026-11-14: Data.Sqlite.Tests 1228 + Accounts.Tests 237
                             # (S3's tenant-store facts add to the first; a floor, so left as measured)
-            timeout: 140    # ESTIMATED: two assemblies (~13 s + ~11 s a run), up to ~416 mutants at
-                            # concurrency 4 is ~52 min on a 10-core box, ~70 on a runner, and 2x that.
-                            # Cut to 2x the first run's wall clock.
+            timeout: 300    # MEASURING BUDGET, as on `accounts` above. The estimate was 140: two
+                            # assemblies (~13 s + ~11 s a run), up to ~416 mutants at concurrency 4 is
+                            # ~52 min on a 10-core box, ~70 on a runner, and 2x that. Cut to 2x the
+                            # first run's wall clock.
+            debug-log: true
           - name: self-service
             config: stryker-config.self-service.json
             project: src/MMLib.Alvo/MMLib.Alvo.csproj
             mutants: 95     # ESTIMATED lower bound, not a probe (~592 code lines x 0.16, S5 included); re-probe on the first run
             suite: 383      # MTP's own Accounts.Tests count after S5 task 8, 2026-11-20 — not yet Stryker's
-            timeout: 90     # ESTIMATED: one assembly (Accounts.Tests over TestHost), up to ~179 mutants at
-                            # concurrency 4. commands-http's TestHost suite cost ~42 s per mutant of wall
-                            # clock at 1034 tests; scaled to ~295 tests that is ~12 s, so ~36 min on a
-                            # 10-core box and ~48 on a runner — 2x would be 96, rounded to 90 because the
-                            # 0.48 upper end is itself a ceiling. Cut to 2x the first run's wall clock.
+            timeout: 300    # MEASURING BUDGET, as on `accounts` above. The estimate was 90: one
+                            # assembly (Accounts.Tests over TestHost), up to ~179 mutants at concurrency 4.
+                            # commands-http's TestHost suite cost ~42 s per mutant of wall clock at 1034
+                            # tests; scaled to ~295 tests that is ~12 s, so ~36 min on a 10-core box and
+                            # ~48 on a runner. Cut to 2x the first run's wall clock.
+            debug-log: true
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1098,6 +1121,9 @@ jobs:
           SHARD: ${{ matrix.name }}
           # Empty for every leg but the canary — see the matrix comment.
           CANARY: ${{ matrix.canary }}
+          # `true` on the legs that want Stryker's trace log, empty on the rest — see
+          # "`log-to-file` IS A COMMAND-LINE FLAG" in the header.
+          DEBUG_LOG: ${{ matrix.debug-log }}
         run: |
           # `shell: bash` means `bash -eo pipefail`, so the pipeline below would abort
           # the whole step the moment Stryker exits non-zero — before the assertions
@@ -1110,8 +1136,15 @@ jobs:
           # is wall-clock. The runner has ~16 GB, comfortably more than four MTP hosts need for
           # this suite. Set on the command line rather than in the config so this reasoning has
           # somewhere to live — the config files are strict JSON with nowhere to put a comment.
+          #
+          # --log-to-file only where the matrix asks: it is a CLI flag Stryker refuses as a
+          # config key, and it always logs at trace level.
+          extra=()
+          if [ "$DEBUG_LOG" = true ]; then
+            extra+=(--log-to-file)
+          fi
           set +e
-          dotnet tool run dotnet-stryker -f "$CONFIG" --concurrency 4 2>&1 | tee stryker-output.log
+          dotnet tool run dotnet-stryker -f "$CONFIG" --concurrency 4 "${extra[@]}" 2>&1 | tee stryker-output.log
           stryker_exit="${PIPESTATUS[0]}"
           set -e
 
@@ -1146,7 +1179,8 @@ jobs:
           name: stryker-log-${{ matrix.name }}
           # `json` reporter -> mutation-report.json: one entry per mutant with file, line,
           # mutator, replacement and status, so a survivor is readable instead of only a
-          # per-file count (#486). `logs/` is Stryker's own debug log (config `log-to-file`),
+          # per-file count (#486). `logs/` is Stryker's own debug log, written only by the legs
+          # whose matrix entry sets `debug-log: true` (`--log-to-file`, see the step above) —
           # the only place a RuntimeError's cause can show up.
           path: |
             test/stryker-output.log

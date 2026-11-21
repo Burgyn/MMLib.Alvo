@@ -768,6 +768,49 @@ derive data-ef-core-timeout-inflated.txt 's/\(^Timeout:  .*m\)249/\10/' || exit 
 assert_ok "a bare 'Timeout: 0' is a legitimate reading, not a malformed one" \
   "$DERIVED" "$CORE_CFG" 543 1135
 
+# ================================== every config key is one Stryker accepts at all
+#
+# Stryker refuses a WHOLE config over one key it does not know, at startup, before it
+# mutates anything — and post-merge is the first place that is seen. #486 put
+# `"log-to-file": true` (a command-line flag, `-L|--log-to-file`) into
+# stryker-config.commands-http.json, three accounts configs copied it, and those four legs
+# then failed in ~30 s with no score on every main run for nine days. This is the same
+# refusal, made on the PR in milliseconds.
+#
+# The list is Stryker 4.16.0's own, copied verbatim from that refusal (run 44834820709,
+# leg "commands and webhooks over HTTP"). It is pinned to the version in
+# .config/dotnet-tools.json: a Stryker bump that adds or drops a key needs it re-copied,
+# and the error message that bump prints when a config breaks is where to copy it from.
+STRYKER_KEYS='additional-timeout baseline break-on-initial-test-failure concurrency configuration
+coverage-analysis dashboard-url disable-bail disable-mix-mutants ignore-methods ignore-mutations
+language-version mutate mutation-level project project-info report-file-name reporters since
+solution target-framework test-case-filter test-projects test-runner thresholds verbosity'
+if ! command -v jq >/dev/null 2>&1; then
+  fail "every stryker-config*.json key is one Stryker accepts" "jq on PATH" "jq is not installed"
+else
+  allowed="$(printf '%s\n' $STRYKER_KEYS | jq -R . | jq -s .)"
+  for cfg in "$ROOT"/stryker-config*.json; do
+    name="$(basename "$cfg")"
+    unknown="$(jq -r --argjson allowed "$allowed" \
+      '.["stryker-config"] | keys - $allowed | join(", ")' "$cfg")"
+    if [ -z "$unknown" ]; then
+      pass "$name uses only keys Stryker accepts"
+    else
+      fail "$name uses only keys Stryker accepts" "keys from Stryker's allowed list" "unknown: $unknown"
+    fi
+  done
+
+  # The check must be able to fail: the key that cost the four legs nine days is refused.
+  probe="$TMP_ROOT/stryker-config.probe.json"
+  jq '.["stryker-config"]["log-to-file"] = true' "$ROOT/stryker-config.canary.json" > "$probe"
+  unknown="$(jq -r --argjson allowed "$allowed" '.["stryker-config"] | keys - $allowed | join(", ")' "$probe")"
+  if [ "$unknown" = "log-to-file" ]; then
+    pass "a config carrying \"log-to-file\" is refused, as Stryker refuses it"
+  else
+    fail "a config carrying \"log-to-file\" is refused, as Stryker refuses it" "unknown: log-to-file" "unknown: $unknown"
+  fi
+fi
+
 # ============================================================================ total
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

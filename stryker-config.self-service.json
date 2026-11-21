@@ -6,7 +6,6 @@
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
-    "log-to-file": true,
     "additional-timeout": 300000,
     "mutate": [
       "**/Tenants/SelfService/SelfServiceEndpoints.cs",
