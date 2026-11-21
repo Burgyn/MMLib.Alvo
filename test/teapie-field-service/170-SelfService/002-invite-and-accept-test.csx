@@ -47,14 +47,16 @@ await tp.Test("Anyone holding the code sees the tenant, the inviter and the role
     var preview = await BodyOf(tp.Responses["AnyonePreviews"]);
 
     Equal("Acme Repairs", preview.GetProperty("tenantName").GetString());
-    Equal(tp.GetVariable<string>("DanaName"), preview.GetProperty("inviterName").GetString());
+    Equal(tp.GetVariable<string>("DanaName"), preview.GetProperty("createdBy").GetProperty("name").GetString());
     Equal(new[] { "technician" }, Roles(preview));
     False(preview.GetProperty("isOwner").GetBoolean());
 
-    // The preview names no id: neither the tenant's nor the inviter's, so a leaked code discloses a name, not a key.
+    // The preview names no id: neither the tenant's nor the inviter's, so a leaked code discloses a name, not a key. The
+    // inviter is under the key every answer names a creator with, by name alone (#542).
     Equal(
-        new[] { "emailBound", "expiresAt", "inviterName", "isOwner", "roles", "tenantName" },
+        new[] { "createdBy", "emailBound", "expiresAt", "isOwner", "roles", "tenantName" },
         preview.EnumerateObject().Select(member => member.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray());
+    Equal(new[] { "name" }, preview.GetProperty("createdBy").EnumerateObject().Select(member => member.Name).ToArray());
 });
 
 await tp.Test("Accepting makes Theo a technician of Acme, and accepting again changes nothing.", async () =>

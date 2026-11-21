@@ -23,9 +23,13 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 /// <param name="schemaPrefix">The validated <see cref="AlvoOptions.SchemaPrefix"/>.</param>
 internal sealed class InvitationTables(string schemaPrefix)
 {
-    /// <summary>The columns an invitation is read from, in <see cref="ReadView"/>'s order.</summary>
+    /// <summary>
+    /// The columns an invitation is read from, in <see cref="ReadView"/>'s order, over <c>i</c> ⟕ <c>a</c>: the creator's
+    /// display name is left-joined on, so a creator without an account row still lists (#542 item 1).
+    /// </summary>
     private const string ViewColumns =
-        "id, tenant_id, roles, grants_owner, email, max_uses, uses, expires_at, created_by, created_at, revoked_at";
+        "i.id, i.tenant_id, i.roles, i.grants_owner, i.email, i.max_uses, i.uses, i.expires_at, i.created_by, a.display_name, "
+        + "i.created_at, i.revoked_at";
 
     /// <summary>Gets the invitations table, e.g. <c>alvo_tenant_invitations</c>.</summary>
     internal string Invitations { get; } = schemaPrefix + AlvoFrameworkTables.TenantInvitationsSuffix;
@@ -36,7 +40,7 @@ internal sealed class InvitationTables(string schemaPrefix)
     /// <summary>Gets the members table a live invitation's creator must still own a membership in.</summary>
     private string Members { get; } = schemaPrefix + AlvoFrameworkTables.TenantMembersSuffix;
 
-    /// <summary>Gets the accounts table the preview reads the inviter's name from.</summary>
+    /// <summary>Gets the accounts table the list and the preview read the creator's name from.</summary>
     private string Accounts { get; } = schemaPrefix + AlvoFrameworkTables.AuthAccountsSuffix;
 
     /// <summary>Creates the table and its index if either is missing — on a connection with no transaction in flight.</summary>
@@ -76,7 +80,13 @@ internal sealed class InvitationTables(string schemaPrefix)
 
     /// <summary>Gets the statement reading every invitation of one tenant, newest first, then by id.</summary>
     internal string ListSql =>
-        $"SELECT {ViewColumns} FROM {Invitations} WHERE tenant_id = @tenant_id ORDER BY created_at DESC, id DESC";
+        $"SELECT {ViewColumns} FROM {ViewSource} WHERE i.tenant_id = @tenant_id ORDER BY i.created_at DESC, i.id DESC";
+
+    /// <summary>Gets the statement reading one invitation by its id, as the list reads it.</summary>
+    internal string ViewSql => $"SELECT {ViewColumns} FROM {ViewSource} WHERE i.id = @id";
+
+    /// <summary>The invitations, each with its creator's account left-joined on, as <see cref="ViewColumns"/> reads them.</summary>
+    private string ViewSource => $"{Invitations} i LEFT JOIN {Accounts} a ON a.id = i.created_by";
 
     /// <summary>
     /// Gets the statement revoking one invitation of one tenant; an already revoked one keeps its first instant but still
@@ -175,8 +185,9 @@ internal sealed class InvitationTables(string schemaPrefix)
         Number(reader, 6),
         StoredInstant.Of(reader.GetString(7)),
         new UserId(Guid.Parse(reader.GetString(8), CultureInfo.InvariantCulture)),
-        StoredInstant.Of(reader.GetString(9)),
-        InstantOrNull(reader, 10));
+        reader.IsDBNull(9) ? null : reader.GetString(9),
+        StoredInstant.Of(reader.GetString(10)),
+        InstantOrNull(reader, 11));
 
     /// <summary>Maps a row of <see cref="LiveSql"/>.</summary>
     /// <param name="reader">A reader positioned on a row.</param>

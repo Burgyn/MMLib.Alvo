@@ -69,6 +69,7 @@ internal static partial class AccountsSchemas
         document.AddComponent(MetadataId, Metadata());
         document.AddComponent(KeyId, Key());
         document.AddComponent(KeySetId, KeySet(document));
+        AddPersonComponents(document);
         AddInvitationComponents(document);
         AddAppTokenComponents(document);
     }

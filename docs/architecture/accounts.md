@@ -402,8 +402,9 @@ A personal membership is honoured only while `personalTenant` is applied, and on
 
 All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
 other auth routes. The gates run in this order, so a stranger learns nothing about the descriptor: the person
-(an API key → 403 `forbidden`; none → 401 `Bearer`; malformed or ambiguous → 401 `invalid_request`; unusable → 401
-`invalid_token`), then the feature (404 `feature-disabled` with `descriptorKey`), then the body (415, then 422
+(none, or an API key of any kind → 401 with the bare `Bearer` challenge, since Bearer is these routes' only scheme (#542);
+malformed or ambiguous → 401 `invalid_request`; unusable → 401 `invalid_token`; a Bearer a host's own resolver
+resolves to a non-person → 403 `forbidden`), then the feature (404 `feature-disabled` with `descriptorKey`), then the body (415, then 422
 `validation`), then the caller's own membership (404 `not-found` when it is not one the descriptor honours), then the
 registry.
 
@@ -436,7 +437,7 @@ A name is trimmed, 1–100 code points, no control character — the display nam
 | Two devices signing a new person in at once: one account, one personal tenant, one owner (Review Focus 4) | `AccountStoreFacts.Two_concurrent_first_sign_ins_create_one_personal_tenant` |
 | Nobody changes their own membership (AC4); a personal tenant has exactly one member | `MemberRoutesTests.Nobody_patches_their_own_membership`; `TenancyEngineFacts.A_personal_tenant_takes_no_members`; `TenantStoreFacts.A_personal_tenant_refuses_every_member_change` |
 | A non-member gets the unknown id's 404 on every route; a membership the descriptor does not honour is managed by no route | `MemberRoutesTests.A_non_member_gets_404_on_every_member_route`, `…An_unhonoured_personal_membership_is_managed_by_no_route`; `TenantRoutesTests.A_non_member_and_an_unknown_tenant_get_the_same_404` |
-| Person only: an API key is 403, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_403_and_no_credential_is_a_bearer_challenge`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
+| Person only: an API key is the bare Bearer challenge no credential gets, a key beside a Bearer 401; the key's own tenant and rows unchanged (AC7) | `TenantRoutesTests.An_api_key_is_the_same_bearer_challenge_as_no_credential`, `…A_bearer_a_host_resolves_to_no_person_is_403_naming_no_route`, `TokenRoutesTests.An_api_key_of_any_kind_is_one_bare_bearer_challenge_on_every_person_only_route`, `…A_key_beside_a_bearer_is_ambiguous_and_an_unusable_bearer_is_invalid_token`; `TenancyEngineFacts.An_api_key_beside_self_service_behaves_exactly_as_before` |
 | `feature-disabled` names its key on all six routes; creating is rate-limited and only creating | `TenantRoutesTests.Without_self_service_every_route_is_404_feature_disabled`, `…Without_create_tenants_creating_is_404_naming_its_key`, `…Tenant_creation_answers_429_after_its_limit` |
 | An event actor keeps only assignable tenant roles, narrowed at delivery to the membership it still holds (D10); a banned person holds none while banned (stack review B-M1) | `EventActorTests.A_recorded_tenant_role_no_longer_assignable_is_not_held`; `DeliveryRunnerActorTests`; `TenantStoreFacts.A_banned_person_s_memberships_are_not_found_until_the_account_is_enabled` (both engines; red on both without the account condition) |
 | The registry is the tenant list only under `selfService` and only when the host registers none (D13) | `TenantCatalogsTests` |
@@ -457,8 +458,10 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   never stored.
 - **D6** — the personal tenant is created in the sign-in and refresh transactions; a Bearer request in the gap after
   `personalTenant` is applied (at most one access-token lifetime) has none.
-- **D7** — only a person calls the routes (an API key is 403); a non-member is 404 like an unknown id; nobody changes
-  their own membership.
+- **D7** — only a person calls the routes; a non-member is 404 like an unknown id; nobody changes their own membership.
+  **Revised by #542 item 2:** an API key was 403 here and 401 on `/user`; every person-only route now answers it the
+  401 with the bare `Bearer` challenge (RFC 6750 §3.1's "unsupported authentication method"), through one reading,
+  `CallerResolution.PersonBearer`. 403 stays for a credential of the route's own scheme that is insufficient.
 - **D8** — three new problem types: `feature-disabled` (404, `descriptorKey`), `last-owner` (409), `tenant-limit` (409,
   `maxPerAccount`); a personal tenant's membership change is 409 `conflict`.
 - **D9** — `maxPerAccount` counts the shared tenants the account *created*, for its lifetime: tenants cannot be deleted
@@ -526,11 +529,11 @@ the invitation's roles:
 ```http
 POST /auth/v1/tenants/3c…/invitations      Authorization: Bearer <Ada>   { "roles": ["technician"] }
 → 201 { "id": "b1…", "code": "alvo_inv_Qm9…", "roles": ["technician"], "isOwner": false, "email": null,
-        "maxUses": 1, "uses": 0, "expiresAt": "…+7 days", "createdBy": "…", "createdAt": "…", "status": "active",
-        "revokedAt": null }
+        "maxUses": 1, "uses": 0, "expiresAt": "…+7 days", "createdBy": { "id": "…", "name": "Ada Lovelace" },
+        "createdAt": "…", "revokedAt": null, "status": "active" }
 
 POST /auth/v1/invitations/preview           (no credential)              { "code": "alvo_inv_Qm9…" }
-→ 200 { "tenantName": "Acme", "inviterName": "Ada Lovelace", "roles": ["technician"], "isOwner": false,
+→ 200 { "tenantName": "Acme", "createdBy": { "name": "Ada Lovelace" }, "roles": ["technician"], "isOwner": false,
         "expiresAt": "…", "emailBound": false }
 
 POST /auth/v1/invitations/accept            Authorization: Bearer <Carol> { "code": "alvo_inv_Qm9…" }
@@ -637,8 +640,8 @@ after CORS and no-store and before any other gate. While `tenancy.selfService.in
 | `POST /tenants/{id}/invitations` `{roles, isOwner?, email?, maxUses?, expiresAt?}` | an owner | 201 with `code`, the only answer that ever carries it, and no `Location`; 422 at the offending pointer; 409 `conflict` on a personal tenant |
 | `GET /tenants/{id}/invitations` | an owner | 200, newest first, never a `code`; `status` is `revoked` > `usedUp` > `expired` > `active` |
 | `DELETE /tenants/{id}/invitations/{invitationId}` | any owner of the tenant | 204, also the second time (the first `revoked_at` is kept); 404 for another tenant's id |
-| `POST /invitations/preview` `{code}` | anyone, no credential read | 200 `{tenantName, inviterName, roles, isOwner, expiresAt, emailBound}`; the dead 404 |
-| `POST /invitations/accept` `{code}` | a person (an API key → 403; none → 401 `Bearer`) | 200 the person's membership, for `Joined` and `AlreadyMember` alike; the dead 404 |
+| `POST /invitations/preview` `{code}` | anyone, no credential read | 200 `{tenantName, createdBy: {name}, roles, isOwner, expiresAt, emailBound}` — the creator by name, never an id (#542); the dead 404 |
+| `POST /invitations/accept` `{code}` | a person (none, or any API key → 401 `Bearer`) | 200 the person's membership, for `Joined` and `AlreadyMember` alike; the dead 404 |
 | `POST /token` with `invitation_code` | the exchange | 200; 400 `invalid_grant` for a dead code; 400 `invalid_request` while invitations are off |
 
 For the owner routes, a member who is not an owner gets 403, and a non-member or an unknown tenant gets the same 404.
@@ -669,7 +672,7 @@ the code's hash.
 | An email-bound invitation admits only that address, only when trusted, in any case | `InvitationStoreFacts.An_email_bound_invitation_admits_only_that_trusted_email`; `InvitationAcceptTests.An_email_bound_invitation_admits_its_trusted_address_in_any_case`; `InvitationSignUpTests.An_email_bound_invitation_signs_up_only_its_trusted_address` |
 | An invitation grants only assignable roles, never `admin`; a role dropped from `assignableRoles` is gone on the next request (AC4) | `InvitationRoutesTests.A_role_outside_assignable_roles_is_refused_and_nothing_is_created`; `InvitationRequestTests`; `InvitationEngineFacts.An_invitation_grants_only_assignable_roles_and_never_admin` |
 | An invited tenant role never reaches a global entity or management | `InvitationEngineFacts.An_invited_tenant_role_never_reaches_a_global_entity_or_management` |
-| Only owners invite, list and revoke; a non-member's 404 equals an unknown tenant's; accept needs a person | `InvitationRoutesTests.A_member_who_is_not_an_owner_cannot_invite_list_or_revoke`, `…A_non_member_and_an_unknown_tenant_get_the_same_404`, `…An_api_key_is_403_and_no_credential_is_a_bearer_challenge`; `InvitationAcceptTests.Accept_needs_a_person` |
+| Only owners invite, list and revoke; a non-member's 404 equals an unknown tenant's; accept needs a person | `InvitationRoutesTests.A_member_who_is_not_an_owner_cannot_invite_list_or_revoke`, `…A_non_member_and_an_unknown_tenant_get_the_same_404`, `…An_api_key_is_the_same_bearer_challenge_as_no_credential`; `InvitationAcceptTests.Accept_needs_a_person` |
 | `invitationOnly` creates an account only with a live code, verified after the subject token; domains still apply | `SignUpDecisionTests`; `InvitationSignUpTests.Without_a_code_a_new_person_is_refused_as_before`, `…A_code_from_a_refused_subject_token_is_never_consumed`, `…Allowed_email_domains_refuse_an_invited_outsider`, `…An_existing_person_with_a_dead_code_is_refused` |
 | The code is 128 bits, stored as its hash, shown once, never in a URL, a log, a `ToString` or a refusal (AC6) | `InvitationCodeTests`; `InvitationRoutesTests.An_owner_invites_and_the_code_is_answered_once`; `AccountsOpenApiTests.No_invitation_route_takes_the_code_in_its_url`; `SecretsNeverLoggedTests.No_invitation_code_appears_in_any_log` (the code whole, its random part and its hash, at Trace), `…No_error_body_echoes_a_presented_token` |
 | `feature-disabled` names `tenancy.selfService.invitations` on all five routes; a code on the exchange while off is `invalid_request`; all five are rate-limited | `InvitationRoutesTests.Without_invitations_every_route_is_404_naming_its_key`, `…Invitation_routes_answer_429_after_their_limit`; `InvitationAcceptTests.Without_invitations_preview_and_accept_are_404_naming_its_key`, `…Preview_and_accept_are_charged_the_invitations_budget`; `InvitationSignUpTests.A_code_while_invitations_are_off_is_invalid_request` |
@@ -703,7 +706,11 @@ From the plan (`2026-11-13-accounts-s4-invitations.md`, D1–D15), one line each
   at most 30 days, and an owner-granting invitation single-use and at most 7 days.
 - **D10** — who may call: owners create, list and revoke; any person accepts; anyone previews.
 - **D11** — create answers 201 with the code and no `Location` (there is no single-invitation `GET`). **Deviation:** the
-  201 also carries `revokedAt: null`, so a client parses one shape for created and listed invitations.
+  201 also carries `revokedAt: null`, so a client parses one shape for created and listed invitations. **Revised by #542
+  item 1:** `createdBy` is the creator as a person, `{ id, name }` (it was a bare id), read back with the list's own
+  query inside the creation's transaction; the anonymous preview's `inviterName` became `createdBy: { name }` — the same
+  key and path, and still no id. The list names a creator by their current display name, also after they left the
+  tenant, as the token list names a minter.
 - **D12** — `created_at` is a column the spec's model does not list. It orders the list.
 - **D13** — `Alvo:Api:RateLimits:Invitations`, 20 per client per minute, on all five routes. The exchange with a code
   stays on the `Token` budget.
@@ -785,7 +792,8 @@ curl -X POST https://api.example.com/auth/v1/tokens \
         "scopes": ["jobs:read", "jobs:write"], "expiresAt": "'"$EXPIRES"'" }'
 # 201 { "keyId": "alvo_pat_q8…", "token": "alvo_pat_q8….Zp…", "header": "X-Alvo-Api-Key",
 #       "kind": "personal", "name": "nightly export", "tenantId": "3c…", "roles": [],
-#       "scopes": ["jobs:read", "jobs:write"], "expiresAt": "…", "createdAt": "…" }
+#       "scopes": ["jobs:read", "jobs:write"], "createdBy": { "id": "…", "name": "Ada Lovelace" }, "createdAt": "…",
+#       "expiresAt": "…", "lastUsedAt": null, "revokedAt": null, "status": "active" }
 ```
 
 `token` is in this answer and in no other, ever: store it in the script's secret store now — below it is `$TOKEN`.
@@ -819,7 +827,7 @@ key id, which is not secret:
 curl https://api.example.com/auth/v1/tokens -H "Authorization: Bearer $ADA"
 # 200 [ { "keyId": "alvo_svc_7f…", "kind": "service", "name": "billing", "tenantId": "3c…",
 #         "roles": ["dispatcher"], "scopes": ["jobs:read", "jobs:write"],
-#         "mintedBy": { "id": "…", "displayName": "Ada Lovelace" }, "createdAt": "…", "expiresAt": "…",
+#         "createdBy": { "id": "…", "name": "Ada Lovelace" }, "createdAt": "…", "expiresAt": "…",
 #         "lastUsedAt": "…", "revokedAt": null, "status": "active" }, … ]
 
 curl -X DELETE https://api.example.com/auth/v1/tokens/alvo_svc_7f… -H "Authorization: Bearer $ADA"
@@ -854,8 +862,9 @@ section as tests, on SQLite and on PostgreSQL.
   a salt adds nothing to a 256-bit random secret (S4 D2's reasoning). It is in the 201 and in no list, refusal, log,
   `ToString` or URL.
 - **A token is an app credential, never a manager.** It cannot mint, list or revoke a token or call any self-service
-  route — 403, those are a person's acts — and the Management API refuses it with 403 even when its roles would pass an
-  `access` level (D9, which closes S1 D8).
+  route — those take a person's Bearer token alone, so a token there is 401 with the bare `Bearer` challenge (#542) — and
+  the Management API, whose scheme it does use, refuses it with 403 even when its roles would pass an `access` level
+  (D9, which closes S1 D8).
 - **The descriptor decides on every request** (D11). Remove `accessTokens` or switch one kind off, and the next request
   of every token of that kind is 401. Remove `selfService` — apply then needs `service` off too (D8) — and so is every
   service token's and every personal token's in a tenant, since no membership counts any more, while a tenantless
@@ -936,8 +945,8 @@ deliveries keep the tenant roles recorded at the event, bounded by `assignableRo
 ### The routes
 
 All under `{AlvoAccountsOptions.Prefix}` (default `/auth/v1`), Bearer only, `Cache-Control: no-store`, CORS like the
-other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (any `X-Alvo-Api-Key`, a
-token included → 403 `forbidden`; none → 401 `Bearer`; a key beside a Bearer → 401 ambiguous); `auth.accessTokens`
+other auth routes. The gates run in this order: the `Create` budget (`POST` only); the person (none, or any `X-Alvo-Api-Key`, a
+token included → 401 `Bearer`; a key beside a Bearer → 401 `invalid_request`); `auth.accessTokens`
 (404 `feature-disabled`); then, for `POST`, whether this host would ever resolve a token (the same 404, with a sentence
 naming a replaced `IApiKeyStore`), the JSON body (415, then 422), the kind's own switch (404
 `feature-disabled` naming `auth.accessTokens.personal` or `.service`), the person's membership of the named tenant, and
@@ -998,6 +1007,7 @@ Three behaviours, recorded so they read as decisions:
 | A token is minted only where it would resolve: a host that replaced the `IApiKeyStore` gets the `feature-disabled` 404 naming `auth.accessTokens` and stores nothing; a host that decorates it keeps minting, and the token works | `AppTokenReachTests.A_host_that_replaced_the_api_key_store_is_refused_the_mint`, `…A_host_that_decorates_the_api_key_store_keeps_minting_and_its_tokens_resolve`; `ApiKeyStoresTests.The_reach_probe_is_answered_only_with_a_registry_and_is_never_a_key` |
 | Minting shares the `Create` budget with tenant creation | `TokenRoutesTests.Minting_answers_429_after_the_create_budget_and_shares_it_with_tenant_creation` |
 | `lastUsedAt` is minute-grained, and its write never fails a request | `ApiKeyStoresTests.App_token_touches_are_throttled_to_one_a_minute`; `TokenRoutesTests.Last_used_is_recorded_within_a_minute`; `AppTokenResolutionTests.A_failed_last_used_write_never_fails_a_request_whose_token_is_valid` |
+| One person shape and one key for a creator (#542 item 1): an invitation and a token name theirs as `createdBy: { id, name }` — the name as it reads now, `null` when there is none — the mint's 201 is its list item plus the credential, and the anonymous preview names the creator by name alone | `InvitationStoreFacts.An_invitation_names_its_creator_by_their_current_display_name` (both engines); `AppTokenResponseTests.A_minted_token_answers_its_list_item_with_the_credential_and_its_header`, `…A_person_without_a_display_name_is_named_null_and_the_preview_never_names_an_id`; `InvitationRoutesTests.An_owner_invites_and_the_code_is_answered_once`; `InvitationAcceptTests.Anyone_holding_the_code_previews_it_without_signing_in` |
 | A configured API key behaves exactly as before (AC7) | `AppTokenManagementTests.A_configured_key_still_manages_as_before`; `ApiKeyStoresTests.Dev_keys_resolve_from_configuration_and_app_tokens_from_the_registry`; `ApiKeyContextResolverTests`, unchanged |
 
 ### Recorded decisions and deviations
@@ -1041,7 +1051,9 @@ From the plan (`2026-11-13-accounts-s5-tokens.md`, D1–D16), one line each:
 - **D13** — bounds: name 1–100, `expiresAt` required and refused past `maxLifetimeDays`, at most 100 live tokens per
   account. Lowering `maxLifetimeDays` bounds new mints only; an existing token keeps its expiry.
 - **D14** — create answers 201 with the credential and `header`, once, and no `Location`; the list never carries the
-  credential or a hash; revoke is 204 and idempotent; everything is `no-store`.
+  credential or a hash; revoke is 204 and idempotent; everything is `no-store`. **Revised by #542 item 1:** the 201 is
+  the token's list item plus `token` and `header` (S4 D11's shape), and the minter is `createdBy: { id, name }`, the
+  key and shape every `/auth/v1` answer names a creator with — it was `mintedBy: { id, displayName }`.
 - **D15** — minting is charged `Alvo:Api:RateLimits:Create`, the budget `POST /tenants` already draws on (spec §7.3).
   One budget for both, recorded; listing and revoking are not charged.
 - **D16** — public growth is exactly `ApiKeyKind`, `ApiKeyRecord.Kind`, `ApiKeyRecord.MintedBy`, `Auth.AccessTokens` and
@@ -1088,8 +1100,9 @@ And where the implementation answered differently from the plan's first wording,
   bounded per account by the live cap, not in total (spec D10; [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527)
   grows by this table).
 - Events and an audit trail for minting and revoking (spec D9).
-- A settled `/auth/v1` contract before v0.1: one name per thing, one answer for the wrong kind of credential, the
-  rate-limit keys (`RateLimits:Create` also charges `POST /tokens`, `RateLimits:Token` is the OAuth endpoint), the
+- A settled `/auth/v1` contract before v0.1: ~~one name per thing, one answer for the wrong kind of credential~~ (both
+  done in #542: `createdBy: { id, name }` everywhere, and a 401 Bearer challenge for any API key on a person-only route),
+  the rate-limit keys (`RateLimits:Create` also charges `POST /tokens`, `RateLimits:Token` is the OAuth endpoint), the
   `auth.accessTokens` name, and `Idempotency-Key` on `POST /tenants`, `…/invitations` and `/tokens`:
   [#542](https://github.com/Burgyn/MMLib.Alvo/issues/542).
 - The field-service demo, its TeaPie suite, the users' guides and the descriptor skill — S6, [below](#the-demo-s6).
@@ -1124,7 +1137,7 @@ it set up:
 | `007-roles-per-tenant` | Theo founds his own garage, where he is owner and dispatcher. A self-made dispatcher cannot write the global `regions`, in his tenant or in Dana's (the admin key's create is the control). Dana joins the garage as a technician, and the same body she sends is refused there and created in Acme. |
 | `008-dead-invitations` | A revoked invitation, and one that expires 15 seconds after it is made; the suite polls until it has lapsed. |
 | `009-dead-invitations-answer-alike` | Used-up, revoked, expired and unknown codes are one `404`, identical apart from the trace id, and none of them made Olga a member of anything. |
-| `010-tokens-reach` | A token cannot mint a token. An app token sent as `Authorization: Bearer` is `401 invalid_token` (the same secret in `X-Alvo-Api-Key` is the control). Personal and service tokens are refused at Management with its fixed sentence; a Bearer session there is an anonymous caller and gets the same refusal, never a `200`. An operator key is the control. |
+| `010-tokens-reach` | A token cannot mint a token. An app token sent as `Authorization: Bearer` is `401 invalid_token` whose detail names `X-Alvo-Api-Key` (#539; the same secret in that header is the control). Personal and service tokens are refused at Management with its fixed sentence; a Bearer session there is an anonymous caller and gets the same refusal, never a `200`. An operator key is the control. |
 | `011-refresh-rotation` | A refresh rotates the token. Replaying the old one inside the 10-second grace window answers the same child. Replaying it after the window is `400 invalid_grant`; the suite polls until it is. |
 | `012-reuse-ends-the-session` | That reuse ended Dana's session: every refresh token of the family is dead and her newest access token is `401`. Theo, whose session it was not, is still signed in. |
 
@@ -1295,6 +1308,7 @@ And where the product answered differently from the plan's first wording (each p
   as anonymous" (`010`).
 - **An app token sent as `Authorization: Bearer` is the generic `401 invalid_token`** (`010`): *"The presented bearer
   token could not be used. …"*. It does not say the secret belongs in `X-Alvo-Api-Key`; the tokens guide says it.
+  (Since #539 it does: the detail names the header — see *Not in S6, and owed*.)
 
 ### Not in S6, and owed
 
@@ -1302,8 +1316,17 @@ And where the product answered differently from the plan's first wording (each p
   [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538):** Alvo fills the column from the tenant the request acts
   in, and a `tenant_id` naming any other tenant is refused with a `403` whose detail says to remove it (option 1 of the
   issue; the structured `422` of option 2 was not needed once the column is filled).
-- **A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.** The `401` could name `X-Alvo-Api-Key` as its
-  fix. A DX follow-up: [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).
+- ~~**A Bearer carrying an `alvo_pat_` or `alvo_svc_` token gets no hint.**~~ **Done in
+  [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539).** `CallerResolution.Read` reads a well-formed Bearer with a
+  reserved prefix (`AppTokenSecret.IsAppTokenId`, the one test of it) as its own channel and drops its value, so no
+  resolver is handed it. Every site that reads a Bearer — the Data API, commands and `.WithAlvoCaller()`, the
+  self-service routes, the sign-in package's `/user` and `/logout` — answers it with one 401: the same
+  `Bearer error="invalid_token"` challenge and `unauthenticated` type, and the fixed detail *"Personal and service
+  tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, not as 'Authorization: Bearer'."*
+  (the header is the configured one). The sentence is identical for every such string — personal or service, live,
+  revoked or made up — and echoes none of it, so it is no oracle. The fix is in `detail`, not `violations`: an
+  `AlvoViolation` points into the body or a query parameter, never a header. Management still never reads
+  `Authorization`, and a data surface with no person resolver still leaves it to the host.
 - **An `eval-assistant` run on the v10 prompt and the tenth skill** is owed (it costs tokens and is in no ring). Two
   smaller gaps sit beside it: `SkillAreas.AreaOf("/tenancy", …)` does not look for a `selfService` inside an added
   value, and the base prompt's "You can change" list names neither `auth` nor `tenancy.selfService`. All three are

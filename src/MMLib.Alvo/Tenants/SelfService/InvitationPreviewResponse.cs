@@ -11,14 +11,17 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// Member names are fixed with <see cref="JsonPropertyNameAttribute"/> (the <see cref="MembershipResponse"/> precedent).
 /// </remarks>
 /// <param name="TenantName">The tenant's name.</param>
-/// <param name="InviterName">The creator's display name, or <see langword="null"/>.</param>
+/// <param name="CreatedBy">
+/// The creator, by display name alone — the key and path every other answer names a creator under, and never the account
+/// id, which a preview never disclosed (#542 item 1).
+/// </param>
 /// <param name="Roles">The tenant roles accepting it grants, in ordinal order.</param>
 /// <param name="IsOwner">Whether accepting it makes an owner.</param>
 /// <param name="ExpiresAt">The instant from which it admits nobody.</param>
 /// <param name="EmailBound">Whether only one trusted email may accept it.</param>
 internal sealed record InvitationPreviewResponse(
     [property: JsonPropertyName("tenantName")] string TenantName,
-    [property: JsonPropertyName("inviterName")] string? InviterName,
+    [property: JsonPropertyName("createdBy")] PersonName CreatedBy,
     [property: JsonPropertyName("roles")] IReadOnlyList<string> Roles,
     [property: JsonPropertyName("isOwner")] bool IsOwner,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
@@ -33,7 +36,7 @@ internal sealed record InvitationPreviewResponse(
         ArgumentNullException.ThrowIfNull(policy);
         return new(
             preview.TenantName,
-            preview.InviterName,
+            new PersonName(preview.CreatorName),
             [.. policy.Effective(preview.Roles).Select(role => role.Name).Order(StringComparer.Ordinal)],
             preview.GrantsOwner,
             preview.ExpiresAt,

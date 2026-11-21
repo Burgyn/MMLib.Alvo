@@ -28,10 +28,10 @@ internal static partial class AccountsSchemas
     private static void AddInvitationComponents(OpenApiDocument document)
     {
         document.AddComponent(InvitationCodeId, InvitationCode());
-        document.AddComponent(InvitationPreviewId, InvitationPreview());
+        document.AddComponent(InvitationPreviewId, InvitationPreview(document));
         document.AddComponent(InvitationRequestId, InvitationRequest());
-        document.AddComponent(InvitationId, Invitation(withCode: false));
-        document.AddComponent(NewInvitationId, Invitation(withCode: true));
+        document.AddComponent(InvitationId, Invitation(document, withCode: false));
+        document.AddComponent(NewInvitationId, Invitation(document, withCode: true));
     }
 
     private static OpenApiSchema InvitationRequest()
@@ -91,11 +91,11 @@ internal static partial class AccountsSchemas
         return schema;
     }
 
-    private static OpenApiSchema InvitationPreview() => Object(
-        "What a live invitation offers. Never the email it may be bound to.",
-        ["tenantName", "inviterName", "roles", "isOwner", "expiresAt", "emailBound"],
+    private static OpenApiSchema InvitationPreview(OpenApiDocument document) => Object(
+        "What a live invitation offers. Never the email it may be bound to, nor any account id.",
+        ["tenantName", "createdBy", "roles", "isOwner", "expiresAt", "emailBound"],
         ("tenantName", Text("The tenant's name.")),
-        ("inviterName", Nullable("The display name of the owner who invited, or null.")),
+        ("createdBy", new OpenApiSchemaReference(PersonNameId, document)),
         ("roles", Strings("The tenant roles accepting it grants under the applied descriptor.")),
         ("isOwner", new OpenApiSchema { Type = JsonSchemaType.Boolean, Description = "Whether accepting it makes an owner." }),
         ("expiresAt", Instant("When it stops admitting anyone.")),
@@ -105,9 +105,9 @@ internal static partial class AccountsSchemas
             Description = "Whether only the person whose provider vouches for one particular email may accept it.",
         }));
 
-    private static OpenApiSchema Invitation(bool withCode)
+    private static OpenApiSchema Invitation(OpenApiDocument document, bool withCode)
     {
-        var properties = InvitationProperties();
+        var properties = InvitationProperties(document);
         string[] required = ["id", "roles", "isOwner", "email", "maxUses", "uses", "expiresAt", "createdBy", "createdAt", "revokedAt", "status"];
         if (withCode)
         {
@@ -121,7 +121,7 @@ internal static partial class AccountsSchemas
             [.. properties]);
     }
 
-    private static List<(string Name, IOpenApiSchema Schema)> InvitationProperties() =>
+    private static List<(string Name, IOpenApiSchema Schema)> InvitationProperties(OpenApiDocument document) =>
     [
         ("id", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The invitation's id; revoking it takes this." }),
         ("roles", Strings("The tenant roles accepting it grants under the applied descriptor.")),
@@ -130,7 +130,7 @@ internal static partial class AccountsSchemas
         ("maxUses", new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Description = "How many people may accept it." }),
         ("uses", new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Description = "How many have." }),
         ("expiresAt", Instant("When it stops admitting anyone.")),
-        ("createdBy", new OpenApiSchema { Type = JsonSchemaType.String, Format = "uuid", Description = "The owner who created it." }),
+        ("createdBy", CreatedBy(document)),
         ("createdAt", Instant("When it was created.")),
         ("revokedAt", new OpenApiSchema
         {

@@ -25,15 +25,35 @@ public sealed class TokenRoutesTests
 
     private const string Allowed = "https://app.example.test";
 
+    private const string AppTokenAsBearerDetail =
+        "Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, "
+        + "not as 'Authorization: Bearer'.";
+
+    private const string PersonOnlyDetail =
+        "This route answers a signed-in person only. Present the access token sign-in issued as 'Authorization: Bearer "
+        + "<token>'; an API key, a personal token or a service token does not reach it.";
+
     private static readonly SqliteApiEngine _engine = SqliteApiEngine.Instance;
 
     private static readonly string[] _listedKeys =
     [
-        "keyId", "kind", "name", "tenantId", "roles", "scopes", "mintedBy", "createdAt", "expiresAt", "lastUsedAt", "revokedAt", "status",
+        "keyId", "kind", "name", "tenantId", "roles", "scopes", "createdBy", "createdAt", "expiresAt", "lastUsedAt", "revokedAt", "status",
     ];
 
     private static readonly string[] _createdKeys =
-        ["keyId", "token", "header", "kind", "name", "tenantId", "roles", "scopes", "expiresAt", "createdAt"];
+    [
+        "keyId", "token", "header", "kind", "name", "tenantId", "roles", "scopes", "createdBy", "createdAt", "expiresAt", "lastUsedAt",
+        "revokedAt", "status",
+    ];
+
+    private static readonly (HttpMethod Method, string Path)[] _bearerSurfaces =
+    [
+        (HttpMethod.Get, "/api/jobs"),
+        (HttpMethod.Get, "/auth/v1/user"),
+        (HttpMethod.Post, "/auth/v1/logout"),
+        (HttpMethod.Get, "/auth/v1/tenants"),
+        (HttpMethod.Get, Tokens),
+    ];
 
     [Fact]
     public async Task A_person_mints_a_personal_token_and_sees_it_once()
@@ -58,6 +78,9 @@ public sealed class TokenRoutesTests
         body["roles"]!.AsArray().ShouldBeEmpty();
         body["scopes"]!.AsArray().Select(scope => scope!.GetValue<string>()).ShouldBe(["jobs:read"]);
         body["expiresAt"]!.GetValue<DateTimeOffset>().ShouldBe(team.World.Clock.GetUtcNow().AddDays(7));
+        body["createdBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value, "the minter, as the list will name them (#542)");
+        body["createdBy"]!["name"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
+        body["status"]!.GetValue<string>().ShouldBe("active");
         jobs.StatusCode.ShouldBe(HttpStatusCode.OK, await jobs.ReadTextAsync());
         notes.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "notes is outside the token's scopes");
         (await notes.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.OutOfScope);
@@ -102,8 +125,7 @@ public sealed class TokenRoutesTests
                 body: Personal(team, team.Tenant),
                 headers: [new("Authorization", $"Bearer {team.Ada}"), new(team.World.Api.CredentialHeaderName, token)]);
 
-            keyed.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await keyed.ReadTextAsync());
-            (await keyed.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+            await PersonOnlyChallengeAsync(keyed);
             beside.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await beside.ReadTextAsync());
         }
 
@@ -316,9 +338,9 @@ public sealed class TokenRoutesTests
         bob.Select(item => item!["kind"]!.GetValue<string>()).Order().ShouldBe(["personal", "service"]);
         var first = ada[0]!.AsObject();
         first.Select(pair => pair.Key).ShouldBe(_listedKeys);
-        first["mintedBy"]!.AsObject().Select(pair => pair.Key).ShouldBe(["id", "displayName"]);
-        first["mintedBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
-        first["mintedBy"]!["displayName"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
+        first["createdBy"]!.AsObject().Select(pair => pair.Key).ShouldBe(["id", "name"]);
+        first["createdBy"]!["id"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
+        first["createdBy"]!["name"]!.GetValue<string>().ShouldBe(await DisplayNameAsync(team, team.Ada));
         first["lastUsedAt"].ShouldBeNull();
         first["revokedAt"].ShouldBeNull();
         var text = new JsonArray([.. ada.Select(item => item!.DeepClone())]).ToJsonString();
@@ -507,11 +529,126 @@ public sealed class TokenRoutesTests
         using var list = await team.World.AsTokenAsync(HttpMethod.Get, Tokens, token);
         using var revoke = await team.World.AsTokenAsync(HttpMethod.Delete, $"{Tokens}/{KeyOf(token)}", token);
 
-        list.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await list.ReadTextAsync());
-        revoke.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await revoke.ReadTextAsync());
+        await PersonOnlyChallengeAsync(list);
+        await PersonOnlyChallengeAsync(revoke);
         using var still = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", token, tenant: team.Tenant.ToString("D"));
         still.StatusCode.ShouldBe(HttpStatusCode.OK, "a refused revoke revoked nothing");
     }
+
+    /// <summary>
+    /// #539: an app token sent as <c>Authorization: Bearer</c> gets one 401 on every surface that reads a Bearer — the Data
+    /// API, the signed-in person's own routes and the self-service routes — with a fixed detail naming the header it
+    /// belongs in. Live, revoked and made-up tokens of either kind answer alike, so the answer is no oracle; none is
+    /// authenticated (its <c>lastUsedAt</c> stays empty) and the same live token still works in the header named.
+    /// </summary>
+    [Fact]
+    public async Task An_app_token_as_a_bearer_is_one_401_naming_the_api_key_header_on_every_surface()
+    {
+        await using var team = await TeamAsync();
+        var personal = await MintedAsync(team, Personal(team, team.Tenant));
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        var revoked = await MintedAsync(team, Personal(team, team.Tenant));
+        (await RevokeAsync(team, team.Ada, KeyOf(revoked))).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        string[] tokens = [personal, service, revoked, "alvo_svc_nosuchkey.nosecret"];
+
+        var answers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (method, path) in _bearerSurfaces)
+        {
+            foreach (var token in tokens)
+            {
+                answers.Add(await AppTokenAsBearerAnswerAsync(team, method, path, token));
+            }
+        }
+
+        answers.ShouldHaveSingleItem().ShouldBe(
+            $"401 unauthenticated Bearer error=\"invalid_token\" {AppTokenAsBearerDetail}", "one answer for every token on every surface");
+        (await ListAsync(team, team.Ada)).Items.ShouldAllBe(item => item["lastUsedAt"] == null, "a Bearer never authenticated a token");
+        using var asKey = await team.World.AsTokenAsync(HttpMethod.Get, "/api/jobs", service, tenant: team.Tenant.ToString("D"));
+        asKey.StatusCode.ShouldBe(HttpStatusCode.OK, await asKey.ReadTextAsync());
+    }
+
+    /// <summary>
+    /// #542 item 2, the mirror of #539: every route only a signed-in person reaches answers an API key of any kind —
+    /// configured, personal, service, revoked or made up — with the one 401 whose bare challenge names Bearer, the route's
+    /// only scheme (RFC 6750 §3.1). None is resolved, so none is told it is insufficient, and none writes anything.
+    /// </summary>
+    [Fact]
+    public async Task An_api_key_of_any_kind_is_one_bare_bearer_challenge_on_every_person_only_route()
+    {
+        await using var team = await TeamAsync(api: Unthrottled);
+        var personal = await MintedAsync(team, Personal(team, team.Tenant));
+        var service = await MintedAsync(team, Service(team, team.Tenant, ["dispatcher"], ["jobs:read"]));
+        var revoked = await MintedAsync(team, Personal(team, team.Tenant));
+        (await RevokeAsync(team, team.Ada, KeyOf(revoked))).StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        string[] keys = [AccountsWorld.Operator.Presented, personal, service, revoked, "alvo_svc_nosuchkey.nosecret", "made-up"];
+
+        var answers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (method, path) in PersonOnlyRoutes(team, KeyOf(service)))
+        {
+            foreach (var key in keys)
+            {
+                answers.Add(await ApiKeyAnswerAsync(team, method, path, key));
+            }
+        }
+
+        answers.ShouldHaveSingleItem().ShouldBe($"401 unauthenticated Bearer {PersonOnlyDetail}", "one answer for every key on every route");
+        (await team.World.CountAsync("_api_keys")).ShouldBe(3, "no refused request minted anything");
+        (await ListAsync(team, team.Ada)).Items.ShouldAllBe(item => item["lastUsedAt"] == null, "no key was ever resolved");
+    }
+
+    private static async Task<string> AppTokenAsBearerAnswerAsync(Team team, HttpMethod method, string path, string token)
+    {
+        using var response = await team.World.AsPersonAsync(method, path, token, tenant: team.Tenant.ToString("D"));
+        var text = await response.ReadTextAsync();
+        text.ShouldNotContain("alvo_", Case.Sensitive, $"{method} {path} echoes no part of the token, not even its prefix");
+        return $"{(int)response.StatusCode} {await response.ReadProblemTypeAsync()} {response.Headers.WwwAuthenticate} "
+            + await response.ReadProblemDetailAsync();
+    }
+
+    private static async Task<string> ApiKeyAnswerAsync(Team team, HttpMethod method, string path, string key)
+    {
+        using var response = await team.World.AsTokenAsync(method, path, key, body: new { });
+        var text = await response.ReadTextAsync();
+        text.ShouldNotContain(key, Case.Sensitive, $"{method} {path} echoes no part of the key");
+        response.Headers.CacheControl!.NoStore.ShouldBeTrue($"{method} {path} is about a person");
+        return $"{(int)response.StatusCode} {await response.ReadProblemTypeAsync()} {response.Headers.WwwAuthenticate} "
+            + await response.ReadProblemDetailAsync();
+    }
+
+    private static async Task PersonOnlyChallengeAsync(HttpResponseMessage response)
+    {
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await response.ReadTextAsync());
+        response.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Unauthenticated);
+        (await response.ReadProblemDetailAsync()).ShouldBe(PersonOnlyDetail);
+    }
+
+    private static (HttpMethod Method, string Path)[] PersonOnlyRoutes(Team team, string keyId)
+    {
+        var tenant = $"/auth/v1/tenants/{team.Tenant:D}";
+        var bob = $"{tenant}/members/{team.BobId.Value:D}";
+        return
+        [
+            (HttpMethod.Get, "/auth/v1/user"),
+            (HttpMethod.Patch, "/auth/v1/user"),
+            (HttpMethod.Post, "/auth/v1/logout"),
+            (HttpMethod.Get, "/auth/v1/tenants"),
+            (HttpMethod.Post, "/auth/v1/tenants"),
+            (HttpMethod.Patch, tenant),
+            (HttpMethod.Get, $"{tenant}/members"),
+            (HttpMethod.Patch, bob),
+            (HttpMethod.Delete, bob),
+            (HttpMethod.Post, $"{tenant}/invitations"),
+            (HttpMethod.Get, $"{tenant}/invitations"),
+            (HttpMethod.Delete, $"{tenant}/invitations/{Guid.NewGuid():D}"),
+            (HttpMethod.Post, "/auth/v1/invitations/accept"),
+            (HttpMethod.Post, Tokens),
+            (HttpMethod.Get, Tokens),
+            (HttpMethod.Delete, $"{Tokens}/{keyId}"),
+        ];
+    }
+
+    private static void Unthrottled(AlvoApiOptions options) => options.RateLimits.Create = 1000;
 
     private static async Task<string> DisplayNameAsync(Team team, string access)
     {
@@ -578,9 +715,9 @@ public sealed class TokenRoutesTests
         }
     }
 
-    private static async Task<Team> TeamAsync(bool bobOwns = false)
+    private static async Task<Team> TeamAsync(bool bobOwns = false, Action<AlvoApiOptions>? api = null)
     {
-        var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker);
+        var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api);
         var (ada, _) = await world.SignInAsync("ada");
         var (bob, _) = await world.SignInAsync("bob", email: "bob@gmail.com");
         var tenant = await TenantRoutesTests.CreatedAsync(world, ada, "Acme");

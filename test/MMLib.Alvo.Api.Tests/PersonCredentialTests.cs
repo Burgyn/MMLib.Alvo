@@ -22,6 +22,10 @@ public sealed class PersonCredentialTests
 {
     private const string Token = "person-token";
 
+    private const string AppTokenAsBearerDetail =
+        "Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, "
+        + "not as 'Authorization: Bearer'.";
+
     private static readonly AlvoPrincipal _person = TestPersonResolver.Person("person:p", tenant: null);
 
     [Fact]
@@ -121,6 +125,37 @@ public sealed class PersonCredentialTests
         people.Calls.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// #539: a personal or service token sent as a Bearer is the one 401 <c>invalid_token</c> with a fixed detail naming
+    /// the header it belongs in — identical for every such string, never resolved by either resolver, never echoed.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/bookings")]
+    [InlineData("/commands/quote")]
+    public async Task An_app_token_as_a_bearer_is_401_naming_the_api_key_header_and_reaches_no_resolver(string path)
+    {
+        var people = People();
+        await using var world = await WorldAsync(people);
+        var method = path.StartsWith("/commands", StringComparison.Ordinal) ? HttpMethod.Post : HttpMethod.Get;
+        string[] presented = ["alvo_pat_Xk2p9QmZ1sT7vL0aB3cD4e.secret", "alvo_svc_Xk2p9QmZ1sT7vL0aB3cD4e.secret", "alvo_pat_"];
+
+        var answers = new List<(HttpStatusCode, string, string, string)>();
+        foreach (var token in presented)
+        {
+            using var response = await world.SendAsync(
+                method, path, body: method == HttpMethod.Post ? Nights(2) : null, headers: Bearer(token));
+            var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            body.ShouldNotContain("Xk2p9QmZ1sT7vL0aB3cD4e", Case.Sensitive, "a presented token is never echoed");
+            body.ShouldNotContain("alvo_", Case.Sensitive, "not even its prefix");
+            answers.Add((response.StatusCode, await response.ReadProblemTypeAsync(), await response.ReadProblemDetailAsync(),
+                response.Headers.WwwAuthenticate.ToString()));
+        }
+
+        answers.Distinct().ShouldHaveSingleItem("personal, service and a bare prefix answer alike").ShouldBe(
+            (HttpStatusCode.Unauthorized, AlvoProblemTypes.Unauthenticated, AppTokenAsBearerDetail, "Bearer error=\"invalid_token\""));
+        people.Calls.ShouldBeEmpty("an app token in the wrong header is never handed to the person resolver");
+    }
+
     [Fact]
     public async Task A_command_runs_as_the_person_a_bearer_token_names()
     {
@@ -172,6 +207,29 @@ public sealed class PersonCredentialTests
         bearerShaped.Headers.WwwAuthenticate.ToString().ShouldBe(
             "AlvoApiKey header=\"Authorization\"",
             "a Bearer-shaped value in the API-key header is an API key that cannot be used, not a person or an ambiguity");
+        people.Calls.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// #539: the fix an app token sent as a Bearer is given names the header this host actually reads, not the default.
+    /// </summary>
+    [Fact]
+    public async Task An_app_token_as_a_bearer_is_told_the_configured_api_key_header()
+    {
+        var people = People();
+        await using var world = await WorldAsync(people, services => services.Configure<AlvoAuthOptions>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection([new("HeaderName", "X-Workshop-Key")])
+                .Build()));
+
+        using var response = await world.SendAsync(HttpMethod.Get, "/api/bookings", headers: Bearer("alvo_svc_k.s"));
+
+        world.CredentialHeaderName.ShouldBe("X-Workshop-Key", "or this world never moved the API-key header");
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer error=\"invalid_token\"");
+        (await response.ReadProblemDetailAsync()).ShouldBe(
+            "Personal and service tokens are not bearer tokens. Present the token in the X-Workshop-Key header, "
+            + "not as 'Authorization: Bearer'.");
         people.Calls.ShouldBeEmpty();
     }
 

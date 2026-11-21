@@ -518,7 +518,9 @@ internal sealed class AlvoDocumentTransformer(
         (tokenEndpoint is null ? "An Alvo access token" : $"An Alvo access token from `POST {tokenEndpoint}`")
         + ", presented as `Authorization: Bearer <token>`: a short-lived ES256 JWT (RFC 9068) that names one signed-in "
         + "person. A token that cannot be used — expired, revoked, signed for another audience, or naming a session that "
-        + "has ended — is a 401 whose `WWW-Authenticate` carries `error=\"invalid_token\"`; refresh the session and retry.";
+        + "has ended — is a 401 whose `WWW-Authenticate` carries `error=\"invalid_token\"`; refresh the session and retry. "
+        + "A personal or service token is not an access token: it belongs in the API-key header (the `alvoApiKey` security scheme), and "
+        + "presented here it is the same 401, whose detail names that header.";
 
     /// <summary>
     /// The security requirement each generated operation carries: this scheme, <b>or nothing</b>.

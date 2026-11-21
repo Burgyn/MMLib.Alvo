@@ -355,7 +355,8 @@ public abstract class TenancyEngineFacts
         listed.StatusCode.ShouldBe(HttpStatusCode.OK, await listed.ReadTextAsync());
         var row = (await listed.ReadJsonObjectAsync())["items"]!.AsArray().ShouldHaveSingleItem()!;
         (row["title"]!.GetValue<string>(), row["tenant_id"]!.GetValue<Guid>()).ShouldBe(("The key's", _integrationTenant));
-        tenants.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await tenants.ReadTextAsync());
+        tenants.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await tenants.ReadTextAsync());
+        tenants.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer", "the tenant routes take a person's Bearer token alone (#542)");
         both.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await both.ReadTextAsync());
         (await both.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Unauthenticated);
     }

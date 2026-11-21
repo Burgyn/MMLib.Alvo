@@ -49,12 +49,13 @@ public sealed class InvitationRoutesTests
         code.Length.ShouldBe(31);
         invitation["status"]!.GetValue<string>().ShouldBe("active");
         invitation["uses"]!.GetValue<int>().ShouldBe(0);
-        invitation["createdBy"]!.GetValue<Guid>().ShouldBe(team.AdaId.Value);
+        invitation["createdBy"]!.ToJsonString().ShouldBe($"{{\"id\":\"{team.AdaId.Value:D}\",\"name\":\"Ada Lovelace\"}}");
         invitation["expiresAt"]!.GetValue<DateTimeOffset>().ShouldBe(team.World.Clock.GetUtcNow().AddDays(7));
         listed.StatusCode.ShouldBe(HttpStatusCode.OK, listedText);
         var item = (await listed.ReadJsonArrayAsync()).ShouldHaveSingleItem();
         item.Select(pair => pair.Key).ShouldBe(_listedKeys);
         item["id"]!.GetValue<Guid>().ShouldBe(invitation["id"]!.GetValue<Guid>());
+        JsonNode.DeepEquals(item["createdBy"], invitation["createdBy"]).ShouldBeTrue("the list names the creator as the 201 did");
         listedText.ShouldNotContain(code);
         team.World.Logs.Lines.ShouldAllBe(line => !line.Contains(code, StringComparison.Ordinal));
     }
@@ -189,7 +190,7 @@ public sealed class InvitationRoutesTests
     }
 
     [Fact]
-    public async Task An_api_key_is_403_and_no_credential_is_a_bearer_challenge()
+    public async Task An_api_key_is_the_same_bearer_challenge_as_no_credential()
     {
         var integration = new TestApiKey("integration", ["authenticated"], ["*:read", "*:write"]);
         await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, keys: [integration]);
@@ -199,11 +200,9 @@ public sealed class InvitationRoutesTests
             using var keyed = await world.Api.SendAsync(request.Method, request.Path, integration, body: request.Body);
             using var anonymous = await world.Api.SendAsync(request.Method, request.Path, body: request.Body);
 
-            keyed.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await keyed.ReadTextAsync());
-            (await keyed.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
-            anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await anonymous.ReadTextAsync());
-            anonymous.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
-            anonymous.Headers.CacheControl!.NoStore.ShouldBeTrue();
+            await TenantRoutesTests.BearerChallengeAsync(keyed);
+            await TenantRoutesTests.BearerChallengeAsync(anonymous);
+            (await keyed.ReadProblemDetailAsync()).ShouldBe(await anonymous.ReadProblemDetailAsync());
         }
     }
 

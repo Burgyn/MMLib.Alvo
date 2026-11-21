@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Host.Internal;
@@ -21,7 +22,7 @@ namespace MMLib.Alvo.Host.Internal;
 /// <b>A named predicate, not a general catch.</b> #132 is explicit that everything else keeps propagating, and
 /// that is worth keeping: an unhandled exception still produces the runtime's own report and whatever crash
 /// dump the deployment configured, which a blanket <c>catch</c> would take away for every genuine defect. So
-/// exactly two shapes are recognized, and the fact that pins this asserts an unrelated exception is
+/// exactly three shapes are recognized, and the fact that pins this asserts an unrelated exception is
 /// <em>not</em> one of them.
 /// </para>
 /// </remarks>
@@ -34,6 +35,12 @@ internal static class AlvoHostExit
     /// <c>EX_CONFIG</c> from <c>sysexits.h</c>: the configuration is wrong and no retry will fix it.
     /// </summary>
     internal const int ConfigurationFailure = 78;
+
+    /// <summary>
+    /// The <see cref="Exception.Data"/> key the boot tags a stage-0 descriptor refusal with — spelled here rather than
+    /// read from the core, whose internals the host does not reference; a fact pins it to the core's spelling.
+    /// </summary>
+    internal const string StartupRefusalDataKey = "MMLib.Alvo.StartupRefusal";
 
     /// <summary>
     /// Whether <paramref name="failure"/> is a misconfiguration an operator can act on, rather than a defect.
@@ -50,6 +57,14 @@ internal static class AlvoHostExit
     /// <c>Alvo__Schema__Startup=Verify</c>, and a plan that would discard data. That type exists precisely so
     /// its <see cref="Exception.Message"/> is written for the operator reading a container log, so letting it
     /// print a stack trace instead would defeat the reason it exists.
+    /// </para>
+    /// <para>
+    /// <b>A <see cref="DescriptorValidationException"/> only when the boot tagged it as stage 0's</b> (#340, #547): a
+    /// mounted descriptor the boot refuses before touching the database — mistyped, or written for a newer Alvo. The
+    /// boot puts the operator's text, naming the running build and both fixes, in its <see cref="Exception.Data"/> under
+    /// <see cref="StartupRefusalDataKey"/>, and that text is what is printed. One the apply raises — rows a new check
+    /// would break, an engine that declines a feature, an overlap the database could not count — carries no tag: it
+    /// depends on the database and can be transient, so it is not claimed as <c>EX_CONFIG</c>.
     /// </para>
     /// <para>
     /// <b>And an <see cref="AggregateException"/> over nothing but those, because that is the shape two
@@ -76,6 +91,7 @@ internal static class AlvoHostExit
         return failure switch
         {
             OptionsValidationException or AlvoStartupRefusedException => true,
+            DescriptorValidationException refused => OperatorRefusal(refused) is not null,
             AggregateException collected => collected.InnerExceptions.Count > 0
                 && collected.InnerExceptions.All(IsConfigurationFailure),
             _ => false,
@@ -102,6 +118,7 @@ internal static class AlvoHostExit
         return failure switch
         {
             OptionsValidationException validation => string.Join(ParagraphBreak, validation.Failures),
+            DescriptorValidationException refused => OperatorRefusal(refused) ?? refused.Message,
             AggregateException collected => string.Join(
                 ParagraphBreak, collected.InnerExceptions.Select(Describe)),
             _ => failure.Message,
@@ -109,4 +126,12 @@ internal static class AlvoHostExit
     }
 
     private static string ParagraphBreak => Environment.NewLine + Environment.NewLine;
+
+    /// <summary>
+    /// The operator's text, only when the tag is a string: anything else under the key — absent, or put there by code that
+    /// is not the boot — is not a refusal the boot wrote for an operator, and is not claimed as <c>EX_CONFIG</c>.
+    /// </summary>
+    /// <param name="refused">The refusal.</param>
+    private static string? OperatorRefusal(DescriptorValidationException refused) =>
+        refused.Data[StartupRefusalDataKey] as string;
 }
