@@ -669,6 +669,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **The operator's user routes check `{project}`, and `…/users/{id}/disabled` refuses `{}`** (#526). All seven
+  `{management}/projects/{project}/users…` routes answered for any project name, served or not; an unknown one is now
+  the named `404` (*"This instance serves no project '…'"*), as on every other project route. `PUT …/users/{id}/disabled`
+  read a body without `disabled` — `{}` or none — as **enable**; it is now `422` with the sentence naming both values,
+  exactly as `…/accounts/{id}/disabled` answers. A caller that sent the deployment's real project name and an explicit
+  `{"disabled": true|false}` sees no change. The dashboard calls the port in-process and is unaffected.
+
 - **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
   as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
   the person has none:
