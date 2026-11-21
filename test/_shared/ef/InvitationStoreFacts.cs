@@ -60,11 +60,52 @@ public abstract class InvitationStoreFacts : IAsyncDisposable
 
         var expected = new InvitationView(
             request.Id, tenant, ["viewer", "planner"], GrantsOwner: true, "bob@example.com", MaxUses: 3, Uses: 0,
-            _now.AddDays(7), owner, _now, RevokedAt: null);
+            _now.AddDays(7), owner, CreatorName: "Ada", _now, RevokedAt: null);
         outcome.Status.ShouldBe(MemberChangeStatus.Changed);
         Same(outcome.Invitation.ShouldNotBeNull(), expected);
         Same((await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem(), expected);
         (await ColumnAsync(services, request.Id, "code_hash")).ShouldBe(request.CodeHash, "only the code's hash is stored");
+    }
+
+    /// <summary>
+    /// #542 item 1: an invitation names its creator as a person — the id and the display name — and a creator with no
+    /// display name is a creator with a <see langword="null"/> name, never a missing one; a rename shows on the next read.
+    /// </summary>
+    [Fact]
+    public async Task An_invitation_names_its_creator_by_their_current_display_name()
+    {
+        var (store, services) = await StoreAsync();
+        var owner = await SignedUpAsync(services, name: null);
+        var tenant = TenantId.New();
+        (await store.CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", owner, ["dispatcher"], 5, _now), Ct)).Status
+            .ShouldBe(CreateTenantStatus.Created);
+
+        var created = await store.CreateInvitationAsync(Invite(tenant, owner), Ct);
+        await services.GetRequiredService<IAccountStore>().SetDisplayNameAsync(owner, "Ada Lovelace", Ct);
+
+        (created.Invitation!.CreatedBy, created.Invitation.CreatorName).ShouldBe((owner, null));
+        var listed = (await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem();
+        (listed.CreatedBy, listed.CreatorName).ShouldBe((owner, "Ada Lovelace"));
+    }
+
+    /// <summary>
+    /// The creator's name is left-joined on, never inner-joined: an invitation whose creator has no account row any more
+    /// is still listed — named by id, with a <see langword="null"/> name — rather than silently dropped from its owners'
+    /// list (#542 item 1).
+    /// </summary>
+    [Fact]
+    public async Task An_invitation_whose_creator_has_no_account_row_is_still_listed_with_no_name()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, owner, _) = await TeamAsync(store, services);
+        var request = Invite(tenant, owner);
+        await store.CreateInvitationAsync(request, Ct);
+
+        await ScalarAsync(
+            services, $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} WHERE id = '{owner.Value:D}'");
+
+        var listed = (await store.ListInvitationsAsync(tenant, Ct)).ShouldHaveSingleItem();
+        (listed.Id, listed.CreatedBy, listed.CreatorName).ShouldBe((request.Id, owner, null));
     }
 
     [Fact]

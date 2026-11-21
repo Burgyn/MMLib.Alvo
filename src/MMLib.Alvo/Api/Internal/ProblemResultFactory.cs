@@ -92,20 +92,69 @@ internal static class ProblemResultFactory
         $"{BearerScheme} error=\"{error}\"");
 
     /// <summary>
-    /// The 401 for a route only a person's access token reaches, asked with no Bearer token at all — an API key, another
-    /// scheme, or nothing.
+    /// The 401 for a personal or service token presented as <c>Authorization: Bearer</c> (#539) — refused before any
+    /// resolver sees it, with the fix: the header it belongs in.
     /// </summary>
     /// <remarks>
-    /// The challenge is RFC 6750 §3.1's for a request that "lacks any authentication information": the scheme alone,
-    /// with no <c>error</c> code, because nothing was presented that could have been wrong.
+    /// <para>
+    /// <b>The challenge and the type are <see cref="BearerUnauthenticated"/>'s</b> — the request did present a Bearer token
+    /// Alvo cannot use — and only the detail differs: the reserved prefix (<c>AppTokenSecret</c>) lets Alvo recognise the
+    /// mistake, and an agent can act on the fix without reading a guide.
+    /// </para>
+    /// <para>
+    /// <b>The wording is fixed and echoes nothing</b> — not the token, not its prefix, not whether it is personal or
+    /// service, live or revoked: one sentence for every string that starts with a reserved prefix, so it is no oracle. The
+    /// fix is in the detail rather than a <c>violations</c> entry because an <see cref="AlvoViolation"/> points into the
+    /// body or a query parameter, never a header — and the detail is where every other credential refusal here carries its
+    /// fix.
+    /// </para>
+    /// </remarks>
+    /// <param name="headerName">The header an app token is read from, named as the fix.</param>
+    internal static IResult AppTokenAsBearer(string headerName) => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            $"Personal and service tokens are not bearer tokens. Present the token in the {headerName} header, "
+            + "not as 'Authorization: Bearer'."),
+        $"{BearerScheme} error=\"invalid_token\"");
+
+    /// <summary>
+    /// The 401 for a route only a person's access token reaches, asked with no Bearer token at all — an API key of any
+    /// kind (configured, personal or service), another scheme, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The challenge is RFC 6750 §3.1's for a request that "lacks any authentication information (e.g., … attempted using
+    /// an unsupported authentication method)": the scheme alone, with no <c>error</c> code. On these routes an API key is
+    /// that unsupported method — it is never resolved — so it is a 401 naming the scheme that works, not a 403 claiming a
+    /// credential the route never checked is insufficient (RFC 9110 §15.5.4; #542 item 2).
+    /// </para>
+    /// <para>One sentence for every key, live or not, echoing none of it, so it is no oracle.</para>
     /// </remarks>
     internal static IResult BearerRequired() => new UnauthenticatedResult(
         Problem(
             StatusCodes.Status401Unauthorized,
             AlvoProblemTypes.Unauthenticated,
             "This route answers a signed-in person only. Present the access token sign-in issued as "
-            + "'Authorization: Bearer <token>'; an API key does not reach it."),
+            + "'Authorization: Bearer <token>'; an API key, a personal token or a service token does not reach it."),
         BearerScheme);
+
+    /// <summary>
+    /// The 401 for a route only a person's access token reaches, asked with both an API key and a Bearer token — the
+    /// person-only twin of <see cref="AmbiguousCredential"/>.
+    /// </summary>
+    /// <remarks>
+    /// The challenge names Bearer alone, with <c>invalid_request</c>: advertising the API-key scheme here would invite
+    /// the one credential this route never takes. The detail names both and the fix.
+    /// </remarks>
+    /// <param name="headerName">The header an API key is read from, named in the detail.</param>
+    internal static IResult PersonOnlyAmbiguous(string headerName) => new UnauthenticatedResult(
+        Problem(
+            StatusCodes.Status401Unauthorized,
+            AlvoProblemTypes.Unauthenticated,
+            $"The request presents both {headerName} and a bearer token. This route answers a signed-in person: "
+            + "present only the bearer token."),
+        $"{BearerScheme} error=\"invalid_request\"");
 
     /// <summary>
     /// The 401 for a request that presents both an API key and a Bearer token Alvo owns — refused rather than
@@ -505,11 +554,22 @@ internal static class ProblemResultFactory
         AlvoProblemTypes.LastOwner,
         "A shared tenant always keeps an owner. Make another member an owner first; then this one can leave, be removed or be demoted.");
 
-    /// <summary>The 403 for a self-service change the caller may not make — not an owner, or not a person at all.</summary>
+    /// <summary>The 403 for a self-service change the person may not make — not an owner, or about themself.</summary>
     /// <param name="detail">The fixed sentence saying who may.</param>
     /// <returns>The problem result.</returns>
     internal static IResult PersonForbidden(string detail) =>
         Problem(StatusCodes.Status403Forbidden, AlvoProblemTypes.Forbidden, detail);
+
+    /// <summary>
+    /// The 403 for a Bearer token a person-only route accepts as its scheme that a host's own person resolver resolved to a
+    /// caller who is not a person — authenticated, and insufficient (RFC 9110 §15.5.4).
+    /// </summary>
+    /// <remarks>The sentence names no route, so the tenant, invitation and token routes answer it alike (#542 item 2).</remarks>
+    /// <returns>The problem result.</returns>
+    internal static IResult NotAPerson() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "This route answers a signed-in person, and the bearer token names a caller that is not one.");
 
     /// <summary>The 409 for a membership change the tenant's own state refuses, e.g. a personal tenant's.</summary>
     /// <param name="detail">The fixed sentence saying why.</param>

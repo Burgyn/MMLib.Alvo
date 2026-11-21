@@ -17,8 +17,9 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// </para>
 /// <para>
 /// <b>Services are resolved from the request</b>, never bound as handler parameters, so the routes' published operations
-/// carry no inferred body or query parameter, and the policy is read once per request — the descriptor applied when the
-/// request arrived decides it.
+/// carry no inferred body or query parameter, and the policy catalog is read once per request and carried as
+/// <see cref="Catalog"/> — the descriptor applied when the request arrived decides every policy the request reads, so no
+/// two of them can come from different applies.
 /// </para>
 /// </remarks>
 /// <param name="Person">The signed-in person.</param>
@@ -26,12 +27,15 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// The session the person's Bearer token came from, carried into every write that hands out a credential or power, so
 /// the store refuses it once that session has ended (stack review A-I1); <see langword="null"/> from a host's own resolver.
 /// </param>
-/// <param name="Policy">The applied self-service policy.</param>
+/// <param name="Catalog">The policy catalog applied when the request arrived, or <see langword="null"/> before any apply.</param>
 /// <param name="Store">The tenant registry.</param>
 /// <param name="Http">The request.</param>
-internal sealed record SelfServiceCall(UserId Person, Guid? Session, SelfServicePolicy Policy, ITenantStore Store, HttpContext Http)
+internal sealed record SelfServiceCall(UserId Person, Guid? Session, PolicyCatalog? Catalog, ITenantStore Store, HttpContext Http)
 {
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.General);
+
+    /// <summary>Gets the applied self-service policy, from <see cref="Catalog"/>.</summary>
+    internal SelfServicePolicy Policy => PolicyOf(Catalog);
 
     /// <summary>Gets the token that cancels the request.</summary>
     internal CancellationToken Ct => Http.RequestAborted;
@@ -42,8 +46,21 @@ internal sealed record SelfServiceCall(UserId Person, Guid? Session, SelfService
     /// <summary>Admits the request's person and checks the route's feature, or answers the refusal instead.</summary>
     /// <param name="http">The request.</param>
     /// <param name="feature">The feature check: the <c>feature-disabled</c> answer, or <see langword="null"/> when it is on.</param>
-    internal static async ValueTask<(SelfServiceCall? Call, IResult? Refusal)> EnterAsync(
+    internal static ValueTask<(SelfServiceCall? Call, IResult? Refusal)> EnterAsync(
         HttpContext http, Func<SelfServicePolicy, IResult?> feature)
+    {
+        ArgumentNullException.ThrowIfNull(feature);
+        return EnterCatalogAsync(http, catalog => feature(PolicyOf(catalog)));
+    }
+
+    /// <summary>
+    /// Admits the request's person and checks a feature the self-service policy alone does not decide, such as
+    /// <c>auth.accessTokens</c>, or answers the refusal instead.
+    /// </summary>
+    /// <param name="http">The request.</param>
+    /// <param name="feature">The feature check over the applied catalog: the refusal, or <see langword="null"/> when it is on.</param>
+    internal static async ValueTask<(SelfServiceCall? Call, IResult? Refusal)> EnterCatalogAsync(
+        HttpContext http, Func<PolicyCatalog?, IResult?> feature)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(feature);
@@ -53,11 +70,11 @@ internal sealed record SelfServiceCall(UserId Person, Guid? Session, SelfService
             return (null, refusal);
         }
 
-        var policy = PolicyOf(http);
-        return feature(policy) is { } disabled
+        var catalog = CatalogOf(http);
+        return feature(catalog) is { } disabled
             ? (null, disabled)
             : (new SelfServiceCall(
-                person!.Value.User, person.Value.Session, policy, http.RequestServices.GetRequiredService<ITenantStore>(), http), null);
+                person!.Value.User, person.Value.Session, catalog, http.RequestServices.GetRequiredService<ITenantStore>(), http), null);
     }
 
     /// <summary>
@@ -68,8 +85,12 @@ internal sealed record SelfServiceCall(UserId Person, Guid? Session, SelfService
     internal static SelfServicePolicy PolicyOf(HttpContext http)
     {
         ArgumentNullException.ThrowIfNull(http);
-        return http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current?.SelfService ?? SelfServicePolicy.None;
+        return PolicyOf(CatalogOf(http));
     }
+
+    private static PolicyCatalog? CatalogOf(HttpContext http) => http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current;
+
+    private static SelfServicePolicy PolicyOf(PolicyCatalog? catalog) => catalog?.SelfService ?? SelfServicePolicy.None;
 
     /// <summary>
     /// The person's own membership of <paramref name="tenant"/> when the applied descriptor honours it (S3 plan D5), else

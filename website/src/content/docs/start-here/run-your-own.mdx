@@ -133,14 +133,10 @@ the address the stack uses, so stop the stack first.
 The end of the log says what to change. The common reasons:
 
 - **The descriptor is invalid.** The log shows `Descriptor validation failed:` and one line per problem: its JSON
-  pointer, for example `/entities/tickets/fields/estimate_cost/computed`, what is wrong and how to fix it. Correct the
-  file and start again.
-
-  :::caution[Known issue in this build]
-  This refusal arrives as an unhandled `DescriptorValidationException`, and the container exits with code 139
-  instead of the clean exit 78 below ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)). The messages are
-  the same.
-  :::
+  pointer, for example `/entities/tickets/fields/estimate_cost/computed`, what is wrong and how to fix it, and the
+  container exits with code 78. Correct the file and start again. If a descriptor that served on another Alvo is
+  refused for keys this one does not know (the schema location ends in `additionalProperties/<key>`), a newer Alvo
+  wrote it: run that version, because an older one does not serve it.
 - **The change would discard data.** The log says `Alvo cannot start:`, lists the plan with the destructive steps
   marked (such as `DropEntity tickets`), and the container exits with code 78. Keep what the descriptor dropped, or,
   if the data is disposable, start over with an empty database:

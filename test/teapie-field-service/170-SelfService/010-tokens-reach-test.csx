@@ -4,28 +4,30 @@ const string AppTokenRefusal =
     "Personal and service tokens are app credentials and never manage a project. "
     + "Use an operator session or a configured API key.";
 
-await tp.Test("A service token cannot mint a token.", async () =>
+await tp.Test("A service token cannot mint a token: the route asks for a person's Bearer token.", async () =>
 {
     var refused = tp.Responses["BillingMintsAToken"];
-    Equal("https://alvo.dev/errors/forbidden", await ProblemType(refused));
-    StartsWith("Only a signed-in person manages tenants.", (await BodyOf(refused)).GetProperty("detail").GetString());
+    Equal("https://alvo.dev/errors/unauthenticated", await ProblemType(refused));
+    Equal("Bearer", string.Join(", ", refused.Headers.WwwAuthenticate.Select(value => value.ToString())));
+    StartsWith("This route answers a signed-in person only.", (await BodyOf(refused)).GetProperty("detail").GetString());
     True(!(await refused.Content.ReadAsStringAsync()).Contains("alvo_svc_"), "BillingMintsAToken echoes no service secret");
 });
 
-await tp.Test("An app token sent as Authorization: Bearer is refused as an invalid token, with no rows.", async () =>
+await tp.Test("An app token sent as Authorization: Bearer is refused as an invalid token naming the right header, with no rows.", async () =>
 {
     var refused = tp.Responses["BillingAsBearer"];
 
-    // The answer the guides quote: the generic refusal of an unusable bearer token — it names neither the header
-    // the secret belongs in nor what kind of credential it is.
+    // The answer the tokens guide quotes (#539): one fixed sentence for every app token in the wrong header, naming
+    // the header it belongs in and echoing nothing of the token.
     Equal("https://alvo.dev/errors/unauthenticated", await ProblemType(refused));
     Equal(
-        "The presented bearer token could not be used. Sign in again, or check that it has not expired or been revoked "
-            + "and that you belong to the tenant you requested.",
+        "Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, "
+            + "not as 'Authorization: Bearer'.",
         (await BodyOf(refused)).GetProperty("detail").GetString());
     var challenge = string.Join(", ", refused.Headers.WwwAuthenticate.Select(value => value.ToString()));
     Contains("invalid_token", challenge);
     False((await BodyOf(refused)).TryGetProperty("items", out _), "a refusal carries no page");
+    True(!(await refused.Content.ReadAsStringAsync()).Contains("alvo_svc_"), "BillingAsBearer echoes no part of the token");
 
     // Control: the same secret, in X-Alvo-Api-Key, reads both of Acme's jobs — it acts as a dispatcher there.
     Equal(

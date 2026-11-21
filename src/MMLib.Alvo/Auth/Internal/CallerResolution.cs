@@ -55,6 +55,10 @@ internal readonly record struct CallerAdmission(AlvoPrincipal? Principal, IResul
 ///   <term>an Alvo-owned Bearer that is empty, carries whitespace, or shares the request with another <c>Authorization</c> line</term>
 ///   <description>401 <c>invalid_request</c>, resolving nothing — never "take the first" / ignored</description>
 ///   </item>
+///   <item>
+///   <term>an otherwise well-formed Alvo-owned Bearer carrying an app-token prefix (<c>alvo_pat_</c>/<c>alvo_svc_</c>)</term>
+///   <description>401 <c>invalid_token</c> whose detail names the API-key header, resolving nothing (#539) / ignored</description>
+///   </item>
 /// </list>
 /// <para>
 /// <b><c>Authorization</c> is never the person channel while it is the API-key header.</b> A host may name
@@ -249,7 +253,46 @@ internal static class CallerResolution
         CredentialChannel.ApiKey => ProblemResultFactory.Unauthenticated(options.HeaderName),
         CredentialChannel.Bearer => ProblemResultFactory.BearerUnauthenticated(InvalidToken),
         CredentialChannel.MalformedBearer => ProblemResultFactory.BearerUnauthenticated(InvalidRequest),
+        CredentialChannel.AppTokenBearer => ProblemResultFactory.AppTokenAsBearer(options.HeaderName),
         _ => ProblemResultFactory.AmbiguousCredential(options.HeaderName),
+    };
+
+    /// <summary>
+    /// The Bearer token a route only a signed-in person reaches is asked with, or the 401 it answers instead — the one
+    /// reading the self-service routes and the sign-in package's own share (#542 item 2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every reading but a usable Bearer is a 401</b>, each with a Bearer challenge: these routes authenticate with
+    /// Bearer alone, so an API key of any kind — configured, personal or service, live or not — is RFC 6750 §3.1's
+    /// "unsupported authentication method", never resolved and never told it is insufficient. An app token sent as a
+    /// Bearer is answered exactly as <see cref="AdmitAsync"/> answers it everywhere else (#539).
+    /// </para>
+    /// <para>What a site does with the token it returns — resolve it, judge the person — stays the site's.</para>
+    /// </remarks>
+    /// <param name="request">The request to read.</param>
+    /// <param name="options">The header names to read, and the one an app token's refusal names.</param>
+    /// <param name="personRegistered">Whether a person resolver is registered.</param>
+    /// <returns>Exactly one of the token and the refusal.</returns>
+    internal static (string? Token, IResult? Refusal) PersonBearer(
+        HttpRequest request, AlvoAuthOptions options, bool personRegistered)
+    {
+        var credential = Read(request, options, CredentialSurface.Data, personRegistered);
+        return credential.Channel == CredentialChannel.Bearer
+            ? (credential.Value, null)
+            : (null, PersonOnlyRefusal(credential.Channel, options));
+    }
+
+    /// <summary>The 401 a person-only route answers for <paramref name="channel"/>, any reading but a usable Bearer.</summary>
+    /// <param name="channel">The channel <see cref="Read"/> decided.</param>
+    /// <param name="options">The API-key header name the ambiguous and the app-token refusals name.</param>
+    private static IResult PersonOnlyRefusal(CredentialChannel channel, AlvoAuthOptions options) => channel switch
+    {
+        CredentialChannel.MalformedBearer => ProblemResultFactory.BearerUnauthenticated(InvalidRequest),
+        CredentialChannel.Ambiguous => ProblemResultFactory.PersonOnlyAmbiguous(options.HeaderName),
+        CredentialChannel.AppTokenBearer => ProblemResultFactory.AppTokenAsBearer(options.HeaderName),
+        CredentialChannel.ApiKey or CredentialChannel.None => ProblemResultFactory.BearerRequired(),
+        _ => throw new InvalidOperationException($"A person-only route has no answer for the {channel} reading."),
     };
 
     /// <summary>Whether this surface, under these options, reads <c>Authorization</c> at all (D7).</summary>
@@ -265,7 +308,9 @@ internal static class CallerResolution
     /// <remarks>
     /// No Bearer line at all is <see cref="CredentialChannel.None"/> — another scheme is the host's. A Bearer line
     /// beside any other line is malformed, by the same rule <see cref="Presented"/> applies to the API key: an
-    /// ambiguous credential is refused, never disambiguated by taking the first.
+    /// ambiguous credential is refused, never disambiguated by taking the first. A well-formed token carrying a reserved
+    /// app-token prefix is read as one, by <see cref="AppTokenSecret.IsAppTokenId"/> — the one test of the prefix — and its
+    /// value is dropped, so no resolver can be handed it.
     /// </remarks>
     /// <param name="lines">The <c>Authorization</c> field lines.</param>
     private static PresentedCredential Bearer(StringValues lines)
@@ -276,8 +321,13 @@ internal static class CallerResolution
         }
 
         var token = lines.Count == 1 ? TokenOf(lines[0]!) : string.Empty;
-        return token.Length == 0 || token.Any(char.IsWhiteSpace)
-            ? new PresentedCredential(CredentialChannel.MalformedBearer, null)
+        if (token.Length == 0 || token.Any(char.IsWhiteSpace))
+        {
+            return new PresentedCredential(CredentialChannel.MalformedBearer, null);
+        }
+
+        return AppTokenSecret.IsAppTokenId(token)
+            ? new PresentedCredential(CredentialChannel.AppTokenBearer, null)
             : new PresentedCredential(CredentialChannel.Bearer, token);
     }
 

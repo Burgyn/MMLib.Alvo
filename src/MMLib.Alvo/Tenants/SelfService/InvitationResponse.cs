@@ -39,7 +39,7 @@ internal sealed record InvitationResponse(
     [property: JsonPropertyName("maxUses")] int MaxUses,
     [property: JsonPropertyName("uses")] int Uses,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
-    [property: JsonPropertyName("createdBy")] Guid CreatedBy,
+    [property: JsonPropertyName("createdBy")] PersonReference CreatedBy,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("revokedAt")] DateTimeOffset? RevokedAt,
     [property: JsonPropertyName("status")] string Status)
@@ -74,7 +74,7 @@ internal sealed record InvitationResponse(
             invitation.MaxUses,
             invitation.Uses,
             invitation.ExpiresAt,
-            invitation.CreatedBy.Value,
+            new PersonReference(invitation.CreatedBy.Value, invitation.CreatorName),
             invitation.CreatedAt,
             invitation.RevokedAt,
             StatusOf(invitation, now));

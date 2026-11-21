@@ -1,6 +1,7 @@
-### A token cannot mint a token: minting is something a signed-in person does
+### A token cannot mint a token: minting is something a signed-in person does, and a person-only route authenticates
+### with Bearer alone, so any API key there is the bare Bearer challenge (#542)
 # @name BillingMintsAToken
-## TEST-EXPECT-STATUS: [403]
+## TEST-EXPECT-STATUS: [401]
 POST {{fsBaseUrl}}/auth/v1/tokens
 X-Alvo-Api-Key: {{BillingToken}}
 Content-Type: application/json
@@ -30,7 +31,7 @@ Content-Type: application/json
 }
 
 ### The pitfall a reader hits first: an app token sent the way a person's session is. Personal and service tokens go
-### in X-Alvo-Api-Key (the `header` their mint answered); as `Authorization: Bearer` the secret is not a JWT Alvo issued.
+### in X-Alvo-Api-Key (the `header` their mint answered); as `Authorization: Bearer` the 401 says so (#539).
 # @name BillingAsBearer
 ## TEST-EXPECT-STATUS: [401]
 GET {{fsBaseUrl}}/api/work_orders?order=reference.asc

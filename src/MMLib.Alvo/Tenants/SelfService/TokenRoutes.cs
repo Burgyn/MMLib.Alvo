@@ -16,8 +16,13 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <para>
 /// <b>The order of the gates is the self-service contract</b> (S3 plan Task 7): the person (a token — any key — presented as
 /// an API key is 403, never a token minting a token), then <c>auth.accessTokens</c>, then the body, then the kind's own
-/// feature, then the person's membership (a personal token naming a tenant), and only then the registry. Right after
+/// feature, then the person's membership of the tenant the token names, and only then the registry. Right after
 /// <c>auth.accessTokens</c>, minting also asks whether this host would ever resolve the token (<see cref="AppTokenReach"/>).
+/// </para>
+/// <para>
+/// <b>The membership is asked here for either kind</b>, though the registry asks it again in the mint's transaction: the
+/// registry judges the live cap first, so without this a stranger at the cap would be answered 409 for a service token and
+/// 404 for a personal one. A stranger's tenant is always the self-service routes' one 404.
 /// </para>
 /// <para>
 /// <b>The secret is made here and only its hash goes down</b>: the registry stores what it is given and never sees the
@@ -32,10 +37,7 @@ internal static class TokenRoutes
     /// <param name="http">The request.</param>
     internal static async Task<IResult> CreateAsync(HttpContext http)
     {
-        ArgumentNullException.ThrowIfNull(http);
-        var catalog = http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current;
-        var tokens = catalog?.AppTokens ?? AppTokenPolicy.None;
-        var (call, refusal) = await SelfServiceCall.EnterAsync(http, _ => AppTokenProblems.Off(tokens)).ConfigureAwait(false);
+        var (call, refusal) = await EnterAsync(http).ConfigureAwait(false);
         if (call is null)
         {
             return refusal!;
@@ -46,7 +48,8 @@ internal static class TokenRoutes
             return unreachable;
         }
 
-        var rules = new TokenRules(tokens, call.Policy, EntitiesOf(catalog), call.Now);
+        var tokens = TokensOf(call.Catalog);
+        var rules = new TokenRules(tokens, call.Policy, EntitiesOf(call.Catalog), call.Now);
         var (request, invalid) = await call.ReadAsync(
             (body, options, ct) => AppTokenRequest.ReadAsync(body, options, rules, ct)).ConfigureAwait(false);
         if (request is null)
@@ -59,7 +62,7 @@ internal static class TokenRoutes
             return disabled;
         }
 
-        return request is { Kind: ApiKeyKind.Personal, Tenant: { } tenant } && await call.MembershipAsync(tenant).ConfigureAwait(false) is null
+        return request.Tenant is { } tenant && await call.MembershipAsync(tenant).ConfigureAwait(false) is null
             ? SelfServiceProblems.NoSuchTenant()
             : await MintedAsync(call, request).ConfigureAwait(false);
     }
@@ -110,9 +113,10 @@ internal static class TokenRoutes
     private static ValueTask<(SelfServiceCall? Call, IResult? Refusal)> EnterAsync(HttpContext http)
     {
         ArgumentNullException.ThrowIfNull(http);
-        var tokens = http.RequestServices.GetRequiredService<IPolicyCatalogProvider>().Current?.AppTokens ?? AppTokenPolicy.None;
-        return SelfServiceCall.EnterAsync(http, _ => AppTokenProblems.Off(tokens));
+        return SelfServiceCall.EnterCatalogAsync(http, catalog => AppTokenProblems.Off(TokensOf(catalog)));
     }
+
+    private static AppTokenPolicy TokensOf(PolicyCatalog? catalog) => catalog?.AppTokens ?? AppTokenPolicy.None;
 
     private static IAppTokenStore TokenStore(HttpContext http) => http.RequestServices.GetRequiredService<IAppTokenStore>();
 
@@ -143,6 +147,7 @@ internal static class TokenRoutes
         }
 
         var header = call.Http.RequestServices.GetRequiredService<IOptions<AlvoAuthOptions>>().Value.HeaderName;
-        return SelfServiceCall.Json(AppTokenResponse.From(outcome.Token!, secret.Presented, header), StatusCodes.Status201Created);
+        return SelfServiceCall.Json(
+            AppTokenResponse.From(outcome.Token!, secret.Presented, header, call.Now), StatusCodes.Status201Created);
     }
 }

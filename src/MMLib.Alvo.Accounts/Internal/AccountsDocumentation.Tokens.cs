@@ -80,8 +80,8 @@ internal static partial class AccountsDocumentation
         PersonUnauthenticated(document),
         TenantRefusal(
             "403",
-            "`forbidden`: an API key or another token was presented — a token never mints one; or a service token was asked "
-            + "for a tenant the person is a member of but does not own.",
+            "`forbidden`: a service token was asked for a tenant the person is a member of but does not own; or the access "
+            + "token names a caller that is not a signed-in person.",
             document),
         Disabled(
             document,

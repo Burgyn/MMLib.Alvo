@@ -1,11 +1,19 @@
 # The load stack is the field-service stack with one thing changed: the alvo service runs a
 # PRE-BUILT image instead of building from the context.
 #
-# WHY AN OVERRIDE AND NOT A FLAG. The A/B gate needs two images of the same stack — the PR's
-# merge-base and its HEAD — and it swaps between them by recreating one service while PostgreSQL
-# and its rows stay put, so both arms measure the identical dataset. A `build:` service cannot be
-# pointed at an already-built tag; an `image:` one can. `scripts/test-load` therefore builds both
-# tags itself and runs compose with `--no-build`.
+# WHY AN OVERRIDE AND NOT A FLAG. The A/B gate needs two images of the same stack — the baseline
+# ref (--baseline-ref; CI passes the PR's base) and HEAD — and it swaps between them by recreating
+# one service while PostgreSQL stays put. A `build:` service cannot be pointed at an already-built tag; an `image:` one can.
+# `scripts/test-load` therefore builds both tags itself and runs compose with `--no-build`.
+#
+# EACH ARM ITS OWN DATABASE AND DESCRIPTOR (#547). The base arm is the baseline ref as it shipped:
+# its own descriptor, in its own database of the same PostgreSQL server, seeded by its own
+# seed.sql. Handed the head's descriptor, an older image refuses every key it does not know; the
+# head's database carries framework tables it never wrote, and no version contract says whether it
+# may serve them (deviation 55, docs/architecture/host.md). While a PR leaves seed.sql and the
+# descriptor alone, the two databases hold the same rows, because the seed derives every id from a
+# row ordinal; a PR that changes either is measured as it ships against the baseline ref as it
+# shipped. Unset, both variables name the head arm's, which is all the single-arm tiers ever use.
 #
 # `pull_policy: never` is the guard that matters here: without it a typo in the tag would send
 # compose to Docker Hub for "alvo-load", and the run would either hang or measure something that
@@ -14,9 +22,12 @@ services:
   alvo:
     image: ${ALVO_LOAD_IMAGE:?set ALVO_LOAD_IMAGE — scripts/test-load builds and selects it}
     pull_policy: never
+    volumes: !override
+      - ${ALVO_LOAD_DESCRIPTOR:-./examples/field-service/field-service.alvo.json}:/alvo/descriptor.json:ro
     # The demo's sign-in wiring (S6: Development, the test issuer, the secrets key, wider rate budgets) is reset, so the
     # gate's A/B and every calibration keep measuring the host the baselines in test/load/baselines/ describe.
     environment:
+      ConnectionStrings__Alvo: Host=postgres;Port=5432;Database=${ALVO_LOAD_DATABASE:-alvo_field_service};Username=alvo;Password=alvo
       ASPNETCORE_ENVIRONMENT: !reset null
       Alvo__Accounts__Providers__Google__ClientIds__0: !reset null
       Alvo__Accounts__Providers__Google__Authority: !reset null

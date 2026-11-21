@@ -11,6 +11,11 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>The token's list item, plus the credential and where to put it</b> (#542 item 1, S4 plan D11's shape for invitations):
+/// every other member is exactly what <c>GET {prefix}/tokens</c> will show of it, from <see cref="AppTokenListItem.From"/>,
+/// so a client parses one shape for a created and a listed token.
+/// </para>
+/// <para>
 /// <b>The secret is shown once.</b> The registry holds only its hash, so no later answer can repeat it. <see cref="PrintMembers"/>
 /// masks it as <c>alvo_pat_***</c> or <c>alvo_svc_***</c>, so neither a log line nor a debugger string carries it.
 /// </para>
@@ -28,8 +33,12 @@ namespace MMLib.Alvo.Tenants.SelfService;
 /// <param name="TenantId">The tenant it acts in, or <see langword="null"/> for a tenantless personal token.</param>
 /// <param name="Roles">A service token's tenant roles; empty for a personal one.</param>
 /// <param name="Scopes">What it may read and write.</param>
-/// <param name="ExpiresAt">When it expires.</param>
+/// <param name="CreatedBy">The person who minted it.</param>
 /// <param name="CreatedAt">When it was minted.</param>
+/// <param name="ExpiresAt">When it expires.</param>
+/// <param name="LastUsedAt">When it last authenticated a request; <see langword="null"/> for a token just minted.</param>
+/// <param name="RevokedAt">When it was revoked; <see langword="null"/> for a token just minted.</param>
+/// <param name="Status"><c>active</c>, as of the request, for a token just minted.</param>
 internal sealed record AppTokenResponse(
     [property: JsonPropertyName("keyId")] string KeyId,
     [property: JsonPropertyName("token")] string Token,
@@ -39,8 +48,12 @@ internal sealed record AppTokenResponse(
     [property: JsonPropertyName("tenantId")] Guid? TenantId,
     [property: JsonPropertyName("roles")] IReadOnlyList<string> Roles,
     [property: JsonPropertyName("scopes")] IReadOnlyList<string> Scopes,
+    [property: JsonPropertyName("createdBy")] PersonReference CreatedBy,
+    [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
-    [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt)
+    [property: JsonPropertyName("lastUsedAt")] DateTimeOffset? LastUsedAt,
+    [property: JsonPropertyName("revokedAt")] DateTimeOffset? RevokedAt,
+    [property: JsonPropertyName("status")] string Status)
 {
     /// <summary>The <see cref="Kind"/> of a personal token.</summary>
     internal const string PersonalKind = "personal";
@@ -52,20 +65,25 @@ internal sealed record AppTokenResponse(
     /// <param name="token">The token as stored.</param>
     /// <param name="presented">The whole credential, <c>keyId.secret</c>.</param>
     /// <param name="header">The configured credential header.</param>
-    internal static AppTokenResponse From(AppTokenView token, string presented, string header)
+    /// <param name="now">The instant the request acts at, which its <see cref="Status"/> is judged at.</param>
+    internal static AppTokenResponse From(AppTokenView token, string presented, string header, DateTimeOffset now)
     {
-        ArgumentNullException.ThrowIfNull(token);
+        var listed = AppTokenListItem.From(token, now);
         return new(
-            token.KeyId,
+            listed.KeyId,
             presented,
             header,
-            token.Kind == ApiKeyKind.Service ? ServiceKind : PersonalKind,
-            token.Name,
-            token.Tenant?.Value,
-            token.Roles,
-            token.Scopes,
-            token.ExpiresAt,
-            token.CreatedAt);
+            listed.Kind,
+            listed.Name,
+            listed.TenantId,
+            listed.Roles,
+            listed.Scopes,
+            listed.CreatedBy,
+            listed.CreatedAt,
+            listed.ExpiresAt,
+            listed.LastUsedAt,
+            listed.RevokedAt,
+            listed.Status);
     }
 
     /// <summary>Prints every member, the credential masked as <see cref="AppTokenSecret"/> prints itself.</summary>
@@ -81,8 +99,10 @@ internal sealed record AppTokenResponse(
             .Append(", TenantId = ").Append(TenantId)
             .Append(", Roles = [").AppendJoin(", ", Roles).Append(']')
             .Append(", Scopes = [").AppendJoin(", ", Scopes).Append(']')
+            .Append(", CreatedBy = ").Append(CreatedBy)
+            .Append(", CreatedAt = ").Append(CreatedAt)
             .Append(", ExpiresAt = ").Append(ExpiresAt)
-            .Append(", CreatedAt = ").Append(CreatedAt);
+            .Append(", Status = ").Append(Status);
         return true;
     }
 }

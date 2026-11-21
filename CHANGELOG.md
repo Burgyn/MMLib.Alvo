@@ -182,8 +182,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     descriptor does not do. The schema assistant's prompt is v10 (two sentences cut to keep the always-on budget);
     its `eval-assistant` run is owed (#540).
   - **Known gaps, shown honestly in the guides:** a scoped create without `tenant_id` is `403` "The write was rejected
-    by policy." and names no field (#538, since fixed: see *Changed*); an app token sent as `Authorization: Bearer` is `401 invalid_token` with no
-    hint to use `X-Alvo-Api-Key` (#539). **Docs:** `docs/architecture/accounts.md`, *The demo (S6)*.
+    by policy." and names no field (#538, since fixed: see *Changed*); an app token sent as `Authorization: Bearer` is
+    `401 invalid_token` with no hint to use `X-Alvo-Api-Key` (#539, since fixed: see *Changed*). **Docs:**
+    `docs/architecture/accounts.md`, *The demo (S6)*.
 - **What the accounts initiative's whole-stack review fixed** (S0–S6 read together; facts on SQLite and PostgreSQL):
   - **A refresh-token reuse also kills what a thief minted.** Ending a session for reuse now revokes, in the same
     transaction, every personal and service token the person minted and every invitation they created, in any tenant,
@@ -668,6 +669,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (breaking)
 
+- **The operator's user routes check `{project}`, and `…/users/{id}/disabled` refuses `{}`** (#526). All seven
+  `{management}/projects/{project}/users…` routes answered for any project name, served or not; an unknown one is now
+  the named `404` (*"This instance serves no project '…'"*), as on every other project route. `PUT …/users/{id}/disabled`
+  read a body without `disabled` — `{}` or none — as **enable**; it is now `422` with the sentence naming both values,
+  exactly as `…/accounts/{id}/disabled` answers. A caller that sent the deployment's real project name and an explicit
+  `{"disabled": true|false}` sees no change. The dashboard calls the port in-process and is unaffected.
+
+- **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
+  as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
+  the person has none:
+  - `GET /auth/v1/tokens`: `mintedBy: { "id", "displayName" }` → `createdBy: { "id", "name" }`.
+  - `POST` and `GET /auth/v1/tenants/{id}/invitations`: `createdBy` was a bare account id; it is now the object.
+  - `POST /auth/v1/invitations/preview` (anonymous): `inviterName` → `createdBy: { "name" }` — the same key and path, by
+    name alone, so the preview still discloses no account id.
+  - `POST /auth/v1/tokens`: the 201 is now the token's list item plus `token` and `header` — it gains `createdBy`,
+    `lastUsedAt`, `revokedAt` and `status` — so a client parses one shape for a minted and a listed token, as for
+    invitations. The OpenAPI document publishes the two shapes as `authPersonReference` and `authPersonName`.
+  **Docs:** the tokens and tenants guides, `docs/architecture/accounts.md`, the design
+  `docs/superpowers/specs/2026-11-21-auth-v1-contract-uniformity-design.md` §2.
+- **An API key on a person-only `/auth/v1` route is `401`, not `403`** (#542 item 2). Every route only a signed-in
+  person reaches — the tenant, member and token routes, managing and accepting invitations (not the anonymous preview),
+  and `/user` and `/logout` — authenticates with a person's Bearer token alone. Any `X-Alvo-Api-Key` there — a
+  configured key, a personal or a service token, live or not — is now the answer no credential gets: `401`
+  `unauthenticated` with a bare `WWW-Authenticate: Bearer` (RFC 6750 §3.1) and the detail *"This route answers a
+  signed-in person only. Present the access token sign-in issued as 'Authorization: Bearer <token>'; an API key, a
+  personal token or a service token does not reach it."* The self-service routes answered `403 forbidden` *"Only a
+  signed-in person manages tenants. …"*, the token routes included; `/user` and `/logout` were already `401` and change
+  only that detail's last clause. A key beside a Bearer stays `401` `Bearer error="invalid_request"`, with a detail
+  that now names both and asks for the Bearer alone. `403 forbidden` stays for a Bearer token a host's own person
+  resolver resolves to a caller who is not a person, with a sentence that names no route. **Docs:** the tokens and
+  tenants guides, `docs/architecture/accounts.md`, the design
+  `docs/superpowers/specs/2026-11-21-auth-v1-contract-uniformity-design.md` §3.
 - **A descriptor that lists `google` must say who may sign up** (accounts slice S2). `auth.providers` naming `google`
   without `auth.signUp` was applied with an unhonoured-subsystem warning; it is now refused at `/auth/signUp`, on every
   host, whether or not it adds accounts. Add `"signUp": { "mode": "open" }` or `{ "mode": "invitationOnly" }`.
@@ -764,8 +797,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `afterUpdate`.
 
   This is refused at apply **and at boot**. A host reading a descriptor file (`Alvo:DescriptorPath`, `FromDescriptor`)
-  that carries one refuses to start, with the condition's JSON pointer and a fix in the log (in the standalone image
-  that exit is still code 139, #340). A stored descriptor that applied before leaves its project `Failed` at start-up:
+  that carries one refuses to start, with the condition's JSON pointer and a fix in the log (exit code 78 in the
+  standalone image since #547). A stored descriptor that applied before leaves its project `Failed` at start-up:
   the process stays up and readiness answers 503. A dashboard or Management API apply is refused the same way.
 - **After-hook templates refuse a row image their event lacks** (#325, same reach). A placeholder reading
   `{{new.<field>}}` in an `afterDelete` hook or `{{old.<field>}}` in an `afterCreate` hook — in `email.to`, a named
@@ -992,6 +1025,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Minting a token in a stranger's tenant is always `404`.** `POST /auth/v1/tokens` answered a person at the 100-token
+  cap `409` for a service token in a tenant they are not in, and `404` for a personal one; both are now the self-service
+  routes' one `404`, byte for byte an unknown tenant's. A service token naming a personal tenant the descriptor does not
+  honour (`personalTenant` off) is that `404` too, as on every other tenant-scoped route, rather than `409`. **Docs:**
+  `docs/architecture/accounts.md`.
+- **An app token sent as `Authorization: Bearer` is told where it belongs** (#539). A personal or service token
+  (`alvo_pat_…`/`alvo_svc_…`) presented as a Bearer is still `401` `unauthenticated` with `Bearer
+  error="invalid_token"`, and is still never authenticated, but its detail is now one fixed sentence naming the API-key
+  header: *"Personal and service tokens are not bearer tokens. Present the token in the X-Alvo-Api-Key header, not as
+  'Authorization: Bearer'."* The same answer on the Data API, commands, `.WithAlvoCaller()` endpoints, the self-service
+  routes and `/auth/v1/user` and `/logout`, for every such token, and it repeats none of it. The OpenAPI Bearer scheme
+  says so too. **Docs:** the tokens guide, `docs/architecture/accounts.md`.
 - **A create on a tenant-scoped entity no longer needs `tenant_id`** (#538). Left out of a `POST` (single, keyed or
   batch) or a typed create, the row is placed in the tenant the call acts in, exactly as a `PUT` that creates already
   did. A body may still name it, and the caller's own tenant keeps working unchanged; any other value, `null` included,
@@ -1430,6 +1475,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The standalone host exits 78 on a descriptor the boot refuses at stage 0, not 139** (#340, #547). A mounted
+  descriptor that fails validation — mistyped, or written for a newer Alvo — or that the mapper refuses (a field naming
+  an unknown format, a format pattern that is not a regular expression) used to escape `Main` unhandled, and the
+  container exited with the crash-shaped 139. Stderr now carries the pointed violations under a headline naming the
+  running build, with two fixes (correct the file, or run the newer Alvo it was written for — an older Alvo does not
+  serve a newer descriptor), and the process exits 78; the boot records and logs the same text. An embedded host still
+  gets a `DescriptorValidationException`; an unknown format is now one (at `#/`) instead of an `InvalidDataException`,
+  which also makes a dashboard-first host stand down on it instead of crashing. A validation refusal the *apply* raises
+  (rows a new check breaks, an overlap the database could not count) is unchanged and still exits 139.
 - **Dashboard: renaming or removing a field finds every place that names it** (#513). The schema editor's field
   references missed the constructs added on 2026-11-06, so a rename left them behind (Preview then failed server-side) and
   a removal did not name them. It now carries — and a removal names as blocking — a state machine's `field` and each

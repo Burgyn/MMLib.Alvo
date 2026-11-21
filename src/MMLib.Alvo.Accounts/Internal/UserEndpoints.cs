@@ -16,10 +16,12 @@ namespace MMLib.Alvo.Accounts.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Only a Bearer token reaches them.</b> The credential is read by <see cref="CallerResolution.Read"/>, the one reading
-/// every authenticating site shares, as the Data API reads it: an API key alone is no person (a plain Bearer challenge,
-/// RFC 6750 §3.1, since nothing usable was presented); a malformed or ambiguous Bearer is <c>invalid_request</c> before
-/// anything is validated; a token that does not hold is <c>invalid_token</c>.
+/// <b>Only a Bearer token reaches them.</b> The credential is read by <see cref="CallerResolution.PersonBearer"/>, the one
+/// reading every person-only route shares, so these routes answer each credential exactly as the self-service routes do
+/// (#542 item 2): an API key of any kind is no person (a plain Bearer challenge, RFC 6750 §3.1 — Bearer is the only
+/// scheme here); a malformed or ambiguous Bearer is <c>invalid_request</c> before anything is validated, and a personal or
+/// service token sent as one is <c>invalid_token</c> naming the API-key header (#539); a token that does not hold is
+/// <c>invalid_token</c>.
 /// </para>
 /// <para>
 /// <b>Logout identifies, it does not authenticate.</b> It needs the token's signature, claims and lifetime, not a live
@@ -40,8 +42,6 @@ internal static class UserEndpoints
     internal const string LogoutOperationId = "auth.logout";
 
     private const string InvalidToken = "invalid_token";
-
-    private const string InvalidRequest = "invalid_request";
 
     /// <summary>Maps the three routes into the sign-in group.</summary>
     /// <param name="group">The group mapped at <see cref="AlvoAccountsOptions.Prefix"/>.</param>
@@ -132,16 +132,7 @@ internal static class UserEndpoints
 
     /// <summary>The Bearer token the request presents, or the 401 a request presenting none (usable) earns.</summary>
     private static (string? Token, IResult? Refusal) Bearer(HttpRequest request, AlvoAuthOptions auth)
-    {
-        var credential = CallerResolution.Read(request, auth, CredentialSurface.Data, personRegistered: true);
-        return credential.Channel switch
-        {
-            CredentialChannel.Bearer => (credential.Value, null),
-            CredentialChannel.MalformedBearer or CredentialChannel.Ambiguous =>
-                (null, ProblemResultFactory.BearerUnauthenticated(InvalidRequest)),
-            _ => (null, ProblemResultFactory.BearerRequired()),
-        };
-    }
+        => CallerResolution.PersonBearer(request, auth, personRegistered: true);
 
     private static IResult Unusable() => ProblemResultFactory.BearerUnauthenticated(InvalidToken);
 
