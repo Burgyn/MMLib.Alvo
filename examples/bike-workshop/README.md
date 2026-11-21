@@ -101,8 +101,8 @@ Also left out on purpose:
 
 - `automation`, `functions` and `dynamicEntities` — accepted with a warning but nothing runs for them, and
   a demo that shows a rule which never fires misleads its reviewer.
-- **Tenancy.** One workshop is one tenant; turning it on would make every write carry `tenant_id` and the
-  bootstrap administrator act in no tenant, which is a different demo (`../field-service` is the tenancy
+- **Tenancy.** One workshop is one tenant; turning it on would put every row behind a tenant wall and leave the
+  bootstrap administrator acting in no tenant, which is a different demo (`../field-service` is the tenancy
   one).
 
 ## Rough edges you will see

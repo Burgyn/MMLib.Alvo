@@ -162,9 +162,10 @@ internal static class BehaviourInvariants
             foreach (var (operation, method, suffix) in _singleRowRoutes)
             {
                 var path = $"/api/{entity}{suffix.Replace("{id}", Guid.NewGuid().ToString(), StringComparison.Ordinal)}";
-                // `forCreate` only on the POST: a create on a tenant-scoped entity has to echo `tenant_id`,
-                // and a patch that sent the same member would be refused for naming a column it may not
-                // write — a 403 that looks exactly like the per-operation refusal under test.
+                // `forCreate` only on the POST: the create body names the caller's own `tenant_id` on a
+                // tenant-scoped entity (optional there since #538, and still accepted), and a patch that sent
+                // the same member would be refused for naming a column it may not write — a 403 that looks
+                // exactly like the per-operation refusal under test.
                 using var response = await world.SendAsync(
                     method, path, project.Admin(), body: method == HttpMethod.Get || method == HttpMethod.Delete
                         ? null

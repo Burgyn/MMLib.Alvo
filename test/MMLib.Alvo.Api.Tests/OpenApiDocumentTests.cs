@@ -547,6 +547,31 @@ public sealed class OpenApiDocumentTests
     }
 
     /// <summary>
+    /// A scoped entity's create body offers <c>tenant_id</c> without demanding it, and says what leaving it out does
+    /// (#538): the row lands in the caller's own tenant, and a value naming any other tenant is refused.
+    /// </summary>
+    /// <remarks>
+    /// A generated client treats <c>required</c> as a field it must fill. Listing <c>tenant_id</c> there sent every
+    /// such client — and every agent reading the document — to echo a value the server already knows, and a client
+    /// that left it out was refused with no hint why.
+    /// </remarks>
+    [Fact]
+    public async Task A_scoped_create_body_offers_tenant_id_as_optional_and_says_where_the_row_lands()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "tenant-notes.alvo.json", [], new AlvoApiWorldSetup(MapOpenApiDocument: true));
+        var document = await world.OpenApiDocumentAsync();
+
+        var create = document["components"]!["schemas"]!["notesCreate"]!;
+
+        create["properties"]!.AsObject().ContainsKey("tenant_id").ShouldBeTrue("a caller may still name its own tenant");
+        create["required"]!.AsArray().Select(x => (string)x!).ShouldBe(["title"]);
+        var description = (string)create["description"]!;
+        description.ShouldContain("`tenant_id` is optional");
+        description.ShouldContain("caller's own tenant");
+    }
+
+    /// <summary>
     /// <b>A write is offered <c>If-Match</c> only on an entity that can issue an <c>ETag</c></b> — and is
     /// offered it on one that can.
     /// </summary>

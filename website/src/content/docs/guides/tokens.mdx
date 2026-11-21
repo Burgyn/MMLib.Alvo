@@ -177,9 +177,8 @@ answers are the same.
    `X-Alvo-Api-Key`. A hint in the answer itself is [#539](https://github.com/Burgyn/MMLib.Alvo/issues/539). (`170-SelfService/004-billing-token` and `010-tokens-reach`, `BillingAsBearer` and its control
    `BillingAsKey`.)
 
-   Dana's script creates jobs the same way, and **a scoped create still carries `tenant_id`** in its body, as every
-   scoped create does today (see [step 3 of the tenants guide](/guides/tenants-and-invitations/) and
-   [#538](https://github.com/Burgyn/MMLib.Alvo/issues/538)). The rows it writes
+   Dana's script creates jobs the same way, and **a scoped create needs no `tenant_id`** in its body: the row lands
+   in the tenant the token acts in (see [step 3 of the tenants guide](/guides/tenants-and-invitations/)). The rows it writes
    show Dana in `created_by`. The rows billing would write show the token's own id: a service token is a member of the
    tenant that nobody signs in as.
 

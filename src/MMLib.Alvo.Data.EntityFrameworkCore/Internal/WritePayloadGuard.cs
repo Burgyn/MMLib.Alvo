@@ -25,9 +25,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </para>
 /// <para>
 /// The one asymmetry is <c>tenant_id</c> on a create, and it lives in
-/// <see cref="AlvoManagedColumns.IsCallerWritable"/> with its reason: a create legitimately places a row
-/// in a tenant, and the synthesized tenant scope over the candidate row decides whether that tenant is
-/// allowed. No managed column is ever a descriptor-declared field on an entity the framework manages it
+/// <see cref="AlvoManagedColumns.IsCallerWritable"/> with its reason: a create places a row in the caller's
+/// own tenant, and <see cref="AlvoTenantPlacement"/> — which needs the caller, so it is not judged here —
+/// refuses a payload naming any other. No managed column is ever a descriptor-declared field on an entity the framework manages it
 /// for, so none can appear in <see cref="PolicyDecision.ReadOnlyFields"/> — the read-only check alone
 /// would let every one of them through.
 /// </para>

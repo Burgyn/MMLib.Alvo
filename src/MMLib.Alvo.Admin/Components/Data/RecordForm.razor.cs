@@ -488,7 +488,8 @@ public partial class RecordForm
            create legitimately places a row in a tenant and the synthesized tenant scope
            evaluated over the candidate row is what decides whether that tenant is allowed.
            Sending the operator's own is therefore not a shortcut past the guard; it is the
-           value the guard is there to check. Omitting it is what fails. */
+           value the guard is there to check. The port would place the row there anyway when it
+           is left out (#538); sending it keeps the form's intent explicit. */
         if (Entity.Tenancy == TenancyMode.Scoped
             && (await Data.ContextAsync(CancellationToken.None)).Tenant is { } tenant)
         {

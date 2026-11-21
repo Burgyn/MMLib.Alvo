@@ -56,7 +56,6 @@
       "path": "/api/tickets",
       "body": {
         "title": "VPN drops every hour",
-        "tenant_id": "0b8f3c2a-5d4e-4f6a-8b7c-1d2e3f4a5b6c",
         "category_id": "c4a7e1d2-9b3f-4e6a-8c5d-2f1e0d9c8b7a"
       },
       "expect": 201
@@ -66,7 +65,8 @@
       "method": "POST",
       "path": "/api/tickets",
       "body": {
-        "title": "Printer on fire"
+        "title": "Printer on fire",
+        "tenant_id": "7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918"
       },
       "expect": 403,
       "expectType": "forbidden"

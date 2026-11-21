@@ -29,14 +29,16 @@ Content-Type: application/json
   "email": "office@borovica.test"
 }
 
-### Omitting `tenant_id` is refused rather than defaulted — a row must not land in a tenant by accident
-# @name CreateWithoutTenant
+### An explicit null `tenant_id` is refused: omitting the field places the row in the key's tenant (#538), but a
+### value the payload names must be that tenant, and null is not
+# @name CreateWithNullTenant
 ## TEST-EXPECT-STATUS: [403]
 POST {{fsBaseUrl}}/api/customers
 X-Alvo-Api-Key: {{keyDispatcherNorth}}
 Content-Type: application/json
 
 {
+  "tenant_id": null,
   "name": "Tenantless Ltd",
   "tier": "standard"
 }

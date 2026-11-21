@@ -119,8 +119,9 @@ Outside a unit, get a session with `IAlvoSessions.For(caller)`. The untyped `Cre
 - **A create leaves out a property that is `null`**, so the field's descriptor `default` applies. To leave a field to
   its default, make the property nullable: a non-nullable property's `0`, `false` or first enum member is a value and is
   sent. A replace sends every field, `null` included. An enum is written as its declared value.
-- **A tenant-scoped entity needs its tenant.** A typed create on one must map `tenant_id` and set it; a `tenant_id` of
-  `Guid.Empty` is refused with an `ArgumentException` before anything is sent.
+- **A tenant-scoped entity takes the caller's tenant.** A typed create on one need not map `tenant_id`: left unmapped,
+  or `null` on a `Guid?`, the row lands in the caller's tenant. A value it does send must be that tenant, and a
+  `tenant_id` of `Guid.Empty` is refused with an `ArgumentException` before anything is sent.
 - **What it answers.** The record as the caller may read it back, or `null` when the caller's `get` rule does not return
   every field the class maps. The write happened either way.
 
