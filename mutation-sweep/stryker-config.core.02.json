@@ -1,0 +1,50 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Commands/Internal/CommandAccessJudge.cs",
+      "Commands/Internal/CommandAnswers.cs",
+      "Commands/Internal/CommandApplyRefusals.cs",
+      "Commands/Internal/CommandBinding.cs",
+      "Commands/Internal/CommandCompletion.cs",
+      "Commands/Internal/CommandDescription.cs",
+      "Commands/Internal/CommandEndpointMetadata.cs",
+      "Commands/Internal/CommandKeys.cs",
+      "Commands/Internal/CommandOperationIds.cs",
+      "Commands/Internal/CommandProblems.cs",
+      "Commands/Internal/CommandRegistration.cs",
+      "Commands/Internal/CommandRegistry.cs",
+      "Commands/Internal/CommandRun.cs",
+      "Commands/Internal/CommandRunner.cs",
+      "Commands/Internal/CommandSimulator.cs",
+      "Commands/Setup.cs",
+      "Data/AlvoEntityAttribute.cs",
+      "Data/AlvoEnumValueAttribute.cs",
+      "Data/AlvoFieldAttribute.cs",
+      "Data/AlvoPatch.cs",
+      "Data/AlvoRecordExtensions.cs",
+      "Data/AlvoTranslationException.cs",
+      "Data/AlvoTypedReadExtensions.cs",
+      "Data/AlvoTypedWriteExtensions.cs",
+      "Data/IAlvoEntity.cs",
+      "Data/IAlvoPatch.cs",
+      "Data/Internal/EnumMap.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

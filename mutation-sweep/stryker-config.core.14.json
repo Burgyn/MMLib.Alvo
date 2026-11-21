@@ -1,0 +1,39 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Extensions/Internal/DescriptorActionBindings.cs",
+      "Extensions/Internal/DescriptorActionSweep.cs",
+      "Extensions/Internal/ExtensionApplyGuard.cs",
+      "Extensions/Internal/ExtensionApplyRefusals.cs",
+      "Extensions/Internal/ExtensionBinder.cs",
+      "Extensions/Internal/ExtensionBindingCompiler.cs",
+      "Extensions/Internal/ExtensionBindings.cs",
+      "Extensions/Internal/ExtensionCatalog.cs",
+      "Extensions/Internal/ExtensionIdProblems.cs",
+      "Extensions/Internal/ExtensionIds.cs",
+      "Extensions/Internal/ExtensionLog.cs",
+      "Extensions/Internal/ExtensionRefusal.cs",
+      "Extensions/Internal/ExtensionRegistration.cs",
+      "Extensions/Internal/ExtensionRegistrations.cs",
+      "Extensions/Internal/ExtensionRegistry.cs",
+      "Extensions/Internal/ExtensionStateGuard.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

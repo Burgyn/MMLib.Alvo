@@ -1,0 +1,31 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Rules/Internal/BeforeHookCompiler.cs",
+      "Rules/Internal/BeforeHookRunner.cs",
+      "Rules/Internal/CelImageReads.cs",
+      "Rules/Internal/CheckCompiler.cs",
+      "Rules/Internal/DescriptorHost.cs",
+      "Rules/Internal/FieldLiteral.cs",
+      "Rules/Internal/MutationTarget.cs",
+      "Rules/Internal/OwnerComparisonCheck.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

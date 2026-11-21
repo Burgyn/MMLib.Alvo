@@ -1,0 +1,44 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Management/Internal/GuardedUserAdministration.cs",
+      "Management/Internal/IfMatchRevision.cs",
+      "Management/Internal/JsonPointerPath.cs",
+      "Management/Internal/ManagementAccessChange.cs",
+      "Management/Internal/ManagementApplyBody.cs",
+      "Management/Internal/ManagementEndpoints.Accounts.cs",
+      "Management/Internal/ManagementEndpoints.Operations.cs",
+      "Management/Internal/ManagementEndpoints.cs",
+      "Management/Internal/ManagementGate.cs",
+      "Management/Internal/ManagementIdempotency.cs",
+      "Management/Internal/ManagementOperationsBodies.cs",
+      "Management/Internal/ManagementRollbackBody.cs",
+      "Management/Internal/ManagementRoute.cs",
+      "Management/Internal/ManagementUserBodies.cs",
+      "Management/Internal/OperationReasons.cs",
+      "Management/Setup.cs",
+      "Migrations/AlvoBootState.cs",
+      "Migrations/AlvoDescriptorApplyExtensions.cs",
+      "Migrations/AlvoSchemaOptions.cs",
+      "Migrations/AlvoStartupRefusedException.cs",
+      "Migrations/DescriptorApplyPreview.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

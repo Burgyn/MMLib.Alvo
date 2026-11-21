@@ -1,0 +1,37 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Lifecycle/TimerReplanBindings.cs",
+      "Lifecycle/TransitionSimulator.cs",
+      "Management/Access/Internal/ManagementAccessEndpointFilter.cs",
+      "Management/Access/Internal/ManagementAccessEvaluator.cs",
+      "Management/Access/ManagementAccessRouteBuilderExtensions.cs",
+      "Management/Access/ManagementLevel.cs",
+      "Management/Access/ManagementOperation.cs",
+      "Management/Access/ManagementOperations.cs",
+      "Management/AlvoManagementEndpointRouteBuilderExtensions.cs",
+      "Management/AlvoManagementOptions.cs",
+      "Management/Internal/AlvoManagementOptionsConfiguration.cs",
+      "Management/Internal/AlvoManagementService.cs",
+      "Management/Internal/AlvoOperationsService.Reads.cs",
+      "Management/Internal/AlvoOperationsService.Replay.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

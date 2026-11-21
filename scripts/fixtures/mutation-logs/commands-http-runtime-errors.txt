@@ -1,0 +1,145 @@
+# Stryker log fixture for scripts/test-assert-mutation-run. DO NOT hand-edit.
+# Produced by: the `Stryker (commands and webhooks over HTTP)` shard of .github/workflows/mutation.yml,
+#   i.e. cd test && dotnet tool run dotnet-stryker -f ../stryker-config.commands-http.json --concurrency 4 --log-to-file
+# Captured: 2026-11-21 01:26-05:27 UTC on a GitHub-hosted 4-vCPU runner, on-demand run 44850064624,
+#   branch debt/mutation-legs at 969754d9.
+# Stryker 4.16.0 / .NET SDK 10.0, ubuntu-latest.
+# WHY IT IS HERE: the negative case for check 7. 157 mutants tested, 1 Killed / 0 Survived /
+#   0 Timeout / 156 Errors - every error "The test host crashed or became unreachable while testing
+#   this mutant" in the json report - and Stryker, which leaves errors out of the score, printed
+#   100.00 % and exited 0. The leg reported SUCCESS on one scored mutant. A run that is mostly
+#   RuntimeErrors must be refused.
+# Paths scrubbed to /repo -- a plain textual substitution.
+
+[38;5;11m   _____ _              _               _   _ ______ _______  [0m
+[38;5;11m  / ____| |            | |             | \ | |  ____|__   __| [0m
+[38;5;11m | (___ | |_ _ __ _   _| | _____ _ __  |  \| | |__     | |    [0m
+[38;5;11m  \___ \| __| '__| | | | |/ / _ \ '__| | . ` |  __|    | |    [0m
+[38;5;11m  ____) | |_| |  | |_| |   <  __/ |    | |\  | |____   | |    [0m
+[38;5;11m |_____/ \__|_|   \__, |_|\_\___|_| (_)|_| \_|______|  |_|    [0m
+[38;5;11m                   __/ |                                      [0m
+[38;5;11m                  |___/                                       [0m
+
+
+Version: [38;5;2m4.16.0[0m
+
+[01:26:13 WRN] Using a concurrency of 4 which is more than recommended 2 for normal system operation. This might have an impact on performance.
+[01:26:13 INF] Stryker will use a max of 4 parallel testsessions.
+[01:26:13 INF] Analysis starting.
+[01:26:13 INF] Analyzing 1 test project(s).
+[38;5;11mA new version of Stryker.NET (5.1.0) is available. Please consider upgrading [0m
+[38;5;11musing `dotnet tool update -g dotnet-stryker`[0m
+
+[01:26:24 INF] Found project /repo/src/MMLib.Alvo/MMLib.Alvo.csproj to mutate.
+[01:26:24 INF] Analysis complete.
+[01:26:24 INF] Building test project /repo/test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj (1/1)
+[01:26:24 INF] Building project MMLib.Alvo.Api.Tests.csproj using dotnet build MMLib.Alvo.Api.Tests.csproj -c Debug --property:Platform=AnyCPU (directory /repo/test/MMLib.Alvo.Api.Tests.)
+[01:27:38 WRN] The Microsoft Test Platform testrunner is currently in preview. Results should be verified since this feature is still being tested.
+[01:27:39 INF] Number of tests found: 1236 for project /repo/src/MMLib.Alvo/MMLib.Alvo.csproj. Initial test run started.
+[01:29:39 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/PayloadViolations.cs resulted in a compile error (at 279:12) with id: CS1620, message: Argument 2 must be passed with the 'ref' keyword (Source code: (StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(2590)?            $""
+:            $"The field stores {field.Precision} digits in total with {field.Scale} of them fractional, so "
+)
+            + (StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(2591)?$"":$"at most {(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(2592)?field.Precision + field.Scale:field.Precision - field.Scale)} digits may precede the decimal point."))
+[01:29:39 INF] Safe Mode! Stryker will remove all mutations in Precision and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Commands/Internal/CommandCompletion.cs resulted in a compile error (at 23:14) with id: CS0165, message: Use of unassigned local variable 'framework' (Source code: framework)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in WriteInUnitAsync and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Descriptor/Internal/RollupResolver.cs resulted in a compile error (at 352:38) with id: CS0165, message: Use of unassigned local variable 'aggregated' (Source code: aggregated)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in EnsureAggregatedFieldIsResolvable and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Events/Internal/AlvoEventOptionsConfiguration.cs resulted in a compile error (at 67:26) with id: CS0165, message: Use of unassigned local variable 'section' (Source code: section)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in Configure and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Events/Internal/DeliveryDispatcher.cs resulted in a compile error (at 356:58) with id: CS0165, message: Use of unassigned local variable 'handler' (Source code: handler)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in RunContainedAsync and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Expressions/Internal/HostCelFunction.cs resulted in a compile error (at 1032:46) with id: CS0165, message: Use of unassigned local variable 'type' (Source code: type)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in Parameter and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Extensions/Internal/HandlerBinding.cs resulted in a compile error (at 77:54) with id: CS0165, message: Use of unassigned local variable 'shape' (Source code: shape)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in TypedMapping and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Lifecycle/EntityLifecycleService.cs resulted in a compile error (at 24:33) with id: CS0165, message: Use of unassigned local variable 'machine' (Source code: machine)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in EnsureTransition and mark them as 'compile error'.
+[01:29:57 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Reads/Internal/ReadExtensionBinding.cs resulted in a compile error (at 114:62) with id: CS0165, message: Use of unassigned local variable 'entity' (Source code: entity)
+[01:29:57 INF] Safe Mode! Stryker will remove all mutations in BindEntity and mark them as 'compile error'.
+[01:30:05 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Commands/Internal/CommandEndpointFilter.cs resulted in a compile error (at 119:30) with id: CS0165, message: Use of unassigned local variable 'admitted' (Source code: admitted)
+[01:30:05 INF] Safe Mode! Stryker will remove all mutations in AdmittedAsync and mark them as 'compile error'.
+[01:30:05 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Expressions/Internal/CelTypeChecker.cs resulted in a compile error (at 1843:35) with id: CS0411, message: The type arguments for method 'Enumerable.Select<TSource, TResult>(IEnumerable<TSource>, Func<TSource, int, TResult>)' cannot be inferred from the usage. Try specifying the type arguments explicitly. (Source code: Select)
+[01:30:05 INF] Safe Mode! Stryker will remove all mutations in Arity and mark them as 'compile error'.
+[01:30:05 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Lifecycle/EntityTimerReplanJob.cs resulted in a compile error (at 43:59) with id: CS0165, message: Use of unassigned local variable 'decision' (Source code: decision)
+[01:30:05 INF] Safe Mode! Stryker will remove all mutations in RunAsync and mark them as 'compile error'.
+[01:30:13 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/AlvoDocumentTransformer.cs resulted in a compile error (at 231:37) with id: CS0165, message: Use of unassigned local variable 'policy' (Source code: policy)
+[01:30:13 INF] Safe Mode! Stryker will remove all mutations in ViewOf and mark them as 'compile error'.
+[01:30:13 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Hooks/Internal/WriteExtensionRunner.cs resulted in a compile error (at 142:17) with id: CS0161, message: 'WriteExtensionRunner.Fires(BoundWriteHook, WriteInvocation, WriteHookStage, (PolicyCatalog? Catalog, IReadOnlyDictionary<string, object?> Sets), CancellationToken)': not all code paths return a value (Source code: private bool Fires(
+        BoundWriteHook hook, WriteInvocation invocation, WriteHookStage stage,
+        (PolicyCatalog? Catalog, IReadOnlyDictionary<string, object?> Sets) written, CancellationToken cancellationToken)
+{    {
+        if (hook.ConditionFor(invocation.Entity) is not { } condition)
+{        return (StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15697)?false:true);
+}
+        try
+{        {
+            using var pass = budget.Enter(cancellationToken);
+            return CelInterpreter.EvaluatePredicate(condition, Current(invocation, stage), invocation.Old, invocation.Caller);
+        }
+}        catch (Exception thrown) when (WriteCancelled(thrown, cancellationToken))
+{        if(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15700)){;}else{throw new OperationCanceledException(cancellationToken);}
+}        catch (CelFunctionException refused) when ((StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15701)?refused.OnCallerData || !OnCallersData(condition, invocation, stage, written):refused.OnCallerData && (StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15702)?OnCallersData(condition, invocation, stage, written):!OnCallersData(condition, invocation, stage, written))))
+{        if(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15704)){;}else{throw refused.NotTheCallers();}
+}        catch (Exception thrown) when ((StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15705)?thrown is CelFunctionException { IsHost: false }:(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15706)?thrown is not CelFunctionException { IsHost: true }:thrown is not CelFunctionException { IsHost: false })))
+{        if(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(15708)){;}else{throw FailBeforeRun(hook.Id, HookFailedException.Exception, thrown);}
+}    }
+})
+[01:30:13 INF] Safe Mode! Stryker will remove all mutations in Fires and mark them as 'compile error'.
+[01:30:13 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Hooks/Internal/WriteHookBinding.cs resulted in a compile error (at 160:70) with id: CS0165, message: Use of unassigned local variable 'entity' (Source code: entity)
+[01:30:13 INF] Safe Mode! Stryker will remove all mutations in EntityConditions and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Commands/Internal/CommandRunner.cs resulted in a compile error (at 75:35) with id: CS0165, message: Use of unassigned local variable 'key' (Source code: key)
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in ReleaseAsync and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Commands/Internal/CommandRunner.cs resulted in a compile error (at 94:33) with id: CS0165, message: Use of unassigned local variable 'result' (Source code: result)
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in FinishAsync and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Commands/Internal/CommandRunner.cs resulted in a compile error (at 106:37) with id: CS0165, message: Use of unassigned local variable 'key' (Source code: key)
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in FailedAsync and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Descriptor/Internal/DescriptorValidator.cs resulted in a compile error (at 1015:29) with id: CS0165, message: Use of unassigned local variable 'exclude' (Source code: exclude)
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in EventExclusionErrors and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Expressions/Internal/CelFunctionBudget.cs resulted in a compile error (at 82:256) with id: CS0165, message: Use of unassigned local variable 'result' (Source code: result)
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in Call and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs resulted in a compile error (at 967:24) with id: CS0161, message: 'AlvoManagementService.Caller(ManagementSimulatedCaller)': not all code paths return a value (Source code: private AlvoContext Caller(ManagementSimulatedCaller caller)
+{    {
+        if (caller.User is not { } user)
+{        return Anonymous(caller.Roles);
+}
+        try
+{        return new AlvoContext
+            {
+                User = new UserId(user),
+                Roles = ((StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(16939)?RoleCatalog.BuiltInOnly:roles.DeclaredRoles ?? RoleCatalog.BuiltInOnly)).Resolve((StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(16941)?caller.Roles :(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(16940)?[]:caller.Roles ?? []))),
+                Tenant = caller.Tenant is { } tenant ? new TenantId(tenant) : null,
+            };
+}        catch (UnknownRoleException refusal)
+{        if(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(16946)){;}else{throw new ManagementSimulationException(refusal.Message, refusal);}
+}        catch (ArgumentException refusal)
+{        if(StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(16948)){;}else{throw new ManagementSimulationException(
+                (StrykervLUdhSkZtTfxvWU.MutantControl.IsActive(16949)?                $"":                $"{refusal.Message} Send at least one role, or omit 'user' to simulate the anonymous caller."),
+                refusal);}
+}    }
+})
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in Caller and mark them as 'compile error'.
+[01:30:21 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Reads/Internal/ReadExtensionRunner.cs resulted in a compile error (at 186:13) with id: CS0165, message: Use of unassigned local variable 'fields' (Source code: fields)
+[01:30:21 INF] Safe Mode! Stryker will remove all mutations in Checked and mark them as 'compile error'.
+[01:30:37 WRN] An unidentified mutation in /repo/src/MMLib.Alvo/Api/Internal/FormatCatalog.cs resulted in a compile error (at 220:17) with id: CS0165, message: Use of unassigned local variable 'format' (Source code: format)
+[01:30:37 INF] Safe Mode! Stryker will remove all mutations in AddFormatOf and mark them as 'compile error'.
+[01:30:55 INF] 21643 mutants created
+[01:30:55 INF] 3321  mutants got status CompileError. Reason: Mutant caused compile errors
+[01:30:55 INF] 39    mutants got status Ignored.      Reason: Removed by block already covered filter
+[01:30:55 INF] 18126 mutants got status Ignored.      Reason: Removed by mutate filter
+[01:30:55 INF] 21486 total mutants are skipped for the above mentioned reasons
+[01:30:55 INF] 157   total mutants will be tested
+
+Killed:   [38;5;13m  1[0m
+Survived: [38;5;13m  0[0m
+Timeout:  [38;5;13m  0[0m
+Errors:  [38;5;13m156[0m
+
+
+All mutants have been tested, and your mutation score has been calculated
+…
+[38;5;2mYour json report has been generated at:[0m
+[38;5;2mfile:///repo/test/StrykerOutput/2026-11-21.01-[0m
+[38;5;2m26-10/reports/mutation-report.json[0m
+[05:27:53 INF] Time Elapsed 04:01:39.7786611
+[05:27:53 INF] The final mutation score is 100.00 %

@@ -168,6 +168,23 @@ else
   fail "a commit with no issue opens one" "exit 0" "exit $?: $NOTIFY_OUT"
 fi
 
+# --- 1b. The weekly sweep files its OWN issue for the same commit -------------------
+# A sweep and the push run of the same main commit are different runs; one issue for both
+# would read a sweep shard's failure as news about the merge.
+new_case scheduled-sweep
+healthy_jobs
+printf '[{"number":181,"title":"%s"}]\n' "$TITLE_A" > "$CASE_DIR/issues.json"
+if run_notify "$SHA_A" schedule; then
+  if calls_have '^issue create' && calls_have_fixed "Weekly mutation sweep failed on main — ${SHA_A:0:12}"; then
+    pass "a scheduled sweep opens its own issue, not a comment on the push run's"
+  else
+    fail "a scheduled sweep opens its own issue, not a comment on the push run's" \
+         "issue create titled 'Weekly mutation sweep failed on main — ${SHA_A:0:12}'" "$(calls)"
+  fi
+else
+  fail "a scheduled sweep opens its own issue" "exit 0" "exit $?: $NOTIFY_OUT"
+fi
+
 # --- 2. THE REGRESSION THIS CHANGE IS FOR ------------------------------------------
 # An OPEN mutation-gate issue for a DIFFERENT commit must not absorb this one. Before
 # the fix the lookup was by label alone, so three consecutive main commits landed as

@@ -14,9 +14,9 @@
       "!SqliteProviderOptions.cs"
     ],
     "thresholds": {
-      "high": 90,
-      "low": 86,
-      "break": 81
+      "high": 95,
+      "low": 92,
+      "break": 90
     },
     "reporters": [
       "progress",

@@ -6,7 +6,6 @@
     ],
     "test-runner": "mtp",
     "coverage-analysis": "off",
-    "log-to-file": true,
     "additional-timeout": 300000,
     "mutate": [
       "**/Tenants/SelfService/SelfServiceEndpoints.cs",
@@ -28,9 +27,9 @@
       "**/Tenants/SelfService/AppTokenReach.cs"
     ],
     "thresholds": {
-      "high": 80,
-      "low": 40,
-      "break": 30
+      "high": 90,
+      "low": 80,
+      "break": 78
     },
     "reporters": [
       "progress",

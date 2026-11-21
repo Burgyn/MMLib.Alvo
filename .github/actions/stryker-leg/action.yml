@@ -1,0 +1,143 @@
+name: Stryker leg
+description: >-
+  Run one mutation leg of .github/workflows/mutation.yml and judge whether it measured what its
+  config asked for. Shared by the workflow's three matrices (per-push legs, per-push `since` legs,
+  the weekly sweep) so the guard, the working directory and the assertions cannot drift between
+  them. The checkout and the log upload stay in each job: the upload must run on a timeout, and a
+  job-level `if: always()` step is what measurably does (run 44834820709).
+inputs:
+  config:
+    description: The Stryker config, relative to the repository root.
+    required: true
+  project:
+    description: The mutated csproj, relative to the repository root (must exist).
+    required: true
+  mutants:
+    description: The declared mutant count, the floor of assert-mutation-run's check 3.
+    required: true
+  suite:
+    description: The declared test count, the floor of check 4.
+    required: true
+  shard:
+    description: The leg's name, for messages.
+    required: true
+  mode:
+    description: >-
+      Empty, `canary`, `since` or `sweep` — scripts/assert-mutation-run's 6th argument. `since` is
+      narrowed to `since-changed` here when the merge touched the leg's files.
+    default: ''
+  since:
+    description: For mode `since`, the commit to diff against (the previous main commit).
+    default: ''
+  concurrency:
+    description: Stryker's --concurrency.
+    default: '4'
+  debug-log:
+    description: '`true` to pass --log-to-file (trace level).'
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        global-json-file: global.json
+
+    # Fails the shard rather than skipping it. This step used to set run=false and
+    # let every later step skip, which reported the leg as SUCCESS — a shard that
+    # measured nothing looking exactly like a shard that measured everything. All the
+    # mutated projects exist, so a missing csproj means a rename that silently retired a
+    # leg, which is precisely the failure this workflow exists to make loud.
+    - name: Guard — mutated project must exist
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+        SHARD: ${{ inputs.shard }}
+      run: |
+        if [ ! -f "$PROJECT" ]; then
+          echo "::error::Mutation run ($SHARD) has no project at '$PROJECT'. If it was renamed or moved, update the matrix; a shard that cannot find its project must not report success."
+          exit 1
+        fi
+
+    - name: Restore tools
+      shell: bash
+      run: dotnet tool restore
+
+    - name: Mutation test
+      shell: bash
+      # From `test/`, NOT the repo root: with MMLib.Alvo.slnx in the working directory
+      # Stryker enters solution mode and ignores each config's `test-projects`, running
+      # every test project that references the mutated assembly. The workflow header has the
+      # numbers. Hence `../<config>` too.
+      working-directory: test
+      env:
+        CONFIG: ../${{ inputs.config }}
+        MUTANTS: ${{ inputs.mutants }}
+        SUITE: ${{ inputs.suite }}
+        SHARD: ${{ inputs.shard }}
+        MODE: ${{ inputs.mode }}
+        SINCE: ${{ inputs.since }}
+        CONCURRENCY: ${{ inputs.concurrency }}
+        DEBUG_LOG: ${{ inputs.debug-log }}
+      run: |
+        # `shell: bash` means `bash -eo pipefail`, so the pipeline below would abort the step
+        # the moment Stryker exits non-zero — before the assertions run. Turn -e off around it
+        # and take the exit code by hand, so that a run which measured the WRONG THING is
+        # diagnosed as that rather than as a low score. `|| true` would not do: it clobbers
+        # PIPESTATUS.
+        #
+        # --concurrency is per leg (the workflow header, "THE CADENCE"): 4 by default, 2 on the
+        # TestHost-heavy legs whose hosts overran Stryker's test-run timeout at 4 and were
+        # force-killed — reported as RuntimeErrors (commands-http, accounts-store).
+        extra=()
+        if [ "$DEBUG_LOG" = true ]; then
+          extra+=(--log-to-file)
+        fi
+
+        # `since` mode: the same config, plus Stryker's `since` against the previous main
+        # commit, so only what the merge changed is mutated. Derived here rather than kept as a
+        # second config per leg, so the two cannot drift. Test-file changes are excluded from
+        # the diff: with coverage-analysis off Stryker cannot tell which mutants a changed test
+        # covers, so it would treat every mutant as changed and turn each push into a full run.
+        # The weekly sweep is what judges a weakened test.
+        #
+        # And it decides whether ZERO mutants is an acceptable answer. A merge that changed none
+        # of this leg's files must test nothing and pass (assert mode `since`); a merge that DID
+        # change one and still tests nothing is a diff Stryker failed to see — a false green — so
+        # then the assert runs in mode `since-changed`, which refuses zero. "This leg's files" is
+        # the config's own `mutate` set as scripts/mutation-shards resolves it, the same resolver
+        # the weekly shards are cut with.
+        if [ "$MODE" = since ]; then
+          if [ -z "$SINCE" ]; then
+            echo "::error::Mutation run ($SHARD): mode 'since' needs the commit to diff against, and none was given. Refusing to run a full leg under a diff-run's floors."
+            exit 1
+          fi
+          jq --arg target "$SINCE" \
+            '.["stryker-config"].since = {"target": $target, "ignore-changes-in": ["**/test/**", "**/*.md"]}' \
+            "$CONFIG" > stryker-since-config.json
+          leg_config="${CONFIG#../}"
+          CONFIG=stryker-since-config.json
+          changed="$(git -C .. diff --name-only "$SINCE" HEAD -- 'src/*.cs' | sort)"
+          mutated="$(python3 ../scripts/mutation-shards --resolve "$leg_config" | sort)"
+          touched="$(comm -12 <(printf '%s\n' "$changed") <(printf '%s\n' "$mutated") | sed '/^$/d')"
+          if [ -n "$touched" ]; then
+            MODE=since-changed
+            echo "[mutation] $SHARD: since $SINCE — the merge changed $(printf '%s\n' "$touched" | wc -l | tr -d ' ') of this leg's files, so zero mutants would be a false green:"
+            printf '  %s\n' $touched
+          else
+            echo "[mutation] $SHARD: since $SINCE — the merge changed none of this leg's files; zero mutants is the expected answer."
+          fi
+        fi
+
+        set +e
+        dotnet tool run dotnet-stryker -f "$CONFIG" --concurrency "$CONCURRENCY" "${extra[@]}" 2>&1 | tee stryker-output.log
+        stryker_exit="${PIPESTATUS[0]}"
+        set -e
+
+        # Did this run MEASURE what the config asked for? The positive assertions live in
+        # scripts/assert-mutation-run so they can be run over a saved log by hand
+        # (scripts/test-assert-mutation-run). Read its header before changing any of them.
+        ../scripts/assert-mutation-run \
+          stryker-output.log "$CONFIG" "$MUTANTS" "$SUITE" "$SHARD" "$MODE"
+
+        exit "$stryker_exit"

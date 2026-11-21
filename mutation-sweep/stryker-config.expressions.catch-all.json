@@ -1,0 +1,63 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "**/Expressions/**",
+      "!**/Expressions/Setup.cs",
+      "!Expressions/Internal/CelArgumentMarshaller.cs",
+      "!Expressions/Internal/CelBuiltInFunctions.Conversions.cs",
+      "!Expressions/Internal/CelBuiltInFunctions.Math.cs",
+      "!Expressions/Internal/CelBuiltInFunctions.Text.cs",
+      "!Expressions/Internal/CelBuiltInFunctions.cs",
+      "!Expressions/Internal/CelCompiler.cs",
+      "!Expressions/Internal/CelDataOrigin.cs",
+      "!Expressions/Internal/CelDuration.cs",
+      "!Expressions/Internal/CelFunction.cs",
+      "!Expressions/Internal/CelFunctionBudget.cs",
+      "!Expressions/Internal/CelFunctionBudgetPolicy.cs",
+      "!Expressions/Internal/CelFunctionCatalog.cs",
+      "!Expressions/Internal/CelFunctionException.cs",
+      "!Expressions/Internal/CelFunctionRegistration.cs",
+      "!Expressions/Internal/CelHookArithmetic.cs",
+      "!Expressions/Internal/CelInterpreter.cs",
+      "!Expressions/Internal/CelLexer.cs",
+      "!Expressions/Internal/CelParser.cs",
+      "!Expressions/Internal/CelPath.cs",
+      "!Expressions/Internal/CelTemporal.cs",
+      "!Expressions/Internal/CelText.cs",
+      "!Expressions/Internal/CelToken.cs",
+      "!Expressions/Internal/CelTree.cs",
+      "!Expressions/Internal/CelTypeChecker.Relations.cs",
+      "!Expressions/Internal/CelTypeChecker.cs",
+      "!Expressions/Internal/HostCelFunction.cs",
+      "!Expressions/Internal/IChangeListPredicateEvaluator.cs",
+      "!Expressions/Internal/IValueCompiler.cs",
+      "!Expressions/Internal/PredicateEvaluator.cs",
+      "!Expressions/Internal/RelationImageValue.cs",
+      "!Expressions/Internal/RelationLifter.cs",
+      "!Expressions/Internal/RoleMembership.cs",
+      "!Expressions/Internal/RoleProvenance.cs",
+      "!Expressions/Internal/SqlPredicateRenderer.Constraint.cs",
+      "!Expressions/Internal/SqlPredicateRenderer.Relations.cs",
+      "!Expressions/Internal/SqlPredicateRenderer.Temporal.cs",
+      "!Expressions/Internal/SqlPredicateRenderer.cs",
+      "!Expressions/Internal/StoredPredicateSurface.cs"
+    ],
+    "thresholds": {
+      "high": 96,
+      "low": 92,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}
