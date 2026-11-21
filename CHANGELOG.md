@@ -1025,6 +1025,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Minting a token in a stranger's tenant is always `404`.** `POST /auth/v1/tokens` answered a person at the 100-token
+  cap `409` for a service token in a tenant they are not in, and `404` for a personal one; both are now the self-service
+  routes' one `404`, byte for byte an unknown tenant's. A service token naming a personal tenant the descriptor does not
+  honour (`personalTenant` off) is that `404` too, as on every other tenant-scoped route, rather than `409`. **Docs:**
+  `docs/architecture/accounts.md`.
 - **An app token sent as `Authorization: Bearer` is told where it belongs** (#539). A personal or service token
   (`alvo_pat_…`/`alvo_svc_…`) presented as a Bearer is still `401` `unauthenticated` with `Bearer
   error="invalid_token"`, and is still never authenticated, but its detail is now one fixed sentence naming the API-key

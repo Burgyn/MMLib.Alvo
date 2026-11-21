@@ -4,7 +4,24 @@ using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.DocsGen.Tests.Host;
 
-public partial class AccountsReferenceTests
+/// <summary>The sign-in reference, generated once for every fact in the class: each capture boots a host.</summary>
+public sealed class AccountsReferenceCapture : IAsyncLifetime
+{
+    /// <summary>Gets the generated reference document.</summary>
+    internal JsonNode Document { get; private set; } = null!;
+
+    /// <inheritdoc/>
+    public async ValueTask InitializeAsync()
+    {
+        var openApi = await AccountsReferenceGenerator.CaptureAsync(RepositoryRoot.Find(), TestContext.Current.CancellationToken);
+        Document = JsonNode.Parse(AccountsReferenceGenerator.Render(openApi).Content)!;
+    }
+
+    /// <inheritdoc/>
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+public partial class AccountsReferenceTests(AccountsReferenceCapture reference) : IClassFixture<AccountsReferenceCapture>
 {
     private static readonly string[] _signInPaths =
     [
@@ -25,6 +42,7 @@ public partial class AccountsReferenceTests
         "/auth/v1/user",
     ];
 
+    /// <summary>The operation ids <c>SelfServiceEndpoints</c> declares as its <c>*OperationId</c> constants, one per route.</summary>
     private static readonly string[] _selfServiceOperations =
     [
         "tenants.list", "tenants.create", "tenants.rename", "tenants.listMembers", "tenants.updateMember",
@@ -34,26 +52,20 @@ public partial class AccountsReferenceTests
 
     private static readonly string[] _guides = ["sign-in", "tenants-and-invitations", "tokens"];
 
-    private static async Task<JsonNode> GeneratedAsync()
-    {
-        var openApi = await AccountsReferenceGenerator.CaptureAsync(RepositoryRoot.Find(), TestContext.Current.CancellationToken);
-        return JsonNode.Parse(AccountsReferenceGenerator.Render(openApi).Content)!;
-    }
-
     private static string[] PathsOf(JsonNode document) => [.. document["paths"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
     [Fact]
-    public async Task The_reference_holds_exactly_the_sign_in_routes() =>
-        PathsOf(await GeneratedAsync()).ShouldBe(_signInPaths);
+    public void The_reference_holds_exactly_the_sign_in_routes() =>
+        PathsOf(reference.Document).ShouldBe(_signInPaths);
 
     [Fact]
-    public async Task No_entity_route_reaches_the_sign_in_reference() =>
-        PathsOf(await GeneratedAsync()).ShouldAllBe(path => path.StartsWith("/auth/v1", StringComparison.Ordinal));
+    public void No_entity_route_reaches_the_sign_in_reference() =>
+        PathsOf(reference.Document).ShouldAllBe(path => path.StartsWith("/auth/v1", StringComparison.Ordinal));
 
     [Fact]
-    public async Task Every_operation_keeps_its_operation_id()
+    public void Every_operation_keeps_its_operation_id()
     {
-        var ids = (await GeneratedAsync())["paths"]!.AsObject()
+        var ids = reference.Document["paths"]!.AsObject()
             .SelectMany(path => path.Value!.AsObject().Select(operation => operation.Value!["operationId"]?.GetValue<string>()))
             .ToList();
 
@@ -102,9 +114,9 @@ public partial class AccountsReferenceTests
     /// code alike — must be an operation of the generated reference: a renamed route or a concrete id in a path fails here.
     /// </summary>
     [Fact]
-    public async Task Every_route_a_guide_names_is_a_sign_in_operation()
+    public void Every_route_a_guide_names_is_a_sign_in_operation()
     {
-        var paths = (await GeneratedAsync())["paths"]!.AsObject();
+        var paths = reference.Document["paths"]!.AsObject();
         var named = GuideRoutes().ToList();
 
         foreach (var guide in _guides)
