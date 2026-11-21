@@ -12,7 +12,9 @@ namespace MMLib.Alvo.Api.Tests;
 /// </summary>
 /// <remarks>
 /// The rows are the table's own cells plus the plan's D7 — the scheme compared case-insensitively, a non-Bearer
-/// scheme ignored, a repeated or whitespace-bearing Bearer malformed rather than "take the first". The enum names
+/// scheme ignored, a repeated or whitespace-bearing Bearer malformed rather than "take the first" — plus #539: a
+/// well-formed Bearer carrying a reserved app-token prefix (ordinal, as <c>AppTokenSecret</c> reserves it) is read as
+/// a token in the wrong header, its value dropped so nothing downstream can resolve it. The enum names
 /// travel as text because the reading's types are internal and a public theory cannot name them.
 /// </remarks>
 public sealed class CredentialReadingTests
@@ -35,6 +37,15 @@ public sealed class CredentialReadingTests
         { "Data", true, null, ["Bearer a", "Bearer b"], "MalformedBearer", null },
         { "Data", true, null, ["Basic x", "Bearer t"], "MalformedBearer", null },
         { "Data", true, null, [], "None", null },
+        { "Data", true, null, ["Bearer alvo_pat_k.s"], "AppTokenBearer", null },
+        { "Data", true, null, ["Bearer alvo_svc_k.s"], "AppTokenBearer", null },
+        { "Data", true, null, ["Bearer alvo_pat_"], "AppTokenBearer", null },
+        { "Data", true, null, ["bearer alvo_svc_k.s"], "AppTokenBearer", null },
+        { "Data", true, null, ["Bearer ALVO_PAT_k.s"], "Bearer", "ALVO_PAT_k.s" },
+        { "Data", true, null, ["Bearer alvo_pat_k s"], "MalformedBearer", null },
+        { "Data", true, "k", ["Bearer alvo_pat_k.s"], "Ambiguous", null },
+        { "Data", false, null, ["Bearer alvo_pat_k.s"], "None", null },
+        { "Management", true, null, ["Bearer alvo_svc_k.s"], "None", null },
         { "Management", true, null, ["Bearer t"], "None", null },
         { "Management", true, "k", ["Bearer t"], "ApiKey", "k" },
     };
