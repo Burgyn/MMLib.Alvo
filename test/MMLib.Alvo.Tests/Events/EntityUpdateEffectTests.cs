@@ -133,6 +133,6 @@ public sealed class EntityUpdateEffectTests
             AlvoFrameworkEnvelope completion, CommandKey? key, CommandAnswer? answer, DateTimeOffset now, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public Task<int> SweepAsync(DateTimeOffset claimedBefore, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<int> SweepAsync(DateTimeOffset claimedBefore, int limit, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

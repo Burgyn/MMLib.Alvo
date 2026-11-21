@@ -51,12 +51,12 @@ internal sealed class RefreshGrant(
             return TokenProblems.MissingRefreshToken();
         }
 
-        if (!RefreshTokenFormat.TryParse(presented, await keys.RefreshMacKeyAsync(ct).ConfigureAwait(false), out var id))
+        if (!RefreshTokenFormat.TryParse(presented, await keys.RefreshMacKeyAsync(ct).ConfigureAwait(false), out var token))
         {
             return TokenProblems.InvalidGrant();
         }
 
-        var outcome = await store.RefreshAsync(Presentation(id), ct).ConfigureAwait(false);
+        var outcome = await store.RefreshAsync(Presentation(token), ct).ConfigureAwait(false);
         var policy = signIn.Policy;
         return outcome is { Status: RefreshStatus.Rotated or RefreshStatus.Replayed, ChildId: { } child, Account: { } account, Session: { } session, Provider: { } provider }
             && signIn.Admits(policy, provider)
@@ -64,15 +64,16 @@ internal sealed class RefreshGrant(
                 : TokenProblems.InvalidGrant();
     }
 
-    private RefreshRequest Presentation(Guid id)
+    private RefreshRequest Presentation(RefreshTokenValue token)
     {
         var settings = options.Value;
         return new RefreshRequest(
-            id,
+            token.Id,
             Guid.NewGuid(),
             clock.GetUtcNow(),
             TimeSpan.FromSeconds(settings.RefreshReuseGraceSeconds),
             TimeSpan.FromDays(settings.RefreshIdleDays),
-            signIn.PersonalTenant());
+            signIn.PersonalTenant(),
+            token.Session);
     }
 }

@@ -41,6 +41,7 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
     /// <param name="write">The write.</param>
     [Theory]
     [InlineData("a reuse")]
+    [InlineData("a swept ancestor's reuse")]
     [InlineData("an invitation")]
     public async Task A_reuse_or_an_invitation_takes_the_account_row_before_the_session(string write)
     {
@@ -51,12 +52,19 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
         (await tenants.CreateSharedAsync(new CreateTenantRequest(tenant, "Acme", account, [], 5, Start), Ct)).Status
             .ShouldBe(CreateTenantStatus.Created);
         (await store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        if (write == "a swept ancestor's reuse")
+        {
+            await ScalarAsync(
+                services,
+                $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE id = '{session.RefreshTokenId:D}'");
+        }
+
         await using var holder = await PostgresRowLocks.HoldAsync(
             services,
             $"UPDATE {TableOf(services, AlvoFrameworkTables.AuthAccountsSuffix)} SET last_sign_in_at = last_sign_in_at WHERE id = '{account.Value:D}'");
 
-        Task call = write == "a reuse"
-            ? store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(2)), Ct)
+        Task call = write != "an invitation"
+            ? store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(2)) with { Session = session.SessionId }, Ct)
             : tenants.CreateInvitationAsync(
                 new CreateInvitationRequest(
                     Guid.NewGuid(), tenant, account, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"), [], GrantsOwner: true,
@@ -70,7 +78,38 @@ public sealed class PostgreSqlAccountStoreTests : AccountStoreFacts, IAsyncLifet
             .ShouldBeTrue($"{write} holds the session while it waits for the account");
         await holder.CommitAsync(Ct);
         await call;
-        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(write == "a reuse" ? SessionRevocations.Reuse : null);
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(write == "an invitation" ? null : SessionRevocations.Reuse);
+    }
+
+    /// <summary>
+    /// #527 after #543: a reuse reads its session before it takes the account row, so it re-reads it after the lock. A ban
+    /// that committed while the reuse waited has ended the session already; the reuse is then only refused, and the ban's
+    /// reason stands. Red without the re-read, which answered <see cref="RefreshStatus.Reused"/> for a session already dead.
+    /// </summary>
+    /// <param name="path">Which reuse path.</param>
+    [Theory]
+    [InlineData("a rotated row presented again")]
+    [InlineData("a swept ancestor")]
+    public async Task A_reuse_that_waited_on_a_ban_is_only_refused(string path)
+    {
+        var (store, services) = await StoreAsync();
+        var (account, session) = await SignedInAsync(store);
+        (await store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(1)), Ct)).Status.ShouldBe(RefreshStatus.Rotated);
+        if (path == "a swept ancestor")
+        {
+            await ScalarAsync(
+                services,
+                $"DELETE FROM {TableOf(services, AlvoFrameworkTables.AuthRefreshTokensSuffix)} WHERE id = '{session.RefreshTokenId:D}'");
+        }
+
+        await using var holder = await PostgresRowLocks.HoldAsync(services, Revocation(services, "a disable", account, session.SessionId));
+
+        var reuse = store.RefreshAsync(Refresh(session.RefreshTokenId, Start.AddMinutes(2)) with { Session = session.SessionId }, Ct);
+        await PostgresRowLocks.UntilWaitingAsync(services, 1, "the reuse must queue behind the ban's account row", reuse);
+        await holder.CommitAsync(Ct);
+
+        (await reuse).Status.ShouldBe(RefreshStatus.Refused);
+        (await RevokedReasonAsync(services, session.SessionId)).ShouldBe(SessionRevocations.Disabled);
     }
 
     [Theory]

@@ -262,10 +262,29 @@ public abstract class LedgerFacts
         var young = await ledger.ClaimAsync(Key("young"), _now.AddHours(-1), Ct);
         await ledger.CompleteAsync(Completion(), Held(Key("young"), young), new CommandAnswer(200, null), _now.AddHours(-1), Ct);
 
-        (await ledger.SweepAsync(_now - CommandLedgerLimits.Retention, Ct)).ShouldBe(1);
+        (await ledger.SweepAsync(_now - CommandLedgerLimits.Retention, 500, Ct)).ShouldBe(1);
 
         (await ledger.ClaimAsync(Key("old"), _now, Ct)).State.ShouldBe(CommandClaimState.Claimed, "an expired key is a new request");
         (await ledger.ClaimAsync(Key("young"), _now, Ct)).State.ShouldBe(CommandClaimState.Answered);
+    }
+
+    /// <summary>#527: both ledgers' sweeps are bounded — one call deletes at most its limit, and the next call the rest.</summary>
+    [Fact]
+    public async Task A_ledger_sweep_deletes_at_most_its_limit()
+    {
+        var services = await StartAsync(Schema(), Descriptor());
+        var webhooks = services.GetRequiredService<IInboundWebhookLedger>();
+        var commands = services.GetRequiredService<ICommandLedger>();
+        foreach (var id in new[] { "a", "b", "c" })
+        {
+            await webhooks.ClaimAsync("/hooks/pay", id, _now.AddDays(-8), Ct);
+            await commands.ClaimAsync(Key(id), _now.AddHours(-25), Ct);
+        }
+
+        (await webhooks.SweepAsync(_now - InboundWebhookLimits.Retention, 2, Ct)).ShouldBe(2);
+        (await webhooks.SweepAsync(_now - InboundWebhookLimits.Retention, 2, Ct)).ShouldBe(1);
+        (await commands.SweepAsync(_now - CommandLedgerLimits.Retention, 2, Ct)).ShouldBe(2);
+        (await commands.SweepAsync(_now - CommandLedgerLimits.Retention, 2, Ct)).ShouldBe(1);
     }
 
     [Fact]
@@ -304,7 +323,7 @@ public abstract class LedgerFacts
         var young = await ledger.ClaimAsync("/hooks/pay", "young", _now.AddDays(-6), Ct);
         await ledger.CompleteAsync("/hooks/pay", "young", young.Token!, _now.AddDays(-6), Ct);
 
-        (await ledger.SweepAsync(_now - InboundWebhookLimits.Retention, Ct)).ShouldBe(1);
+        (await ledger.SweepAsync(_now - InboundWebhookLimits.Retention, 500, Ct)).ShouldBe(1);
 
         (await ledger.ClaimAsync("/hooks/pay", "old", _now, Ct)).State.ShouldBe(WebhookClaim.Claimed, "a swept id is forgotten");
         (await ledger.ClaimAsync("/hooks/pay", "young", _now, Ct)).State.ShouldBe(WebhookClaim.Completed);

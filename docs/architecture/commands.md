@@ -134,7 +134,7 @@ refuses boot (Ruling 16).
   response" — it replays by re-reading the row through the caller's current policy. A command has no row to re-read, so
   its ledger stores the rendered answer; the per-credential scope is what keeps a stored answer from reaching anyone
   but the credential it was given to.
-- **Retention**: keys claimed more than **24 hours** ago are deleted by the hourly `LedgerSweeper`, on an index on
+- **Retention**: keys claimed more than **24 hours** ago are deleted by the hourly framework sweeper (`FrameworkSweeper`, its `command keys` job, in batches of 500), on an index on
   `claimed_at`; a retry after that runs as a new request (Ruling 41). 24 h matches the IETF draft's "at least 24 hours"
   and bounds a table that otherwise grows with every keyed call (#115).
 - Framework DDL is ensured once per process and table by `OnceDdl`, beside `SystemSchemaInitializer`'s boot creation
@@ -168,7 +168,7 @@ what was signed (Ruling 25).
   (`Func<HttpRequest, ReadOnlyMemory<byte>, CancellationToken, ValueTask<TenantId?>>`), is called only after
   verification and is given the verified bytes; a `null` answer falls back to `Tenant`; with neither the handler runs
   as `System(null)`, which every tenant-scoped entity refuses. The body is replayed before and after the resolver.
-- **The sweep**: the hourly `LedgerSweeper` deletes ids received more than **7 days** ago, and command keys older than
+- **The sweep**: the hourly framework sweeper (`FrameworkSweeper`, #527) deletes, in batches of 500, ids received more than **7 days** ago, and command keys older than
   24 hours; a failed sweep is logged and retried, never fatal (Rulings 26, 41).
 - **What the returned builder does** (Ruling 49 L8): it configures the outer endpoint; an endpoint filter never reaches
   the RDF-built handler, and the system caller is bound to the handler's `AlvoCaller` only, not published through

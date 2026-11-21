@@ -68,7 +68,7 @@ internal sealed class FakeCommandLedger : ICommandLedger
         return Task.CompletedTask;
     }
 
-    public Task<int> SweepAsync(DateTimeOffset claimedBefore, CancellationToken cancellationToken) => Task.FromResult(0);
+    public Task<int> SweepAsync(DateTimeOffset claimedBefore, int limit, CancellationToken cancellationToken) => Task.FromResult(0);
 
     internal void Commit(CommandKey key) => _rows[(key.Scope, key.Key)] = _rows[(key.Scope, key.Key)] with { Committed = true };
 }

@@ -17,6 +17,7 @@ namespace MMLib.Alvo.Accounts
         public System.Collections.Generic.Dictionary<string, MMLib.Alvo.Accounts.AlvoOidcProviderOptions> Providers { get; }
         public int RefreshIdleDays { get; set; }
         public int RefreshReuseGraceSeconds { get; set; }
+        public int RetentionDays { get; set; }
         public int SessionLifetimeDays { get; set; }
     }
     public sealed class AlvoOidcProviderOptions
