@@ -192,6 +192,23 @@ public sealed class TokenRoutesTests
     }
 
     [Fact]
+    public async Task A_personal_tenant_the_descriptor_no_longer_honours_is_the_stranger_404_for_a_service_token()
+    {
+        await using var team = await TeamAsync();
+        var personal = (await team.World.PersonalTenantAsync(team.Ada)).Value;
+        await team.World.ReapplyAsync(descriptor => descriptor["tenancy"]!["selfService"]!.AsObject().Remove("personalTenant"));
+
+        using var unhonoured = await team.World.MintAsync(team.Ada, Service(team, personal, ["dispatcher"], ["jobs:read"]));
+        using var unknown = await team.World.MintAsync(team.Ada, Service(team, Guid.NewGuid(), ["dispatcher"], ["jobs:read"]));
+
+        unhonoured.StatusCode.ShouldBe(HttpStatusCode.NotFound, await unhonoured.ReadTextAsync());
+        (await unhonoured.Content.ReadAsByteArrayAsync(Ct)).ShouldBe(
+            await unknown.Content.ReadAsByteArrayAsync(Ct),
+            "a membership no route honours is a stranger's, not the personal tenant's 409");
+        (await team.World.CountAsync("_api_keys")).ShouldBe(0);
+    }
+
+    [Fact]
     public async Task A_service_token_carries_only_roles_its_owner_holds()
     {
         await using var team = await TeamAsync();
