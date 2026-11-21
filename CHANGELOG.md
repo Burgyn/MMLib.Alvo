@@ -790,8 +790,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `afterUpdate`.
 
   This is refused at apply **and at boot**. A host reading a descriptor file (`Alvo:DescriptorPath`, `FromDescriptor`)
-  that carries one refuses to start, with the condition's JSON pointer and a fix in the log (in the standalone image
-  that exit is still code 139, #340). A stored descriptor that applied before leaves its project `Failed` at start-up:
+  that carries one refuses to start, with the condition's JSON pointer and a fix in the log (exit code 78 in the
+  standalone image since #547). A stored descriptor that applied before leaves its project `Failed` at start-up:
   the process stays up and readiness answers 503. A dashboard or Management API apply is refused the same way.
 - **After-hook templates refuse a row image their event lacks** (#325, same reach). A placeholder reading
   `{{new.<field>}}` in an `afterDelete` hook or `{{old.<field>}}` in an `afterCreate` hook — in `email.to`, a named
@@ -1463,6 +1463,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The standalone host exits 78 on a descriptor the boot refuses at stage 0, not 139** (#340, #547). A mounted
+  descriptor that fails validation — mistyped, or written for a newer Alvo — or that the mapper refuses (a field naming
+  an unknown format, a format pattern that is not a regular expression) used to escape `Main` unhandled, and the
+  container exited with the crash-shaped 139. Stderr now carries the pointed violations under a headline naming the
+  running build, with two fixes (correct the file, or run the newer Alvo it was written for — an older Alvo does not
+  serve a newer descriptor), and the process exits 78; the boot records and logs the same text. An embedded host still
+  gets a `DescriptorValidationException`; an unknown format is now one (at `#/`) instead of an `InvalidDataException`,
+  which also makes a dashboard-first host stand down on it instead of crashing. A validation refusal the *apply* raises
+  (rows a new check breaks, an overlap the database could not count) is unchanged and still exits 139.
 - **Dashboard: renaming or removing a field finds every place that names it** (#513). The schema editor's field
   references missed the constructs added on 2026-11-06, so a rename left them behind (Preview then failed server-side) and
   a removal did not name them. It now carries — and a removal names as blocking — a state machine's `field` and each

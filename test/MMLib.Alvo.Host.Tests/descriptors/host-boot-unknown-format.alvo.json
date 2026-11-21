@@ -1,0 +1,39 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-boot-format",
+  "description": "The host-boot descriptor with a field naming a format nobody declared.",
+  "auth": {
+    "providers": [
+      "local"
+    ],
+    "roles": [
+      "admin"
+    ]
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": {
+          "type": "string",
+          "required": true,
+          "unique": true,
+          "maxLength": 20,
+          "format": "no-such-format"
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 60
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}

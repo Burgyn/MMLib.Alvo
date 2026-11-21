@@ -377,6 +377,22 @@ public sealed class AlvoBootServiceTests
         world.PrimedEntities.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task A_descriptor_stage_zero_refuses_is_tagged_with_the_refusal_an_operator_reads()
+    {
+        using var world = new BootServiceWorld().BootingFrom(BootServiceWorld.Unservable);
+
+        var refused = (await world.BootAsync()).ShouldBeOfType<DescriptorValidationException>();
+
+        var refusal = refused.Data[DescriptorBootPlan.StartupRefusalDataKey].ShouldBeOfType<string>();
+        refusal.ShouldContain("Alvo cannot start: this build (");
+        refusal.ShouldContain("Descriptor validation failed:");
+        refusal.ShouldContain("newer Alvo");
+        world.State.Phase.ShouldBe(AlvoBootPhase.Failed);
+        world.State.Failure.ShouldBe(refusal);
+        world.Log.ShouldContain(entry => entry.Message.Contains("newer Alvo", StringComparison.Ordinal));
+    }
+
     /// <summary>The counterweight: a boot that does apply the validation counts first, and the breaking rows refuse it.</summary>
     [Fact]
     public async Task A_boot_that_applies_a_validation_existing_rows_break_is_refused_by_the_count()
@@ -386,7 +402,9 @@ public sealed class AlvoBootServiceTests
             .BootingFrom(BootServiceWorld.ValidatedCity);
         world.RowsBreakNewValidations = true;
 
-        (await world.BootAsync()).ShouldBeOfType<DescriptorValidationException>();
+        var refused = (await world.BootAsync()).ShouldBeOfType<DescriptorValidationException>();
+        refused.Data.Contains(DescriptorBootPlan.StartupRefusalDataKey)
+            .ShouldBeFalse("a refusal the rows raise at apply is not the descriptor author's alone to fix");
         world.RecordedRevisions().ShouldBe([1]);
     }
 
