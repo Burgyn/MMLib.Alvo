@@ -190,12 +190,16 @@ public class AlvoApiOptionsValidatorTests
         => Validate(api => api.Cors.Origins.Add(origin)).ShouldBeNull();
 
     [Fact]
-    public void A_token_rate_limit_below_one_is_refused()
-        => ShouldFail(api => api.RateLimits.Token = 0, "RateLimits:Token");
+    public void A_token_endpoint_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.TokenEndpoint = 0, "RateLimits:TokenEndpoint");
 
     [Fact]
     public void A_tenant_creation_rate_limit_below_one_is_refused()
-        => ShouldFail(api => api.RateLimits.Create = 0, "RateLimits:Create");
+        => ShouldFail(api => api.RateLimits.Tenants = 0, "RateLimits:Tenants");
+
+    [Fact]
+    public void An_api_token_minting_rate_limit_below_one_is_refused()
+        => ShouldFail(api => api.RateLimits.ApiTokens = 0, "RateLimits:ApiTokens");
 
     [Fact]
     public void An_invitations_rate_limit_below_one_is_refused()

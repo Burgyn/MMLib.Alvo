@@ -28,8 +28,9 @@ internal sealed class AlvoApiOptionsValidator : IValidateOptions<AlvoApiOptions>
         ValidatePaging(options, failures);
         ValidatePayloadBounds(options, failures);
         ValidateCors(options.Cors, failures);
-        RequirePositive(options.RateLimits?.Token ?? 0, "RateLimits:Token", failures);
-        RequirePositive(options.RateLimits?.Create ?? 0, "RateLimits:Create", failures);
+        RequirePositive(options.RateLimits?.TokenEndpoint ?? 0, "RateLimits:TokenEndpoint", failures);
+        RequirePositive(options.RateLimits?.Tenants ?? 0, "RateLimits:Tenants", failures);
+        RequirePositive(options.RateLimits?.ApiTokens ?? 0, "RateLimits:ApiTokens", failures);
         RequirePositive(options.RateLimits?.Invitations ?? 0, "RateLimits:Invitations", failures);
 
         return failures.Count == 0

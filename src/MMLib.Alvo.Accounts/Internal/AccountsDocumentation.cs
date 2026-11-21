@@ -143,7 +143,7 @@ internal static partial class AccountsDocumentation
     {
         var (status, response) = Refusal(
             "429",
-            "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:Token` allows. "
+            "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:TokenEndpoint` allows. "
             + "Wait for `Retry-After`, then send the request again.",
             document);
         response.Headers!["Retry-After"] = Header("Whole seconds until the window admits this client again.", "60");

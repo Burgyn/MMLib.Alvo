@@ -131,7 +131,7 @@ public sealed class TenantRoutesTests
     [Fact]
     public async Task Tenant_creation_answers_429_after_its_limit()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Create = 2);
+        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Tenants = 2);
         var (access, _) = await world.SignInAsync("ada");
 
         using var first = await CreateAsync(world, access, "One");

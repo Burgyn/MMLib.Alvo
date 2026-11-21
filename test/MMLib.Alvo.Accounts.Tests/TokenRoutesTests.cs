@@ -236,10 +236,15 @@ public sealed class TokenRoutesTests
         onService.StatusCode.ShouldBe(HttpStatusCode.Created, await onService.ReadTextAsync());
     }
 
+    /// <summary>
+    /// #542 item 3: minting is charged its own budget, <c>Alvo:Api:RateLimits:ApiTokens</c>, no longer the one tenant
+    /// creation draws on — a mint at its limit leaves creating a tenant open, and the other way round.
+    /// </summary>
     [Fact]
-    public async Task Minting_answers_429_after_the_create_budget_and_shares_it_with_tenant_creation()
+    public async Task Minting_answers_429_after_its_own_budget_and_shares_none_with_tenant_creation()
     {
-        await using var world = await AccountsWorld.StartAsync(_engine, descriptor: TeamTracker, api: api => api.RateLimits.Create = 2);
+        await using var world = await AccountsWorld.StartAsync(
+            _engine, descriptor: TeamTracker, api: api => (api.RateLimits.ApiTokens, api.RateLimits.Tenants) = (2, 1));
         var (ada, _) = await world.SignInAsync("ada");
         await TenantRoutesTests.CreatedAsync(world, ada, "Acme");
         var body = new JsonObject
@@ -250,15 +255,20 @@ public sealed class TokenRoutesTests
             ["expiresAt"] = world.Clock.GetUtcNow().AddDays(7).ToString("O", CultureInfo.InvariantCulture),
         };
 
+        using var first = await world.MintAsync(ada, body);
         using var second = await world.MintAsync(ada, body);
         using var third = await world.MintAsync(ada, body);
+        using var tenantPastItsBudget = await world.AsPersonAsync(
+            HttpMethod.Post, "/auth/v1/tenants", ada, new JsonObject { ["name"] = "Globex" });
 
-        second.StatusCode.ShouldBe(HttpStatusCode.Created, await second.ReadTextAsync());
+        first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.ReadTextAsync());
+        second.StatusCode.ShouldBe(HttpStatusCode.Created, "the tenant created before took nothing from the minting budget");
         third.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, await third.ReadTextAsync());
+        tenantPastItsBudget.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests, "tenant creation keeps its own budget of one");
         (await third.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.RateLimited);
         int.Parse(third.Headers.GetValues("Retry-After").ShouldHaveSingleItem(), CultureInfo.InvariantCulture).ShouldBeInRange(1, 60);
         third.Headers.CacheControl!.NoStore.ShouldBeTrue();
-        (await world.CountAsync("_api_keys")).ShouldBe(1);
+        (await world.CountAsync("_api_keys")).ShouldBe(2);
     }
 
     [Fact]
@@ -648,7 +658,7 @@ public sealed class TokenRoutesTests
         ];
     }
 
-    private static void Unthrottled(AlvoApiOptions options) => options.RateLimits.Create = 1000;
+    private static void Unthrottled(AlvoApiOptions options) => (options.RateLimits.Tenants, options.RateLimits.ApiTokens) = (1000, 1000);
 
     private static async Task<string> DisplayNameAsync(Team team, string access)
     {

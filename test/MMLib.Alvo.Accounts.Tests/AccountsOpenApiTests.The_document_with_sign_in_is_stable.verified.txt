@@ -110,7 +110,7 @@
             }
           },
           "429": {
-            "description": "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:Token` allows. Wait for `Retry-After`, then send the request again.",
+            "description": "`rate-limited`: this client sent more token requests this minute than `Alvo:Api:RateLimits:TokenEndpoint` allows. Wait for `Retry-After`, then send the request again.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store` (RFC 6749 §5.1): every answer here is about one person or carries a token.",
@@ -691,7 +691,7 @@
             }
           },
           "429": {
-            "description": "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Create` allows. Wait for `Retry-After`, then send the request again.",
+            "description": "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Tenants` allows. Wait for `Retry-After`, then send the request again.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",
@@ -2281,7 +2281,7 @@
             }
           },
           "429": {
-            "description": "`rate-limited`: this client created tenants and minted tokens more often this minute than `Alvo:Api:RateLimits:Create` allows — one budget for both. Wait for `Retry-After`, then send the request again.",
+            "description": "`rate-limited`: this client minted more tokens this minute than `Alvo:Api:RateLimits:ApiTokens` allows. Wait for `Retry-After`, then send the request again.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `no-store`: every answer here is about one person.",

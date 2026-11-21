@@ -220,7 +220,7 @@ internal static partial class AccountsDocumentation
     {
         var (status, response) = TenantRefusal(
             "429",
-            "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Create` allows. Wait for "
+            "`rate-limited`: this client created more tenants this minute than `Alvo:Api:RateLimits:Tenants` allows. Wait for "
             + "`Retry-After`, then send the request again.",
             document);
         response.Headers!["Retry-After"] = Header("Whole seconds until the window admits this client again.", "60");
