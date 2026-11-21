@@ -330,24 +330,29 @@ public class AlvoHostConfigurationRefusalTests
     }
 
     /// <summary>
-    /// A mounted descriptor this build refuses — here one written for a newer Alvo, carrying a key this build's schema
-    /// does not know — is a sentence on stderr naming the key and the two fixes, and a deliberate <c>78</c> (#547).
+    /// A mounted descriptor stage 0 refuses is a sentence on stderr naming what is wrong, the running build and the two
+    /// fixes, and a deliberate <c>78</c> (#340, #547) — whether the schema validation refuses it (a key a newer Alvo
+    /// wrote) or the mapper does (a format nobody declared).
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>The failure the load gate's base arm met, reproduced.</b> An older image handed a newer descriptor refused it
-    /// in stage 0 with a <see cref="DescriptorValidationException"/>, which
-    /// <see cref="AlvoHostExit.IsConfigurationFailure"/> did not recognise, so it escaped <c>Main</c> and the container
-    /// exited 139 — the crash-shaped code #132 removed for every other refusal. The validation's own text was already
-    /// written for the operator; only the exit and the "what now" were missing.
+    /// in stage 0 with a <see cref="DescriptorValidationException"/>, which escaped <c>Main</c>, and the container
+    /// exited 139 — the crash-shaped code #132 removed for every other refusal. An unknown format escaped the same way,
+    /// as the mapper's <see cref="InvalidDataException"/>. Stage 0 now raises both as a validation refusal tagged with
+    /// the text an operator reads, which is what the host presents.
     /// </para>
     /// <para>
     /// A file database of the fact's own, so the start cannot reach the image's <c>/alvo/data</c> default — and so the
     /// identity package, whose own hosted service creates its tables before Alvo's boot runs, writes somewhere disposable.
     /// </para>
     /// </remarks>
-    [Fact]
-    public async Task A_descriptor_written_for_a_newer_alvo_exits_seventy_eight_naming_the_key_and_the_fix()
+    /// <param name="fixture">The refused descriptor, under <c>descriptors/</c>.</param>
+    /// <param name="named">What the refusal must name.</param>
+    [Theory]
+    [InlineData("host-boot-from-a-newer-alvo.alvo.json", "/auth/passkeys")]
+    [InlineData("host-boot-unknown-format.alvo.json", "no-such-format")]
+    public async Task A_descriptor_stage_zero_refuses_exits_seventy_eight_naming_the_problem_and_the_fix(string fixture, string named)
     {
         var databasePath = AlvoHostWorld.TempDatabasePath();
         using var captured = new StringWriter();
@@ -355,7 +360,7 @@ public class AlvoHostConfigurationRefusalTests
 
         try
         {
-            exitCode = await RunCapturingStderrAsync(captured, Ephemeral, NewerDescriptorArgument, SqliteAt(databasePath));
+            exitCode = await RunCapturingStderrAsync(captured, Ephemeral, DescriptorArgumentFor(fixture), SqliteAt(databasePath));
         }
         finally
         {
@@ -364,22 +369,35 @@ public class AlvoHostConfigurationRefusalTests
 
         exitCode.ShouldBe(78);
         var reported = captured.ToString();
-        reported.ShouldContain("/auth/passkeys");
+        reported.ShouldContain("Alvo cannot start: this build (");
+        reported.ShouldContain(named);
         reported.ShouldContain("newer Alvo");
-        reported.ShouldContain("Alvo__DescriptorPath");
     }
 
-    /// <summary>The descriptor's own refusal is the operator's to fix, so it is on the accepting side of the predicate.</summary>
+    /// <summary>
+    /// A validation refusal the boot raises from the apply — rows a new check would break, an overlap the database could
+    /// not count — carries no stage-0 tag and is not claimed as a misconfiguration: it depends on the database and can
+    /// be transient (#547). The tagged one is, and what is printed is the tag's text.
+    /// </summary>
     [Fact]
-    public void A_descriptor_this_build_refuses_is_a_misconfiguration()
+    public void Only_a_descriptor_refusal_the_boot_tagged_as_stage_zero_is_a_misconfiguration()
     {
-        var refusal = new DescriptorValidationException(new DescriptorValidationResult(
-            [new("/auth/passkeys", "Unknown key.", FixSuggestion: null, DescriptorValidationSeverity.Error)]));
+        var untagged = RowsBreakACheck();
+        var tagged = RowsBreakACheck();
+        tagged.Data[AlvoHostExit.StartupRefusalDataKey] = "Alvo cannot start: the operator's text.";
 
-        AlvoHostExit.IsConfigurationFailure(refusal).ShouldBeTrue();
-        AlvoHostExit.Describe(refusal).ShouldContain("/auth/passkeys");
-        AlvoHostExit.Describe(refusal).ShouldContain("newer Alvo");
+        AlvoHostExit.IsConfigurationFailure(untagged).ShouldBeFalse();
+        AlvoHostExit.IsConfigurationFailure(tagged).ShouldBeTrue();
+        AlvoHostExit.Describe(tagged).ShouldBe("Alvo cannot start: the operator's text.");
     }
+
+    /// <summary>The host spells the tag's key itself, because it does not reference core internals; this pins the two.</summary>
+    [Fact]
+    public void The_host_reads_the_tag_under_the_key_the_boot_writes_it()
+        => AlvoHostExit.StartupRefusalDataKey.ShouldBe(MMLib.Alvo.Migrations.Internal.DescriptorBootPlan.StartupRefusalDataKey);
+
+    private static DescriptorValidationException RowsBreakACheck() => new(new DescriptorValidationResult(
+        [new("/entities/orders/fields/total/validations/0", "3 rows break it.", FixSuggestion: null, DescriptorValidationSeverity.Error)]));
 
     /// <summary>Runs the shipped entry point with stderr captured, restoring it whatever happens.</summary>
     private static async Task<int> RunCapturingStderrAsync(StringWriter captured, params string[] args)
@@ -397,8 +415,8 @@ public class AlvoHostConfigurationRefusalTests
         }
     }
 
-    private static string NewerDescriptorArgument =>
-        $"--Alvo:DescriptorPath={AlvoHostWorld.DescriptorPath("host-boot-from-a-newer-alvo.alvo.json")}";
+    private static string DescriptorArgumentFor(string fixture) =>
+        $"--Alvo:DescriptorPath={AlvoHostWorld.DescriptorPath(fixture)}";
 
     private static string SqliteAt(string databasePath) =>
         $"--Alvo:Database:SqliteConnectionString={AlvoHostWorld.ConnectionStringFor(databasePath)}";

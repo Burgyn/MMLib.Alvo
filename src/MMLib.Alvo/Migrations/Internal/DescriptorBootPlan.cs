@@ -8,6 +8,7 @@ using MMLib.Alvo.Extensions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
+using System.Reflection;
 
 namespace MMLib.Alvo.Migrations.Internal;
 
@@ -74,6 +75,46 @@ internal sealed partial class DescriptorBootPlan
 
     internal const string NoDescriptorSourceMessage =
         "Alvo cannot start: no project descriptor source is configured. " + NoDescriptorSourceFix;
+
+    /// <summary>
+    /// What an operator reads for a descriptor a code-first boot's stage 0 refuses — mistyped, or written for a newer Alvo
+    /// (#340, #547).
+    /// </summary>
+    /// <remarks>
+    /// The validation's own pointed text is kept whole; what it cannot say is which build refused it, and that the
+    /// commonest reason a descriptor which once served is refused is that a newer Alvo wrote it. An older Alvo does not
+    /// serve a newer descriptor — there is no downgrade path — so the second fix is to run that version.
+    /// </remarks>
+    /// <param name="refused">What stage 0 refused the descriptor with.</param>
+    internal static string RefusedAtLoad(DescriptorValidationException refused)
+    {
+        ArgumentNullException.ThrowIfNull(refused);
+
+        return string.Join(
+            Environment.NewLine,
+            $"Alvo cannot start: this build ({RunningVersion}) refuses the project descriptor it was given.",
+            string.Empty,
+            refused.Message,
+            string.Empty,
+            "  Fix it:     correct the descriptor at each path above, then restart.",
+            "  Or run:     the newer Alvo it was written for, when a path above is a key this build does not know —",
+            "              an older Alvo does not serve a descriptor written for a newer one.");
+    }
+
+    /// <summary>
+    /// The <see cref="Exception.Data"/> key under which a stage-0 <see cref="DescriptorValidationException"/> carries
+    /// <see cref="RefusedAtLoad"/>'s text — the tag that tells the standalone host this refusal is the operator's to fix.
+    /// </summary>
+    /// <remarks>
+    /// A string the host spells again rather than reads from here: the host's grant to core internals is held to one
+    /// member by <c>HostInternalGrantTests</c>, and a fact in the host's suite pins the two spellings equal.
+    /// </remarks>
+    internal const string StartupRefusalDataKey = "MMLib.Alvo.StartupRefusal";
+
+    /// <summary>The running build of the framework that refused, as its assembly records it.</summary>
+    private static string RunningVersion =>
+        typeof(DescriptorBootPlan).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? "unknown";
 
     private readonly IDescriptorSource? _source;
     private readonly IDescriptorValidator _validator;
@@ -189,8 +230,8 @@ internal sealed partial class DescriptorBootPlan
     /// <param name="descriptorJson">The descriptor JSON to plan from, trusted no more than a file's would be.</param>
     /// <returns>The descriptor, the schema it wants, and its compiled policy.</returns>
     /// <exception cref="DescriptorValidationException">
-    /// <paramref name="descriptorJson"/> failed validation, or one of its rules, tenant scopes or field flags
-    /// failed to compile.
+    /// <paramref name="descriptorJson"/> failed validation, the mapper refused it (an unknown format, say), or one of
+    /// its rules, tenant scopes or field flags failed to compile.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// The mapped schema cannot be served: a field shadows a reserved query-string key, or a declared format
@@ -202,7 +243,7 @@ internal sealed partial class DescriptorBootPlan
         EnsureValid(descriptorJson);
 
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
-        var desired = DescriptorToSchemaMapper.Map(descriptor);
+        var desired = MapOrRefuse(descriptor);
 
         WarnAboutUnhonouredBlocks(descriptor);
         WarnAboutSignInHost(descriptor);
@@ -297,6 +338,40 @@ internal sealed partial class DescriptorBootPlan
                 _logger, shape.Type.FullName ?? shape.Name, shape.Entity ?? string.Empty, string.Join(" ", problems.Select(problem => problem.Message)));
         }
     }
+
+    /// <summary>
+    /// Maps the descriptor, turning the mapper's own refusals into the validation refusal every other stage-0 refusal is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every <see cref="InvalidDataException"/> the mapper raises is a descriptor refusal</b> — an unknown format, a
+    /// format pattern that is not a regular expression, a wildcard subscription, a validation or sequence on a dynamic
+    /// entity, a field named like a framework column, a feature this build does not honour — and the validator, which
+    /// maps the same document, swallows them as already reported. Left as they were, they escaped the boot as an
+    /// exception no caller presents: a dashboard-first host crashed instead of standing down, and the standalone host
+    /// exited 139 (#547). Nothing else the mapper raises is caught, so a defect keeps its own type.
+    /// </para>
+    /// <para>
+    /// <b>The pointer is the document root</b> (<c>#/</c>, the validator's spelling for a refusal it cannot place): the
+    /// mapper's refusals carry no pointer, only a message naming the field or format.
+    /// </para>
+    /// </remarks>
+    /// <param name="descriptor">The parsed descriptor.</param>
+    /// <exception cref="DescriptorValidationException">The mapper refused the descriptor.</exception>
+    private static SchemaModel MapOrRefuse(AlvoDescriptor descriptor)
+    {
+        try
+        {
+            return DescriptorToSchemaMapper.Map(descriptor);
+        }
+        catch (InvalidDataException refused)
+        {
+            throw new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError(MappingRefusalPath, refused.Message, FixSuggestion: null, DescriptorValidationSeverity.Error)]));
+        }
+    }
+
+    private const string MappingRefusalPath = "#/";
 
     private void EnsureValid(string descriptorJson)
     {

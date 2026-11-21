@@ -57,6 +57,25 @@ public sealed class DescriptorBootPlanTests
             () => Subject("""{ "not": "a descriptor" }""").LoadAsync(TestContext.Current.CancellationToken));
 
     /// <summary>
+    /// A field naming a format nobody declared is a validation refusal at stage 0, not the mapper's bare
+    /// <see cref="InvalidDataException"/> — which no caller presented, so the standalone host exited 139 on it (#547).
+    /// </summary>
+    /// <remarks>
+    /// Through the real validator, and that is the point: it maps the same document and swallows the mapper's refusals
+    /// as already reported, so this one reached stage 0's own mapping unreported.
+    /// </remarks>
+    [Fact]
+    public async Task A_field_naming_an_unknown_format_is_a_validation_refusal_at_stage_zero()
+    {
+        var refusal = await Should.ThrowAsync<DescriptorValidationException>(
+            () => Subject(DescriptorWithFormat("no-such-format")).LoadAsync(TestContext.Current.CancellationToken));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("#/");
+        error.Message.ShouldContain("no-such-format");
+    }
+
+    /// <summary>
     /// The refusal <c>MapAlvoDataApi</c> raises at map time, raised at stage 0 instead — so it stays a
     /// failure to <em>start</em> once route mapping becomes lazy, rather than a 500 on the first request.
     /// </summary>
@@ -158,6 +177,23 @@ public sealed class DescriptorBootPlanTests
             "vehicles": {
               "fields": {
                 "{{field}}": { "type": "integer" }
+              }
+            }
+          }
+        }
+        """;
+
+    private static string DescriptorWithFormat(string format) => $$"""
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "fleet",
+          "entities": {
+            "vehicles": {
+              "fields": {
+                "vin": { "type": "string", "format": "{{format}}" }
+              },
+              "rules": {
+                "list": "'authenticated' in @user.roles"
               }
             }
           }

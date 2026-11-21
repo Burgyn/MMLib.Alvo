@@ -160,6 +160,10 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         {
             throw;
         }
+        catch (DescriptorValidationException refused) when (refused.Data.Contains(DescriptorBootPlan.StartupRefusalDataKey))
+        {
+            throw;
+        }
         catch (Exception failure)
         {
             _state.Failed(failure.Message);
@@ -506,6 +510,18 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
     /// <see cref="AlvoStartupRefusedException"/> untouched so that it cannot overwrite a project-scoped refusal
     /// with a project-less one, and a stage-0 refusal that nothing recorded therefore left an embedded host
     /// unable to tell "no descriptor configured" from "the boot has not run".
+    /// <para>
+    /// <b>A descriptor stage 0 refuses is tagged here, and only here, as a refusal written for the operator</b> (#547).
+    /// It is the one <see cref="DescriptorValidationException"/> that is always the descriptor author's to fix —
+    /// mistyped, or written for a newer Alvo — so the operator-facing text naming the running build and both fixes
+    /// (<see cref="DescriptorBootPlan.RefusedAtLoad"/>) is recorded for a probe, logged, and put in the exception's
+    /// <see cref="Exception.Data"/> under <see cref="DescriptorBootPlan.StartupRefusalDataKey"/>, where the standalone
+    /// host reads it to exit 78. The type is unchanged, so an embedded host — and the documented
+    /// <c>Should.ThrowAsync&lt;DescriptorValidationException&gt;(() =&gt; AlvoTestHost.StartAsync(…))</c> — still gets
+    /// the structured result. A validation refusal raised later, by the apply (rows a new check would break, an engine
+    /// that declines a feature, an overlap the database could not count), is not tagged: it depends on the database, can
+    /// be transient, and "correct the descriptor" is not always its fix.
+    /// </para>
     /// </remarks>
     private async Task<BootPlan> LoadTheDescriptorAsync(CancellationToken ct)
     {
@@ -519,11 +535,26 @@ internal sealed partial class AlvoBootService : IHostedLifecycleService
         }
         catch (AlvoStartupRefusedException refusal)
         {
-            _state.Failed(refusal.Message);
-            BootRefused(_logger, refusal.Message);
+            RecordTheRefusal(refusal.Message);
 
             throw;
         }
+        catch (DescriptorValidationException refused)
+        {
+            var refusal = DescriptorBootPlan.RefusedAtLoad(refused);
+            refused.Data[DescriptorBootPlan.StartupRefusalDataKey] = refusal;
+            RecordTheRefusal(refusal);
+
+            throw;
+        }
+    }
+
+    /// <summary>Records a project-less stage-0 refusal for a probe and the log, before it propagates.</summary>
+    /// <param name="refusal">What the operator reads.</param>
+    private void RecordTheRefusal(string refusal)
+    {
+        _state.Failed(refusal);
+        BootRefused(_logger, refusal);
     }
 
     /// <summary>

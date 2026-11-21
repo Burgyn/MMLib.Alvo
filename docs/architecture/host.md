@@ -81,14 +81,32 @@ the process, including the refusal an operator reads and the code they get.
   `OptionsValidationException` — every option value the host or the framework refused,
   whether by `ValidateOnStart` or by the driver selection that runs during registration —
   `AlvoStartupRefusedException`, the boot's own refusal (drift under `Verify`, a plan that
-  would discard data), and `DescriptorValidationException`, a mounted descriptor the boot
-  refuses (#340, #547): its pointed violations are printed under a headline naming the running
-  build, with the two fixes — correct the file, or run the newer Alvo it was written for, since
-  an older Alvo does not serve a newer descriptor (see deviation 55 under *What is left of #24*).
+  would discard data), and a `DescriptorValidationException` the boot tagged as stage 0's
+  (next bullet).
   `OptionsValidationException.Failures` are printed one per paragraph
   rather than through `Message`, which joins them with `"; "` and runs two multi-line
   refusals into one unreadable line: a container with two things wrong is fixable in one
   restart.
+- **A descriptor stage 0 refuses is a configuration failure; one the apply refuses is not**
+  (#340, #547). `AlvoBootService.LoadTheDescriptorAsync` tags the stage-0
+  `DescriptorValidationException` — the schema validation, the mapper's refusals (an unknown
+  format, a pattern that is not a regular expression; `DescriptorBootPlan.Plan` turns the
+  mapper's `InvalidDataException` into a validation refusal at `#/`), a rule or hook that does
+  not compile — with the text an operator reads, in `Exception.Data` under
+  `MMLib.Alvo.StartupRefusal`: the running build, the pointed violations, and both fixes —
+  correct the file, or run the newer Alvo it was written for, since an older Alvo does not serve
+  a newer descriptor (see deviation 55 under *What is left of #24*). The same text is recorded
+  on `AlvoBootState` and logged as the boot's refusal. **The type is unchanged**, so an embedded
+  host keeps the structured result, and the documented
+  `Should.ThrowAsync<DescriptorValidationException>(() => AlvoTestHost.StartAsync(…))` still
+  holds; the host spells the key itself, because it references no core internal, and a fact pins
+  the two spellings. A `DescriptorValidationException` the **apply** raises — rows a new check
+  would break, an engine that declines a sequence or an exclusion, an overlap the database could
+  not count, a server too old for a scoped `SET NULL` — carries no tag and is deliberately **left
+  as it was**: unhandled, with the runtime's report. It depends on the database, one of them wraps
+  a possibly transient `DbException`, and "correct the descriptor" is not always its fix, so
+  claiming `EX_CONFIG` for it would be wrong. A neutral presentation for it is still owed (#340
+  stays open for it).
 - **And an `AggregateException` over nothing but those.** The host has two
   `ValidateOnStart` registrations — its own `AlvoHostOptions` and `MMLib.Alvo.Identity`'s
   `AlvoIdentityOptions` — and `StartupValidator.Validate()` throws one aggregate when more
@@ -109,9 +127,10 @@ the process, including the refusal an operator reads and the code they get.
 - **Everything else still propagates unhandled**, deliberately. A blanket `catch` would take
   the runtime's own report and whatever crash dump the deployment configured away from every
   genuine defect, so a named predicate is used instead and a fact asserts an unrelated
-  exception is *not* one of the named shapes. An `InvalidOperationException` from stage 0 (a
-  field shadowing a reserved query key, a format that is not a regular expression) is still
-  outside it: the type is also every defect's, so recognising it would claim them all.
+  exception is *not* one of the named shapes. Stage 0's own `InvalidOperationException` (a field
+  shadowing a reserved query key, a format the catalog cannot compile) stays outside it too: the
+  validator refuses a reserved name and the mapper a bad pattern first, so it is reachable only
+  through a replaced `IDescriptorValidator`, and the type is also every defect's.
 - **The application is disposed either way.** `BuildAsync` owns the application until it
   returns one (a refused `Compose` disposes it, because reading
   `IOptions<AlvoHostOptions>` is what runs the validation and a live service provider behind

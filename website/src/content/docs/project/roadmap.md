@@ -69,6 +69,7 @@ Open defects the documentation pages point to.
 | Issue | What happens |
 |---|---|
 | [#103](https://github.com/Burgyn/MMLib.Alvo/issues/103) | An entity added through the Management API or the dashboard gets no Data API route until the host restarts. |
+| [#340](https://github.com/Burgyn/MMLib.Alvo/issues/340) | A descriptor the database's rows refuse when it is applied at start — rows a new check would break, overlapping rows — still ends the standalone host with exit code 139 instead of a clean refusal. A descriptor refused before that exits 78. |
 | [#343](https://github.com/Burgyn/MMLib.Alvo/issues/343) | A dry run of a destructive change is refused like a real apply. |
 | [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344) | Small inconsistencies: an unverified `author` on Management API revisions, different statuses for writes to derived fields. |
 | [#345](https://github.com/Burgyn/MMLib.Alvo/issues/345) | A before-hook may `mutate` a rollup or computed field, which the apply should refuse. |

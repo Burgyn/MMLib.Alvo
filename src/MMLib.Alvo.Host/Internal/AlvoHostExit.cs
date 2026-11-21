@@ -37,6 +37,12 @@ internal static class AlvoHostExit
     internal const int ConfigurationFailure = 78;
 
     /// <summary>
+    /// The <see cref="Exception.Data"/> key the boot tags a stage-0 descriptor refusal with — spelled here rather than
+    /// read from the core, whose internals the host does not reference; a fact pins it to the core's spelling.
+    /// </summary>
+    internal const string StartupRefusalDataKey = "MMLib.Alvo.StartupRefusal";
+
+    /// <summary>
     /// Whether <paramref name="failure"/> is a misconfiguration an operator can act on, rather than a defect.
     /// </summary>
     /// <remarks>
@@ -53,9 +59,12 @@ internal static class AlvoHostExit
     /// print a stack trace instead would defeat the reason it exists.
     /// </para>
     /// <para>
-    /// <see cref="DescriptorValidationException"/> covers a mounted descriptor the boot's stage 0 refuses — mistyped, or
-    /// written for a newer Alvo, which is how an older image handed a newer descriptor used to exit <c>139</c> (#547).
-    /// Its message is pointed and written for the person who edits the file, and the fix is theirs: no retry serves it.
+    /// <b>A <see cref="DescriptorValidationException"/> only when the boot tagged it as stage 0's</b> (#340, #547): a
+    /// mounted descriptor the boot refuses before touching the database — mistyped, or written for a newer Alvo. The
+    /// boot puts the operator's text, naming the running build and both fixes, in its <see cref="Exception.Data"/> under
+    /// <see cref="StartupRefusalDataKey"/>, and that text is what is printed. One the apply raises — rows a new check
+    /// would break, an engine that declines a feature, an overlap the database could not count — carries no tag: it
+    /// depends on the database and can be transient, so it is not claimed as <c>EX_CONFIG</c>.
     /// </para>
     /// <para>
     /// <b>And an <see cref="AggregateException"/> over nothing but those, because that is the shape two
@@ -81,7 +90,8 @@ internal static class AlvoHostExit
 
         return failure switch
         {
-            OptionsValidationException or AlvoStartupRefusedException or DescriptorValidationException => true,
+            OptionsValidationException or AlvoStartupRefusedException => true,
+            DescriptorValidationException refused => OperatorRefusal(refused) is not null,
             AggregateException collected => collected.InnerExceptions.Count > 0
                 && collected.InnerExceptions.All(IsConfigurationFailure),
             _ => false,
@@ -108,7 +118,7 @@ internal static class AlvoHostExit
         return failure switch
         {
             OptionsValidationException validation => string.Join(ParagraphBreak, validation.Failures),
-            DescriptorValidationException refused => AlvoHostConfiguration.RefusedDescriptor(refused.Message),
+            DescriptorValidationException refused => OperatorRefusal(refused) ?? refused.Message,
             AggregateException collected => string.Join(
                 ParagraphBreak, collected.InnerExceptions.Select(Describe)),
             _ => failure.Message,
@@ -116,4 +126,9 @@ internal static class AlvoHostExit
     }
 
     private static string ParagraphBreak => Environment.NewLine + Environment.NewLine;
+
+    /// <summary>The text the boot tagged a stage-0 descriptor refusal with, or <see langword="null"/> when it is untagged.</summary>
+    /// <param name="refused">The refusal.</param>
+    private static string? OperatorRefusal(DescriptorValidationException refused) =>
+        refused.Data[StartupRefusalDataKey] as string;
 }

@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Options;
-using System.Reflection;
 
 namespace MMLib.Alvo.Host.Internal;
 
@@ -135,34 +134,6 @@ internal static class AlvoHostConfiguration
             + "crash dump.",
         $"  Unset:      {BootstrapPasswordVariable}",
         $"  And set:    {BootstrapPasswordFileVariable}=/run/secrets/alvo-admin-password");
-
-    /// <summary>The refusal for a mounted descriptor this build's validation refuses (#547).</summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The validation's own text is kept whole</b>, because it already points at each offending path with its
-    /// fix; what it cannot say is which build refused it, and that the commonest reason a descriptor which once
-    /// served is refused is that a newer Alvo wrote it. An older Alvo does not serve a newer descriptor — there is no
-    /// downgrade path — so the second fix is to run the version the descriptor was written for.
-    /// </para>
-    /// <para>
-    /// The version is the host assembly's informational version, which the image build states (MinVer over the
-    /// checkout in <c>image.yml</c>, <c>0.0.0-docker</c> for a local build).
-    /// </para>
-    /// </remarks>
-    /// <param name="violations">The validation's message, one pointed violation per line.</param>
-    internal static string RefusedDescriptor(string violations) => Sentence(
-        $"Alvo cannot start: this build ({RunningVersion}) refuses the project descriptor {DescriptorPathVariable} names.",
-        violations,
-        string.Empty,
-        "  Fix it:     correct the descriptor at each path above, then restart.",
-        "  Or run:     the newer Alvo it was written for, when a path above is a key this build does not know —",
-        "              an older Alvo does not serve a descriptor written for a newer one.");
-
-    /// <summary>The running build, as the host assembly records it.</summary>
-    private static string RunningVersion =>
-        typeof(AlvoHostConfiguration).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? "unknown";
 
     /// <summary>
     /// Turns one refusal into the exception the host raises for <em>every</em> bad option value, whichever
