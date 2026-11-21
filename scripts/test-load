@@ -132,8 +132,9 @@ fi
 # the calibration tier, or when --scenarios names them; never judged by the gate (a gate ceiling must be measured on the
 # gate tier, and the verdict reads only head-1.json), and never beside --baseline-ref.
 HOOKS_RUN=""
-# 1 while the alvo container runs the hooks image: cleanup puts the head image back if the arm dies there (--keep).
-HOOKS_SERVING=0
+# The image the alvo container was last told to run, set by use_image. Cleanup reads it under --keep: a kept stack must
+# be the head composition the run reports, whichever arm — base or hooks — was serving when the run ended or died.
+SERVING=""
 if [ -n "$SCENARIOS_OVERRIDE" ]; then
     HOOKS_RUN="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep '^hook_' | paste -sd, - || true)"
     HEAD_SCENARIOS="$(tr ',' '\n' <<<"$SCENARIOS_OVERRIDE" | grep -v '^hook_' | paste -sd, - || true)"
@@ -204,6 +205,14 @@ COMPOSE=(
 WORKTREE=""
 cleanup() {
     local status=$?
+    # Before the worktree goes: the base arm's descriptor is bind-mounted from it, so a kept stack left on the base arm
+    # would point at a deleted file — and an A/B run always ends on the base arm. A running container would also keep
+    # the base and hooks images below from going. In a subshell, because a failed swap ends in `die`, which here would
+    # end the trap itself.
+    if [ "$KEEP" -eq 1 ] && [ -n "$SERVING" ] && [ "$SERVING" != "$IMAGE_HEAD" ]; then
+        ( use_image "$IMAGE_HEAD" ) >/dev/null 2>&1 \
+            || say "could not put $IMAGE_HEAD back: the kept stack still serves $SERVING"
+    fi
     if [ -n "$WORKTREE" ]; then
         git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
         # prune after remove, in case remove failed; then the mktemp parent, which `remove` never
@@ -211,13 +220,6 @@ cleanup() {
         git worktree prune >/dev/null 2>&1 || true
         rm -rf "$(dirname "$WORKTREE")" >/dev/null 2>&1 || true
         docker image rm -f "$IMAGE_BASE" >/dev/null 2>&1 || true
-    fi
-    # A hooks arm that died mid-way (a k6 threshold, a refused probe) left the hooks image serving: the kept stack must
-    # be the head composition the run reports, and a running container would also keep the image below from going.
-    # In a subshell, because a failed swap ends in `die`, which here would end the trap itself.
-    if [ "${HOOKS_SERVING:-0}" -eq 1 ] && [ "$KEEP" -eq 1 ]; then
-        ( use_image "$IMAGE_HEAD" ) >/dev/null 2>&1 \
-            || say "could not put $IMAGE_HEAD back after the hooks arm failed: the kept stack still serves $IMAGE_HOOKS"
     fi
     if [ "$KEEP" -eq 0 ]; then
         ALVO_LOAD_IMAGE="$IMAGE_HEAD" docker compose "${COMPOSE[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -259,6 +261,7 @@ build_hooks_image() {
 #   use_image IMAGE [DATABASE] [DESCRIPTOR]   — the last two default to the head arm's
 use_image() {
     local image="$1" database="${2:-$HEAD_DATABASE}" descriptor="${3:-$HEAD_DESCRIPTOR}"
+    SERVING="$image"
     # `--no-deps` keeps PostgreSQL out of the swap. Without it, naming `alvo` selects its
     # dependencies too and `--force-recreate` applies to the whole selected set, so PostgreSQL is
     # recreated on every arm swap — the data survives only because compose reuses the previous
@@ -581,15 +584,13 @@ hook_table() {
 
 # The hooks arm: the alvo container swapped for the hooks image in place, PostgreSQL and its rows untouched, so the hook
 # shapes and the head arm's `create` measure the same dataset. The head image is put back afterwards for --keep — by
-# cleanup too, when the arm fails before this block's own swap back (HOOKS_SERVING).
+# cleanup too, when the arm fails before this block's own swap back (SERVING).
 if [ -n "$HOOKS_RUN" ]; then
-    HOOKS_SERVING=1
     use_image "$IMAGE_HOOKS"
     reset_created_rows
     assert_hooks_fire
     run_k6 hooks-1.json "$HOOKS_RUN" "$CURSOR"
     use_image "$IMAGE_HEAD"
-    HOOKS_SERVING=0
     assert_valid_summary "$OUT_DIR/hooks-1.json"
     [ -f "$OUT_DIR/head-1.json" ] && jq -e '.scenarios.create' "$OUT_DIR/head-1.json" >/dev/null \
         || die "the hook shapes are published against \`create\`: run it in the same invocation"
