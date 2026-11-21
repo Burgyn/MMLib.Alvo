@@ -18,9 +18,9 @@
       "Tenants/SelfService/InvitationResponse.cs",
       "Tenants/SelfService/InvitationRoutes.cs",
       "Tenants/SelfService/MembershipRules.cs",
+      "Tenants/SelfService/PersonReference.cs",
       "Tenants/SelfService/RegistryMembershipResolution.cs",
-      "Tenants/SelfService/RegistryTenantCatalog.cs",
-      "Tenants/SelfService/SelfServiceName.cs"
+      "Tenants/SelfService/RegistryTenantCatalog.cs"
     ],
     "thresholds": {
       "high": 80,

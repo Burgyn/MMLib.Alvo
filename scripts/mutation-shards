@@ -6,8 +6,7 @@ job ceiling — expressions, rules/auth/rest, data-ef-core and accounts-store; s
 its header (a fifth, data-ef-rest, fits one job and runs in full on every push). On every push
 the four run with Stryker's `since` against the previous main commit, mutating only what the merge
 changed. The FULL measurement runs weekly and on workflow_dispatch, split into shards that each
-fit — and this script is the one place those shards come from, so that a source file added
-tomorrow cannot silently fall out of every shard.
+fit — and this script is the one place those shards come from.
 
 HOW A SHARD IS CUT. Each long leg keeps its committed config (stryker-config.<leg>.json) as the
 single source of what it mutates. This script resolves that config's `mutate` globs over the
@@ -15,14 +14,26 @@ project's *.cs files, orders them (by path; accounts-store by store), weighs eac
 Stryker CREATES in it (scripts/fixtures/mutation-shards/created-*.tsv, read from a real trace
 log), and cuts the ordered list into contiguous runs of near-equal weight. Contiguous, so a shard
 reads as an area (Events/..., Migrations/...) rather than a scatter. Each shard config is its
-parent with `mutate` replaced by the exact file list; the union of a leg's shards is its parent's
-file set, disjoint, which `--check` re-proves on every PR (scripts/test-assert-mutation-run).
+parent with `mutate` replaced by the exact file list.
 
-WHAT CAN MAKE `--check` FAIL, AND WHAT CANNOT. The output depends on the committed configs, the
-weight tables and the SET of files each config resolves to — never on a file's contents. A file
-the weight table does not list gets a constant weight (the table's median), not one derived from
-its line count, so a comment edit anywhere cannot turn the PR gate red; a file ADDED to, removed
-from or renamed in a long leg's area does, until the shards are regenerated.
+THE CATCH-ALL. Each leg also gets one more shard: the parent's own globs, minus a `!` exclude for
+every file the listed shards name. So a source file ADDED tomorrow is mutated by the catch-all
+with no regeneration, and a file DELETED tomorrow is harmless — Stryker 4.16 accepts a `mutate`
+entry or a `!` exclude that matches nothing (measured locally on the canary, 2026-11-21: same 13
+mutants, exit 0). Ruled 2026-11-21 by the debt-cleanup session on the maintainer's behalf, so that
+no PR adding or removing a .cs file meets an unrelated mutation-tooling failure in the required
+Build & test. The cost: the catch-all grows with every file added since the last regeneration.
+Regenerate (`scripts/mutation-shards`) when it has grown large — at the latest when a sweep's
+measurements recalibrate the shards.
+
+WHAT `--check` PROVES, AND WHAT IT DOES NOT. It does NOT regenerate and compare: the committed
+shards are allowed to be older than the tree. It checks that they are WELL-FORMED for the current
+committed configs — every leg has its listed shards and its catch-all; listed shards name plain
+paths, pairwise disjoint; the catch-all is exactly the parent's globs minus exactly the listed
+files, so together they cover the parent's set once; every other key matches the parent (a
+changed `test-projects` or `mutate` in a parent is a mutation-tooling edit, and regenerating is
+part of it); matrix.json names each config once. Adding, deleting or editing a source file can
+never fail it.
 
 HOW THE SHARD COUNT IS CHOSEN — measured cost, not mutant count. Runner seconds per mutant per
 suite, from the sampling run 44877284451 (2026-11-21): expressions 68.9 s (147 mutants, 94 %
@@ -35,13 +46,15 @@ it is ESTIMATED at 150 s. Each leg gets the fewest shards none of which is proje
 cost / concurrency) past 180 minutes — except a single file heavier than that — so a 340-minute
 budget is >= 1.7x.
 
-EVERY NUMBER A SHARD CARRIES IS PROVISIONAL until the first sweep measures it: its `mutants:` floor
-is 70 % of an estimate (weight x the leg's tested/created ratio), and its `break` is the
-collapse floor 30 the header uses for unmeasured legs.
+EVERY NUMBER A SHARD CARRIES IS PROVISIONAL until the first sweep measures it: its `mutants:` is
+70 % of an estimate (weight x the leg's tested/created ratio) and informational — sweep shards
+run scripts/assert-mutation-run in mode `sweep`, which allows zero mutants and waives the floor,
+because a shard whose files were deleted (or an empty catch-all) is legitimate — and its `break`
+is the collapse floor 30 the header uses for unmeasured legs.
 
 Usage:
   scripts/mutation-shards                       write mutation-sweep/
-  scripts/mutation-shards --check               fail (exit 1) if mutation-sweep/ is stale
+  scripts/mutation-shards --check               fail (exit 1) if mutation-sweep/ is malformed
   scripts/mutation-shards --resolve <config>    print the repo-relative files <config> mutates
                                                 (used by the `since` legs to tell "the merge
                                                 changed nothing here" from "nothing was tested")
@@ -207,10 +220,77 @@ def build(root: pathlib.Path) -> dict[str, str]:
                 "mutants": max(1, math.floor(estimate * 0.7)), "suite": leg["suite"],
                 "timeout": BUDGET, "concurrency": leg["concurrency"],
                 "projected-minutes": round(minutes), "files": len(shard),
+                "mode": "sweep",
                 **({"debug-log": True} if leg.get("debug-log") else {}),
             })
+        catch_all = copy.deepcopy(parent)
+        catch_all["stryker-config"]["mutate"] = catch_all_mutate(parent, files)
+        catch_all["stryker-config"].setdefault("thresholds", {})["break"] = SHARD_BREAK
+        path = f"mutation-sweep/stryker-config.{leg['slug']}.catch-all.json"
+        files_out[path] = json.dumps(catch_all, indent=2, ensure_ascii=False) + "\n"
+        matrix.append({
+            "name": f"{leg['leg']} catch-all",
+            "config": path, "project": leg["project"],
+            "mutants": 1, "suite": leg["suite"],
+            "timeout": BUDGET, "concurrency": leg["concurrency"],
+            "projected-minutes": 0, "files": 0,
+            "mode": "sweep",
+            **({"debug-log": True} if leg.get("debug-log") else {}),
+        })
     files_out["mutation-sweep/matrix.json"] = json.dumps({"include": matrix}, indent=2) + "\n"
     return files_out
+
+
+def catch_all_mutate(parent: dict, listed: list[str]) -> list[str]:
+    """The parent's own globs, minus every file a listed shard names."""
+    return list(parent["stryker-config"]["mutate"]) + ["!" + rel for rel in sorted(listed)]
+
+
+def check(root: pathlib.Path) -> list[str]:
+    """Structural problems with the COMMITTED shards; empty when they are well-formed."""
+    out = root / "mutation-sweep"
+    problems = []
+    try:
+        matrix = json.loads((out / "matrix.json").read_text(encoding="utf-8"))["include"]
+    except (OSError, ValueError, KeyError) as error:
+        return [f"mutation-sweep/matrix.json is unreadable: {error}"]
+    named = [entry.get("config") for entry in matrix]
+    on_disk = sorted(p.relative_to(root).as_posix() for p in out.glob("stryker-config.*.json"))
+    if sorted(named) != on_disk or len(set(named)) != len(named):
+        problems.append(f"matrix.json names {sorted(named)} but mutation-sweep/ holds {on_disk}")
+    for leg in LEGS:
+        parent = json.loads((root / leg["parent"]).read_text(encoding="utf-8"))["stryker-config"]
+        prefix = f"mutation-sweep/stryker-config.{leg['slug']}."
+        listed_paths = sorted(p for p in on_disk if p.startswith(prefix) and not p.endswith(".catch-all.json"))
+        catch_path = f"{prefix}catch-all.json"
+        if not listed_paths:
+            problems.append(f"{leg['leg']}: no listed shards")
+            continue
+        if catch_path not in on_disk:
+            problems.append(f"{leg['leg']}: no catch-all shard ({catch_path})")
+            continue
+        seen: dict[str, str] = {}
+        for shard_path in listed_paths + [catch_path]:
+            config = json.loads((root / shard_path).read_text(encoding="utf-8"))["stryker-config"]
+            others = {k: v for k, v in config.items() if k not in ("mutate", "thresholds")}
+            wanted = {k: v for k, v in parent.items() if k not in ("mutate", "thresholds")}
+            if others != wanted:
+                problems.append(f"{shard_path}: its keys differ from {leg['parent']} beyond `mutate`")
+            if config.get("thresholds", {}).get("break") != SHARD_BREAK:
+                problems.append(f"{shard_path}: break is not the provisional {SHARD_BREAK}")
+            if shard_path == catch_path:
+                continue
+            for rel in config["mutate"]:
+                if rel.startswith("!") or "*" in rel:
+                    problems.append(f"{shard_path}: '{rel}' is not a plain path")
+                elif rel in seen:
+                    problems.append(f"'{rel}' is in both {seen[rel]} and {shard_path}")
+                else:
+                    seen[rel] = shard_path
+        catch_all = json.loads((root / catch_path).read_text(encoding="utf-8"))["stryker-config"]
+        if catch_all["mutate"] != catch_all_mutate({"stryker-config": parent}, list(seen)):
+            problems.append(f"{catch_path}: not the parent's globs minus exactly the listed files")
+    return problems
 
 
 def resolve_config(root: pathlib.Path, config_path: str) -> list[str]:
@@ -240,21 +320,17 @@ def main(argv: list[str]) -> int:
         print("\n".join(resolve_config(root, args[1])))
         return 0
     out = root / "mutation-sweep"
-    wanted = build(root)
-    on_disk = {p.relative_to(root).as_posix() for p in out.glob("*.json")} if out.exists() else set()
     if args == ["--check"]:
-        stale = sorted(p for p, text in wanted.items()
-                       if not (root / p).exists() or (root / p).read_text(encoding="utf-8") != text)
-        extra = sorted(on_disk - set(wanted))
-        if stale or extra:
-            for path in stale:
-                print(f"stale or missing: {path}")
-            for path in extra:
-                print(f"not generated by this script: {path}")
+        problems = check(root)
+        for problem in problems:
+            print(problem)
+        if problems:
             print("Run scripts/mutation-shards and commit mutation-sweep/.")
             return 1
-        print(f"mutation-sweep/ is current: {len(wanted) - 1} shard configs and matrix.json.")
+        print(f"mutation-sweep/ is well-formed: {len(list(out.glob('stryker-config.*.json')))} shard configs.")
         return 0
+    wanted = build(root)
+    on_disk = {p.relative_to(root).as_posix() for p in out.glob("*.json")} if out.exists() else set()
     out.mkdir(exist_ok=True)
     for path in on_disk - set(wanted):
         (root / path).unlink()

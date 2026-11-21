@@ -8,6 +8,7 @@
     "coverage-analysis": "off",
     "additional-timeout": 300000,
     "mutate": [
+      "Tenants/SelfService/SelfServiceName.cs",
       "Tenants/SelfService/SelfServicePolicy.cs",
       "Tenants/SelfService/SelfServiceRoles.cs"
     ],

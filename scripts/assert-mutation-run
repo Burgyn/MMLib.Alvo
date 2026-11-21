@@ -3,7 +3,7 @@
 # its config asked for. Called by .github/workflows/mutation.yml after every shard;
 # runnable by hand over a saved log, which is the point (see "Verifying this" below).
 #
-# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <expected-tests> <shard-name> [canary|since|since-changed]
+# usage: scripts/assert-mutation-run <stryker-log> <stryker-config> <expected-mutants> <expected-tests> <shard-name> [canary|since|since-changed|sweep]
 #
 # WHY THIS EXISTS. A mutation gate has two ways to be green, and only one of them is
 # honest. This repository has already shipped the dishonest one twice: once as a
@@ -95,7 +95,7 @@ config="${2:?missing stryker config path}"
 expected_mutants="${3:?missing expected mutant count}"
 expected_tests="${4:?missing expected test count}"
 shard="${5:?missing shard name}"
-# Optional 6th argument, the MODE: absent, or literally `canary`, `since` or `since-changed`.
+# Optional 6th argument, the MODE: absent, or literally `canary`, `since`, `since-changed` or `sweep`.
 # Anything else is refused rather than ignored: a typo that silently turned check 5 off
 # would leave the one check that can detect a lying runner quietly absent, which is the
 # defect class it exists for.
@@ -114,6 +114,14 @@ shard="${5:?missing shard name}"
 # (scripts/mutation-shards --resolve). Then zero mutants is not "nothing to do", it is a diff
 # Stryker failed to see, a false green; so that mode waives check 3's floor only, and check 1
 # applies in full.
+#
+# `sweep` is a shard of the weekly full sweep (mutation-sweep/, scripts/mutation-shards). It
+# waives the same two things as `since`, for a different reason: a shard names exact files, and
+# a file deleted since the shards were cut is legitimate, as is an empty catch-all — the shard
+# that mutates whatever was ADDED since. Membership is proved structurally instead, on every PR
+# (`mutation-shards --check`). The cost, stated: a sweep shard whose every mutant became a
+# compile error also passes here (stryker-net#3094's shape); the per-push legs still catch that
+# for their whole leg, and a sweep shard's report shows it.
 canary="${6:-}"
 since=false
 since_allows_zero=false
@@ -121,7 +129,8 @@ case "$canary" in
     ''|canary) ;;
     since) since=true; since_allows_zero=true; canary='' ;;
     since-changed) since=true; canary='' ;;
-    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary', 'since' or 'since-changed', or absent, got '$canary'."; exit 1 ;;
+    sweep) since=true; since_allows_zero=true; canary='' ;;
+    *) echo "::error::Mutation run ($shard): the 6th argument must be the word 'canary', 'since', 'since-changed' or 'sweep', or absent, got '$canary'."; exit 1 ;;
 esac
 
 fail() {

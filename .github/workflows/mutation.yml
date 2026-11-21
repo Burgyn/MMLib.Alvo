@@ -3,7 +3,7 @@ name: Mutation
 # Mutation testing of the security-relevant logic. Path-filtered so a push runs it only
 # when a mutated project changes. WHAT RUNS WHEN is THE CADENCE below: on a push, seven legs
 # in full and the four long ones with Stryker `since` the previous main commit; weekly and on
-# workflow_dispatch, the long ones in full as 42 generated shards (mutation-sweep/).
+# workflow_dispatch, the long ones in full as 46 generated shards (mutation-sweep/).
 # The legs, the canary first (see THE CANARY below):
 #   - "security core (expressions)"       → src/MMLib.Alvo/Expressions/**
 #                        (stryker-config.expressions.json)
@@ -815,12 +815,26 @@ name: Mutation
 #   data-ef-core             3  24-195 min (EfAlvoData.cs alone ~195)  340  4
 #   accounts-store           7  49-203 min (EfCoreAccountStore.cs alone ~203)  340  2
 #
+# PLUS ONE CATCH-ALL PER LEG (46 in all): the leg's own globs minus a `!` for every listed file,
+# so a source file ADDED since the shards were cut is mutated there with no regeneration, and a
+# DELETED one is harmless — Stryker 4.16 accepts a `mutate` entry or a `!` exclude that matches
+# nothing (measured on the canary, 2026-11-21: the same 13 mutants, exit 0). Ruled 2026-11-21 by
+# the debt-cleanup session on the maintainer's behalf, after the PR gate went red on this branch
+# when a merge from main added .cs files: no contributor should meet an unrelated mutation-tooling
+# failure in Build & test for adding a file. `scripts/mutation-shards --check` therefore no longer
+# regenerates and compares; it proves the committed shards WELL-FORMED (listed shards disjoint,
+# the catch-all their exact complement, every other key the parent's). The cost: the catch-all
+# grows with every added file until the next regeneration — regenerate when it has grown large,
+# at the latest when a sweep's measurements recalibrate the shards. Sweep shards run the assert in
+# mode `sweep` (zero mutants allowed, floor waived): an empty catch-all and a shard whose files
+# were deleted are both legitimate.
+#
 # Two single files exceed 180 and stay whole — Stryker's file-level `mutate` cannot cut inside
 # one without line spans, which this change does not take on. EfAlvoData.cs at 340/195 = 1.74x
 # is inside the >= 1.7x rule; EfCoreAccountStore.cs at 1.67x is not, on a cost that is itself an
 # estimate — the first sweep settles which way that goes.
 #
-# WHAT THE CADENCE COSTS, stated: 42 shards at `max-parallel: 13`, beside the 7 per-push legs
+# WHAT THE CADENCE COSTS, stated: 46 shards at `max-parallel: 13`, beside the 7 per-push legs
 # that run with them, so a sweep never asks for more than GitHub's 20 concurrent jobs — 4 batches
 # of up to 340 minutes. A sweep can take most of a day of wall clock, which is why it is weekly,
 # and why a dispatch without the `since` input is not to be launched casually. A shard's
@@ -1335,8 +1349,9 @@ jobs:
 
   # THE WEEKLY SWEEP reads its matrix from mutation-sweep/matrix.json, which
   # scripts/mutation-shards generates from the long legs' committed configs and the PR gate
-  # proves current (scripts/test-assert-mutation-run). A file rather than YAML so that ~40
-  # generated entries are not hand-edited, and so the shard list cannot drift from the configs.
+  # proves well-formed (scripts/test-assert-mutation-run). A file rather than YAML so that 46
+  # generated entries are not hand-edited; each leg's catch-all keeps a file added since the
+  # last regeneration under mutation.
   sweep-plan:
     name: Plan the sweep
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.since == '')
@@ -1379,6 +1394,7 @@ jobs:
           mutants: ${{ matrix.mutants }}
           suite: ${{ matrix.suite }}
           shard: ${{ matrix.name }}
+          mode: ${{ matrix.mode }}
           concurrency: ${{ matrix.concurrency || 4 }}
           debug-log: ${{ matrix.debug-log }}
 

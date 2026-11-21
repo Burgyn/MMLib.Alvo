@@ -195,7 +195,10 @@ the Dockerfile ships exactly the runnable examples) is `QuickStartImageTests`, i
   changed source only**; the full long legs run as a sharded sweep weekly
   (Saturday 02:17 UTC) and on `workflow_dispatch` — most of a day, in 4 batches,
   and its shards stay provisional (`break` 30) until a sweep has calibrated
-  them. A dispatch with no `since` input launches that full sweep, so don't do
+  them. Adding or deleting a .cs file needs no shard regeneration — each long
+  leg's catch-all shard mutates whatever was added; regenerate
+  (`scripts/mutation-shards`) when a catch-all has grown large, at the latest
+  at sweep calibration. A dispatch with no `since` input launches that full sweep, so don't do
   it casually; with `since: <sha>` it runs only the diff legs. The cost is
   explicit: nothing blocks a merge on mutation score, so a red mutation run on
   `main` is a notification someone has to act on.

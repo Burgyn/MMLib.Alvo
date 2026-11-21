@@ -9,7 +9,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 159,
-      "files": 9
+      "files": 9,
+      "mode": "sweep"
     },
     {
       "name": "expressions 2 of 5",
@@ -20,7 +21,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 148,
-      "files": 8
+      "files": 8,
+      "mode": "sweep"
     },
     {
       "name": "expressions 3 of 5",
@@ -31,7 +33,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 123,
-      "files": 7
+      "files": 7,
+      "mode": "sweep"
     },
     {
       "name": "expressions 4 of 5",
@@ -42,7 +45,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 167,
-      "files": 1
+      "files": 1,
+      "mode": "sweep"
     },
     {
       "name": "expressions 5 of 5",
@@ -53,29 +57,44 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 147,
-      "files": 13
+      "files": 13,
+      "mode": "sweep"
+    },
+    {
+      "name": "expressions catch-all",
+      "config": "mutation-sweep/stryker-config.expressions.catch-all.json",
+      "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
+      "mutants": 1,
+      "suite": 5330,
+      "timeout": 340,
+      "concurrency": 4,
+      "projected-minutes": 0,
+      "files": 0,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 1 of 27",
       "config": "mutation-sweep/stryker-config.core.01.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 268,
+      "mutants": 267,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 171,
-      "files": 28
+      "files": 28,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 2 of 27",
       "config": "mutation-sweep/stryker-config.core.02.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 250,
+      "mutants": 249,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 159,
-      "files": 27
+      "files": 27,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 3 of 27",
@@ -86,29 +105,32 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 167,
-      "files": 9
+      "files": 9,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 4 of 27",
       "config": "mutation-sweep/stryker-config.core.04.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 274,
+      "mutants": 273,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 175,
-      "files": 13
+      "projected-minutes": 174,
+      "files": 13,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 5 of 27",
       "config": "mutation-sweep/stryker-config.core.05.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 280,
+      "mutants": 279,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 178,
-      "files": 3
+      "files": 3,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 6 of 27",
@@ -119,29 +141,32 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 145,
-      "files": 8
+      "files": 8,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 7 of 27",
       "config": "mutation-sweep/stryker-config.core.07.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 252,
+      "mutants": 251,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 161,
-      "files": 7
+      "projected-minutes": 160,
+      "files": 7,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 8 of 27",
       "config": "mutation-sweep/stryker-config.core.08.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 239,
+      "mutants": 238,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 152,
-      "files": 19
+      "files": 19,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 9 of 27",
@@ -151,30 +176,33 @@
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 176,
-      "files": 12
+      "projected-minutes": 175,
+      "files": 12,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 10 of 27",
       "config": "mutation-sweep/stryker-config.core.10.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 171,
+      "mutants": 170,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 109,
-      "files": 6
+      "files": 6,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 11 of 27",
       "config": "mutation-sweep/stryker-config.core.11.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 280,
+      "mutants": 279,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 179,
-      "files": 15
+      "projected-minutes": 178,
+      "files": 15,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 12 of 27",
@@ -185,18 +213,20 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 168,
-      "files": 26
+      "files": 26,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 13 of 27",
       "config": "mutation-sweep/stryker-config.core.13.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 281,
+      "mutants": 280,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 179,
-      "files": 14
+      "files": 14,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 14 of 27",
@@ -207,29 +237,32 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 167,
-      "files": 16
+      "files": 16,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 15 of 27",
       "config": "mutation-sweep/stryker-config.core.15.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 270,
+      "mutants": 269,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 172,
-      "files": 15
+      "files": 15,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 16 of 27",
       "config": "mutation-sweep/stryker-config.core.16.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 278,
+      "mutants": 277,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 177,
-      "files": 34
+      "files": 34,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 17 of 27",
@@ -240,7 +273,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 178,
-      "files": 20
+      "files": 20,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 18 of 27",
@@ -251,7 +285,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 159,
-      "files": 14
+      "files": 14,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 19 of 27",
@@ -262,18 +297,20 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 160,
-      "files": 7
+      "files": 7,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 20 of 27",
       "config": "mutation-sweep/stryker-config.core.20.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 237,
+      "mutants": 236,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 151,
-      "files": 21
+      "files": 21,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 21 of 27",
@@ -284,7 +321,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 154,
-      "files": 6
+      "files": 6,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 22 of 27",
@@ -295,18 +333,20 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 151,
-      "files": 20
+      "files": 20,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 23 of 27",
       "config": "mutation-sweep/stryker-config.core.23.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 213,
+      "mutants": 212,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 136,
-      "files": 8
+      "files": 8,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 24 of 27",
@@ -317,7 +357,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 171,
-      "files": 17
+      "files": 17,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 25 of 27",
@@ -327,30 +368,45 @@
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 171,
-      "files": 20
+      "projected-minutes": 170,
+      "files": 20,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 26 of 27",
       "config": "mutation-sweep/stryker-config.core.26.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 272,
+      "mutants": 267,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 173,
-      "files": 13
+      "projected-minutes": 171,
+      "files": 13,
+      "mode": "sweep"
     },
     {
       "name": "rules, auth, rest 27 of 27",
       "config": "mutation-sweep/stryker-config.core.27.json",
       "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
-      "mutants": 31,
+      "mutants": 48,
       "suite": 5330,
       "timeout": 340,
       "concurrency": 4,
-      "projected-minutes": 20,
-      "files": 2
+      "projected-minutes": 31,
+      "files": 3,
+      "mode": "sweep"
+    },
+    {
+      "name": "rules, auth, rest catch-all",
+      "config": "mutation-sweep/stryker-config.core.catch-all.json",
+      "project": "src/MMLib.Alvo/MMLib.Alvo.csproj",
+      "mutants": 1,
+      "suite": 5330,
+      "timeout": 340,
+      "concurrency": 4,
+      "projected-minutes": 0,
+      "files": 0,
+      "mode": "sweep"
     },
     {
       "name": "data-ef-core 1 of 3",
@@ -361,7 +417,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 131,
-      "files": 5
+      "files": 5,
+      "mode": "sweep"
     },
     {
       "name": "data-ef-core 2 of 3",
@@ -372,7 +429,8 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 195,
-      "files": 1
+      "files": 1,
+      "mode": "sweep"
     },
     {
       "name": "data-ef-core 3 of 3",
@@ -383,7 +441,20 @@
       "timeout": 340,
       "concurrency": 4,
       "projected-minutes": 24,
-      "files": 5
+      "files": 5,
+      "mode": "sweep"
+    },
+    {
+      "name": "data-ef-core catch-all",
+      "config": "mutation-sweep/stryker-config.data-ef-core.catch-all.json",
+      "project": "src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+      "mutants": 1,
+      "suite": 2903,
+      "timeout": 340,
+      "concurrency": 4,
+      "projected-minutes": 0,
+      "files": 0,
+      "mode": "sweep"
     },
     {
       "name": "accounts-store 1 of 7",
@@ -395,6 +466,7 @@
       "concurrency": 2,
       "projected-minutes": 162,
       "files": 2,
+      "mode": "sweep",
       "debug-log": true
     },
     {
@@ -407,6 +479,7 @@
       "concurrency": 2,
       "projected-minutes": 203,
       "files": 1,
+      "mode": "sweep",
       "debug-log": true
     },
     {
@@ -419,6 +492,7 @@
       "concurrency": 2,
       "projected-minutes": 153,
       "files": 2,
+      "mode": "sweep",
       "debug-log": true
     },
     {
@@ -431,6 +505,7 @@
       "concurrency": 2,
       "projected-minutes": 183,
       "files": 2,
+      "mode": "sweep",
       "debug-log": true
     },
     {
@@ -443,6 +518,7 @@
       "concurrency": 2,
       "projected-minutes": 179,
       "files": 3,
+      "mode": "sweep",
       "debug-log": true
     },
     {
@@ -455,6 +531,7 @@
       "concurrency": 2,
       "projected-minutes": 182,
       "files": 1,
+      "mode": "sweep",
       "debug-log": true
     },
     {
@@ -467,6 +544,20 @@
       "concurrency": 2,
       "projected-minutes": 49,
       "files": 1,
+      "mode": "sweep",
+      "debug-log": true
+    },
+    {
+      "name": "accounts-store catch-all",
+      "config": "mutation-sweep/stryker-config.accounts-store.catch-all.json",
+      "project": "src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj",
+      "mutants": 1,
+      "suite": 1750,
+      "timeout": 340,
+      "concurrency": 2,
+      "projected-minutes": 0,
+      "files": 0,
+      "mode": "sweep",
       "debug-log": true
     }
   ]

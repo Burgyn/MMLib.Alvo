@@ -22,7 +22,9 @@ inputs:
     description: The leg's name, for messages.
     required: true
   mode:
-    description: Empty, `canary` or `since` — scripts/assert-mutation-run's 6th argument.
+    description: >-
+      Empty, `canary`, `since` or `sweep` — scripts/assert-mutation-run's 6th argument. `since` is
+      narrowed to `since-changed` here when the merge touched the leg's files.
     default: ''
   since:
     description: For mode `since`, the commit to diff against (the previous main commit).
