@@ -160,7 +160,12 @@ internal static partial class AccountsDocumentation
 
     private static OpenApiResponses CreateResponses(OpenApiDocument document)
     {
-        var (_, created) = MembershipAnswer(document, "201", "The tenant was created; the body is the person's owner membership.");
+        var created = Response(
+            "The tenant was created; the body is the person's owner membership. A keyed retry answers the same 201 and "
+            + "`Location` with the membership as it reads now — or, when the person has since left the tenant, only "
+            + "`{tenantId}`.",
+            PersonNoStore(),
+            Media("application/json", CreatedOrReplayed(document)));
         created.Headers!["Location"] = Header("The new tenant's URL: `{prefix}/tenants/{tenantId}`.");
         return Answers(
             document,
@@ -180,6 +185,19 @@ internal static partial class AccountsDocumentation
             Invalid(document, keyed: true),
             CreateRateLimited(document));
     }
+
+    /// <summary>
+    /// The create's 201 body: the membership, or — a keyed replay for a creator who has left — the id alone. <c>anyOf</c>,
+    /// not <c>oneOf</c>: neither shape forbids extra members, so a membership also matches the id-only shape.
+    /// </summary>
+    private static OpenApiSchema CreatedOrReplayed(OpenApiDocument document) => new()
+    {
+        AnyOf =
+        [
+            new OpenApiSchemaReference(AccountsSchemas.MembershipId, document),
+            new OpenApiSchemaReference(AccountsSchemas.CreatedTenantId, document),
+        ],
+    };
 
     private static OpenApiResponses RenameResponses(OpenApiDocument document) => Answers(
         document,

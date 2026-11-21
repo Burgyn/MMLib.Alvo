@@ -101,8 +101,11 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   the core nupkg, and a boot warning when a generated class no longer fits the live schema) is done too; HX-15 (host
   functions called from the descriptor, `automation` running on the delivery engine with `entity.update` exactly once
   per event, and required secrets) the fifteenth.
-  The line is complete: HX-01…HX-19 are merged, and its follow-ups (#475–#486) are resolved except #475 and #476,
-  which need design decisions, and #486, a red mutation gate that is only partly addressed.
+  The line is complete: HX-01…HX-19 are merged, and its follow-ups (#475–#486) are resolved except #475, which needs
+  a design decision, and #486, the mutation gate: every leg now runs and the long legs are sharded (`since` on push, a
+  full weekly sweep, #559 and #568), and what it still owes is the first weekly sweep's calibration — the shards'
+  budgets and thresholds are provisional until it has run. #476 (soft-deleted rows counting toward `unique`) is folded
+  into #89, the `softDelete` implementation.
   This line runs ahead of F5's close, the way F4 ran beside F3; the marker stays on F5.
   **End-user accounts and self-service tenancy** — Google sign-in, people who own data, tenants they share
   with members and invitations, and integrator tokens, chosen per app at three levels in the descriptor; seven
@@ -135,16 +138,22 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   technician, a billing service token, a removed member, every tenant wall and refresh reuse, with every existing suite
   still green; three guides (*Sign-in and accounts*, *Tenants, members and invitations*, *Tokens for integrators*), a
   generated sign-in reference, and a tenth descriptor skill, `alvo-descriptor-accounts`
-  (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are complete as stacked PRs #524, #525, #528, #529,
-  #530, #537 and S6's; a whole-stack review precedes the merge. Follow-ups: #523, #526, #527, #536,
-  ~~#543~~ (done: every sweep of a person's credentials takes their account row first, so an owner's removal and her
-  ban no longer deadlock, and an operator gives a tenant whose only owner is banned a new owner), #544 and #546
-  designed (`docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`: #544's `azp` half done — a
-  Google ID token's `azp`, when present, must name a configured client id; key rotation and #546 deferred),
-  ~~#538~~ (done: a scoped create without `tenant_id` is placed in the tenant the call acts in), ~~#539~~ (done: on every surface where Alvo reads a Bearer, an app token sent as `Authorization: Bearer` gets a
-  401 naming the API-key header), ~~#542~~ (done: one `/auth/v1` contract — `createdBy: { id, name }`, a 401 Bearer
-  challenge for any API key on a person-only route, `auth.apiTokens`, one rate budget per route, and `Idempotency-Key` on
-  `POST /tenants`, refused on mint and invitation create) and #540 (the v10 assistant eval is owed).
+  (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are merged, as stacked PRs #524, #525, #528, #529,
+  #530, #537 and S6's, after a whole-stack review. Follow-ups:
+  ~~#523~~ (done: a declared rename no longer leaves an index or a primary key under its old name),
+  ~~#526~~ (done: the operator's user routes check `{project}`, and `…/users/{id}/disabled` answers 422 for `{}` and
+  for a missing body), ~~#538~~ (done: a scoped create without `tenant_id` is placed in the tenant the call acts in),
+  ~~#539~~ (done: on every surface where Alvo reads a Bearer, an app token sent as `Authorization: Bearer` gets a 401
+  naming the API-key header), ~~#542~~ (done: one `/auth/v1` contract — `createdBy: { id, name }`, a 401 Bearer
+  challenge for any API key on a person-only route, `auth.apiTokens`, one rate budget per route, and `Idempotency-Key`
+  on `POST /tenants`, refused on mint and invitation create), ~~#543~~ (done: every sweep of a person's credentials
+  takes their account row first, so an owner's removal and her ban no longer deadlock, and an operator gives a tenant
+  whose only owner is banned a new owner); #544 and #546, designed in
+  `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md` — #544's `azp` half done (a Google ID
+  token's `azp`, when present, must name a configured client id), its key rotation deferred, and #546 deferred; #527
+  (one framework sweeper, session-bound refresh tokens, dead credentials swept) landing in PR #570, with the design's
+  paged lists (Q10) still owed; #536 open; and #540 deferred for budget — the eval with prompt v10 runs next week.
+  Beside them, ~~#519~~ is fixed: a write hook's cold runs no longer fail a write by timing out.
 
 ## 3a. What closed F4
 

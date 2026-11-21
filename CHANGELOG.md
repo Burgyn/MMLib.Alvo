@@ -15,7 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tenancy.selfService.assignableRoles` — without enabling the banned person. It answers `200` with the membership,
   `404` for an unknown tenant or account, `409` for a disabled account or a personal tenant and `422` for a role a
   membership cannot carry, and revokes nothing.
-
 - **`Idempotency-Key` on `POST /auth/v1/tenants`** (#542 item 5, decided by the maintainer). A tenant cannot be deleted,
   so a create retried after a lost answer used to spend a `maxPerAccount` slot for good. With a key, a retry with the same
   name answers the tenant the first create made (the same 201 and `Location`, the membership as it reads now, or the id
@@ -26,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only as a hash, so a replay could not repeat it. A key sent there is refused, 422 `malformed-query` with that fix, so a
   retry is never mistaken for a replay. After a lost answer, list, revoke the one you cannot account for, and create
   again. A bad key on `POST /auth/v1/tenants` (sent twice, blank, too long) is the same 422 `malformed-query`, the Data
-  API's slug for the header. **Docs:** the tenants and tokens guides, `docs/architecture/accounts.md`.
+  API's slug for the header. The OpenAPI document publishes the 201's body as either shape: `authMembership`, or
+  `authCreatedTenant` (`{tenantId}` alone) for the replay to a creator who has left. **Docs:** the tenants and tokens
+  guides, `docs/architecture/accounts.md`.
 - **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
   per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
   in the standalone host), a person can sign in through the app:
@@ -289,7 +290,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   events written from then on. A failed sweep is logged and never fails the apply; the next apply or boot sweeps again.
   "Not declared" is judged only against the database's current revision: a boot or a code-first apply whose descriptor
   differs from the stored one (an older worker over the same database) sweeps nothing.
-
 - **A sequence's `timeZone`** (#479, HX-12 D6): `sequence.timeZone`, an IANA id such as `"Europe/Bratislava"`, makes
   the `period` and the `{yyyy}` `{yy}` `{MM}` `{dd}` tokens read the create's calendar date in that zone — a
   `period: day` count runs from local midnight to local midnight, 23 or 25 hours on a DST day. Absent, both stay UTC,
@@ -331,7 +331,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - an enum per `enum` field;
   - a typed `{Class}Patch`;
   - a `{Project}Roles` class of role constants.
-
   The source generator ships inside the `MMLib.Alvo` nupkg (`analyzers/dotnet/cs`, plus `build/MMLib.Alvo.props`) and
   reaches projects that reference the core directly. A class name that a type in the SDK's implicit global usings
   already has gets `Entity` appended (`tasks` → `TaskEntity`). Docs: *Generated types*.
@@ -430,22 +429,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TimeSpan` to a duration, and `+`/`-` over them to CEL's operators.
 - **Dashboard: *Validation* and *Where*** (HX-11). The field editor's *Validation* box (every field kind) and the rollup
   section's *Where* box are live, checked as you type; the refusal badges for both are gone.
-
 - **`ALVO1001`, an analyzer shipped inside `MMLib.Alvo`** (HX-10, #387). Before-write, after-write, before-delete and
   after-delete hooks — classes and delegates — and `AddCelFunction` delegates are checked at build time for the network
   (`HttpClient`, sockets, mail…), a database connection, a file, a second Alvo data port (`IAlvoData`, `IAlvoEvents`…),
   a service-locator lookup of one, an `await` of anything but the write's transaction and, in a CEL function, a call that
   returns a task. A warning; validate hooks and event handlers are not checked. It reaches projects that reference
   `MMLib.Alvo` directly — NuGet does not pass an analyzer on through another package. Docs: *Analyzer rules*.
-
 - **A time budget for host CEL functions** (#309). Every host function call in one evaluation shares
   `Alvo:Extensions:CelFunctionBudget` (default 250 ms, at most 30 s); a function may take a trailing `CancellationToken`,
   cancelled when the budget is spent.
-
 - **`expression-failed` (422)** (#315): a built-in CEL function or hook arithmetic refusing the request's own data —
   `int('x')`, a `substring` past the end, an overflow, a division by zero — is now a caller-fixable 422 on every host,
   without `AddAlvoProblemDetails()`.
-
 - **Write hooks in three phases** (HX-09, #386). `Entity<T>(…)`/`Entity("name", …)`/`Entities`/`Entity("*", …)` gain
   `Validate`, `BeforeWrite`, `AfterWrite`, `BeforeDelete` and `AfterDelete` — class (`IValidateWriteHook<T>`, …) or
   delegate hooks, with a lambda or CEL `when`. Validate runs before a top-level write's transaction (network allowed,
@@ -462,7 +457,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Breaking for typed .NET clients:** `AlvoExtensionKind` and `AlvoExtensionStage` gained members (append-only).
   **Behaviour change:** a top-level write on an entity with a host in-transaction hook runs in a transaction unit of
   its own — a 30 s limit, one DI scope, and an `IAlvoData` call from the hook is refused.
-
 - **Commands, inbound webhooks and HTTP conventions** (HX-08, #385). `MapAlvoCommand`/`MapAlvoCommand<TEntity>` — named
   commands whose caller (as the Data API resolves it), bound row (404 when unreadable) and access rule (CEL over
   `@user`, `@tenant` and the row, or a typed lambda; 403) are judged before the handler, which runs outside any
@@ -497,7 +491,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `IAlvoData` does not see a unit's calls. **Breaking for third-party `IAlvoData` providers:** `AlvoFilterOperator` gained three
   members; a provider must render them literally (the shipped `AlvoDataLiteralTextTests` hold it) or refuse them as a
   malformed filter.
-
 - **Delivery operations** (HX-06, #383). `IAlvoOperations` and nine Management routes: list deliveries, read one with
   its attempts, redeliver, replay (dry run, `Idempotency-Key` scoped per caller; the reason is not part of the
   fingerprint; the same key with a different request is 409 `idempotency-conflict`; at most 10 000 per run), redacted
@@ -516,7 +509,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dispatcher's claimant is unique per claim. **Breaking for SQL dialect implementers:**
   `IAlvoSqlDialect.TransactionLockStatement`'s default throws `NotSupportedException`. Upgrade: the two tables are
   created on start.
-
 - **Typed layer and lambda translation** (HX-05, #382). `Entity<T>` / `AlvoEntityBuilder<T>` register handlers over a
   host class with conditions as lambdas over `EventCondition<T>` (`New`, `Old`, `Changed`, `Caller` —
   `AlvoConditionCaller`), translated once, at registration, into the CEL the catalog shows (`e.Changed(x => x.Status)
@@ -532,7 +524,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `record-unreadable` (never retried; the `DeliveryRecordUnreadable` log names the class and field). Conditions and queries
   keep CEL's and SQL's null semantics, not C#'s. Docs: *Typed or CEL*; the *extending* examples now show the lambda
   form first. No breaking change.
-
 - **Extension catalog, apply guard, dashboard and assistant** (HX-04, #381). `GET {m}/projects/{p}/extensions` /
   `IAlvoManagement.GetExtensionsAsync` (`viewer`) list every registered event handler as metadata (`ManagementExtension`,
   `ManagementExtensionCatalog`, `AlvoExtensionKind`, `AlvoExtensionStage`) — id, entities, operations, condition, order,
@@ -543,7 +534,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptor's after-hooks and the host's handlers). The schema assistant gains `get_extensions` and
   `get_descriptor`'s `hostExtensions` (instructions v7) and two eval cases, nineteen in all; `scripts/eval-assistant`
   has not yet been run against v7. Docs: *See your extensions in the dashboard*.
-
 - **Event handlers on a delivery engine** (HX-03, #380). An embedded host reacts to committed changes in C#:
   `Entity("tickets", t => t.OnUpdated("id", handler, when: "changed(status) && new.status == 'resolved'"))`, also
   `Entities([...])`, `Entity("*")`, `OnCreated`/`OnDeleted`/`OnSaved`, class handlers (`IAlvoEventHandler<T>`) and
@@ -561,7 +551,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start over another id's unfinished work is refused before anything changes — a rollback past a newly added handler
   with unfinished work included. `IAlvoSession` binds data access to one caller. `Alvo:Deliveries:MaxConcurrency` (16).
   Docs: *React to changes (event handlers)*.
-
 - **`MMLib.Alvo.TestHost`, a real backend inside a test** (HX-02, #379). `AlvoTestHost.StartAsync(b => b.FromDescriptor(…))`
   starts the production pipeline over a private in-memory SQLite database (or the builder's own `UsePostgreSql`), with
   `Data` (behaving exactly as the host's `IAlvoData`), `AlvoTestHost.Caller(roles)`, an optional `TimeProvider`,
@@ -599,7 +588,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `508` problem type `chain-depth-exceeded` with `"retryable": false`. Enforced by the EF driver's write entry points,
   `InMemoryAlvoData` (at the default) and `IAlvoEvents.PublishAsync`.
 - **Docs: *Extending in code*** — where host logic goes, and the event envelope attribute by attribute.
-
 - **The standalone image is published to GitHub Container Registry as `ghcr.io/burgyn/alvo`**, for
   `linux/amd64` and `linux/arm64` (`.github/workflows/image.yml`). Every push to `main` publishes
   `:edge` and `:sha-<7>`; a `v*` tag publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>` and
@@ -615,7 +603,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file (`scripts/test-quickstart`); the pushed two-arch image is a rebuild from the same cache, and the
   arm64 variant is not smoke-tested in CI.
   The startup refusals that suggested `docker run … mmlib/alvo` now name the published image.
-
 - **CEL functions in hook conditions and before-hook `mutate` values** (slice C1). A host registers
   a typed C# function at startup with `AddCelFunction(name, delegate, summary)` on the Alvo builder.
   A descriptor's hook conditions and `mutate` values call it by name, and so can the built-ins. C1
@@ -628,7 +615,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callable function with its signature, summary, provenance and profiles, and the schema assistant
   gains the `get_cel_functions` tool. A host function runs inside the write's transaction with no
   time budget or `CancellationToken` yet (#309).
-
 - **A literal `field.default` is honoured** (#113's literal half). A field declaring
   `"default": false` / `"normal"` / `1` now emits a column `DEFAULT` in the generated DDL on both
   engines, and any write that composes a whole row — a create, and both branches of `PUT` — fills in
@@ -636,13 +622,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   being a `422`, which is the forward commitment PR-I recorded. `FieldSchema` gains `Default`
   (`JsonElement?`, the literal as declared). The examples that had lost theirs have them back:
   `simple-tasks` (`done`, `priority`) and `vehicle-registry` (`passed`).
-
   **Refused, and named at apply:** a `{"$cel": …}` default, which needs the caller's context at write
   time and stays with #113; a literal the field's type cannot hold; a literal its own facets exclude
   (`maxLength`, an enum's `values`, a malformed `uuid` or date); and a default on a `computed` or
   `rollup` field, whose value is maintained for it. `GET {m}/capabilities` no longer reports
   `field.default` as wholly refused — only its `$cel` half.
-
 - **Hook functions end to end** (slice D). A before-hook `condition` or `mutate` can now compute:
   - **19 built-in CEL functions, 32 overloads**, in `Condition` and `Mutate`: text `lowerAscii upperAscii trim replace
     substring size contains startsWith endsWith`; numbers `math.abs math.round math.ceil math.floor math.greatest
@@ -661,7 +645,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Demo hooks in `examples/bike-workshop`**: a frame number normalised with `upperAscii`/`trim`/`replace`, a
     `rack_tag` joined with `+`, the week discount on a rental rounded with `math.round(x, 2)`, and the workshop's own
     address refused on a customer with `endsWith`.
-
 - **A documentation site** at <https://alvo.burgyn.online/> (`website/`, Astro Starlight). Task-phrased
   guides — start here, data modelling, security, behaviour, API usage, C# extension, operations — sit beside a
   reference generated at build time by `tools/MMLib.Alvo.DocsGen`: the descriptor reference from
@@ -674,13 +657,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guides built on them run the published `ghcr.io/burgyn/alvo` image through `docker-compose.quickstart.yml`, with a
   downloaded compose override and descriptor where a page needs its own keys: no clone. Cloning stays the path for
   building from source and for the embedded samples.
-
 - **`ALVO_DESCRIPTOR` picks the descriptor the root compose stack runs.** `ALVO_DESCRIPTOR=./my.alvo.json docker
   compose up --build --wait` mounts that file instead of `examples/vehicle-registry`; unset, nothing changes. A
   descriptor whose roles the demo key does not hold adds keys in a gitignored `docker-compose.override.yml`, as the
   docs' *Run your own descriptor* shows. `scripts/test-e2e` ignores the variable, from the shell and from a root
   `.env`, so the suite always runs the stack it was written for.
-
 - **`examples/help-desk`**, a support desk's `tickets` with enum priority and status, literal defaults, a computed
   field, `audit`, role-differentiated rules and two before-hooks. It applies as it stands, and it is the end state of
   the docs site's tutorial and the source of the README's "See it" section.
@@ -698,14 +679,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   web one**, or its people are refused. An `azp` that is empty or JSON `null` is refused, never read as absent; a
   mismatch answers the same `invalid_request` as another app's `aud`, and the operator's log (event 6403, Information)
   says which claim it was and for which provider, never its value.
-
 - **Disabling or enabling an end user's account answers `200`, not `204`** (#543). The body is
   `{"orphanedTenants": [{"id", "name"}]}`: the shared tenants the account owns that no owner with an enabled account can
   manage after the change — what a ban of a sole owner orphaned.
 - **The last owner of a tenant is the last *enabled* owner** (#543). A co-owner can no longer leave, nor be demoted or
   removed, while the only other owner is banned: the banned owner keeps the flag, so enabling them restores it, but no
   longer counts toward the last-owner check.
-
 - **Each rate budget is named after what it limits, and none is shared** (#542 item 3, decided by the maintainer).
   `Alvo:Api:RateLimits:Token` is now `:TokenEndpoint` (RFC 6749 §3.2's name for `POST /auth/v1/token`; default 30).
   `:Create`, which tenant creation and token minting shared, is split into `:Tenants` (`POST /auth/v1/tenants`) and
@@ -724,8 +703,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The operator's user routes check `{project}`, and `…/users/{id}/disabled` refuses `{}`** (#526). All seven
   `{management}/projects/{project}/users…` routes answered for any project name, served or not; an unknown one is now
   the named `404` (*"This instance serves no project '…'"*), as on every other project route. `PUT …/users/{id}/disabled`
-  read a body without `disabled` — `{}` or none — as **enable**; it is now `422` with the sentence naming both values,
-  exactly as `…/accounts/{id}/disabled` answers. A caller that sent the deployment's real project name and an explicit
+  read `{}` — a body without `disabled` — as **enable**, and refused a missing body with `400` before the handler ran;
+  both are now `422` with the sentence naming both values, exactly as `…/accounts/{id}/disabled` answers. A caller that sent the deployment's real project name and an explicit
   `{"disabled": true|false}` sees no change. The dashboard calls the port in-process and is unaffected.
 - **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
   as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
@@ -816,7 +795,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DeliveryRequest.Debounce` (a due time, and superseding the lane's older waiting deliveries) and `DeliveryClaim.Limits`
   (claim a capped subscriber's delivery only with a free slot of its key), as `DeliveryStoreContractTests` pins. The
   framework tables gain `<prefix>_steps` and `<prefix>_concurrency_slots`.
-
 - **Breaking for clients that branch on 500:** a built-in CEL function's refusal of the caller's data answered 500
   `function-failed`; it answers 422 `expression-failed`, and is no longer logged at Error. Host functions keep 500.
 - **Breaking:** host CEL functions that reach 250 ms in one evaluation — with or without a cancellation token, and
@@ -824,7 +802,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `function-failed` / `hook-failed`); in an after-hook condition, after the commit, the after-hook is dropped with a
   Warning; in an event handler's `when` the delivery is recorded dead. Raise `Alvo:Extensions:CelFunctionBudget` if a
   function legitimately needs longer.
-
 - **`IAlvoManagement` gains `GetExtensionsAsync`** (HX-04). A third-party implementer or decorator of the public port
   must add it; a caller is unaffected.
 - **An apply that would unbind an event handler is refused** (HX-04). A runtime apply, a dry run, a rollback and
@@ -846,7 +823,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `new.<field>` or a bare field in `afterDelete` — read `old.<field>`;
   - `changed(<field>)` in `afterCreate` or `afterDelete` — compare the image the point has, or move the hook to
     `afterUpdate`.
-
   This is refused at apply **and at boot**. A host reading a descriptor file (`Alvo:DescriptorPath`, `FromDescriptor`)
   that carries one refuses to start, with the condition's JSON pointer and a fix in the log (exit code 78 in the
   standalone image since #547). A stored descriptor that applied before leaves its project `Failed` at start-up:
@@ -858,11 +834,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   referencing hook's `/action/template` pointer.
 - **`IAlvoData` has a seventh exception family**, `AlvoChainDepthExceededException`. An implementer of the port must
   refuse a write whose effective depth exceeds the limit (the provider contract suite now asserts it).
-
 - **`IAlvoManagement` gains `GetCelFunctionsAsync`** (slice C1). A caller is unaffected. An
   implementer or decorator of the interface must add the member, for example by delegating to the
   inner instance.
-
 - **`MapAlvoDataApi()` now returns `IEndpointConventionBuilder` instead of `IEndpointRouteBuilder`**
   (#182), so a host can attach `RequireRateLimiting`, an authorization policy, output caching or a
   telemetry tag to Alvo's generated routes and to nothing else — which is what every other ASP.NET
@@ -876,20 +850,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the route builder and `MapAlvoHealth()` is deliberately not chainable: one builder over the probes
   *and* the Data API would let an authorization policy reach `/health/live`, which is a container
   restart-looped by its own liveness gate.
-
 - **`AlvoQuery.EnsureSortKeysCanBePaged` is removed** (#116). It refused a paged read sorted by a
   nullable field, because a keyset boundary could not express where nulls sort. That boundary now
   can, so the guard has nothing left to refuse — and keeping it as a no-op would leave a member every
   `IAlvoData` implementation goes on calling forever. Delete the call; nothing replaces it. The
   API-layer refusal it produced, the `unpageable-sort-key` violation code, is gone with it: a request
   that used to earn it is now answered.
-
 - **The list response envelope gained a third member, `count`** (#110). It is always present and is
   `null` unless the request sent a recognised `Prefer: count` preference, exactly as `next` is always
   present and null
   on the last page — the envelope's members are a statement about the bytes. A client that rejects
   unknown members, or that pins the published schema's `required` list, sees the change.
-
 - **A dev API key's `Secret` must now be at least 32 characters** (#125). `AlvoAuthOptionsValidator`
   required only that it be non-empty, so `Secret = "password"` was accepted — and `ApiKeyHash` is a
   single unsalted SHA-256 pass, which is only as strong as the assumption that the secret is random.
@@ -900,20 +871,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is why the floor is set *at* that length rather than above it. Length is a proxy for entropy and
   not a measure of it — which is why this remains a **dev** mechanism, and why the real issuance
   path (#36) must not inherit this hash.
-
 - **An entity may no longer be named after one of Alvo's own tables** (#156). `alvo_descriptor_versions`,
   `alvo_idempotency` and `alvo_outbox` — or the same three under a non-default `AlvoOptions.SchemaPrefix`
   — were excluded from introspection but not *reserved*, so a descriptor could declare an entity that
   mapped straight onto one and the framework and the entity would share a table. Such a descriptor is
   now refused at apply, with the entity's JSON pointer and a fix. The names come from one internal
   authority both the provider and the core read; no public surface changed.
-
 - **A field declared both `required` and unconditionally `readOnly` is now refused at apply** (#124).
   The combination made every create of its entity unsatisfiable — supplying the field was refused as
   read-only, omitting it as missing — while the published OpenAPI document described a create the API
   would not accept. An expression-valued `readOnly` is unaffected: it is legal for one role and
   impossible for another, and the request-time half below answers that caller.
-
 - **A before-hook `mutate` value must honour its target field's facets** (#308, Ruling V). Two
   changes for descriptors already stored. **At apply:** a `mutate` *literal* outside the field's
   `maxLength`, enum `values`, `format` or decimal precision/scale — or a `null` into a `required`
@@ -926,7 +894,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store it with a `201`. The check runs once on the final patch, so a later hook may still repair an
   earlier one's value; the refusal names the field and facet only when the descriptor does not flag
   the field `hidden`.
-
 - **Hook arithmetic, comparisons and Boolean positions fail closed** (slice D, Rulings P–R and Y-D). In a before-hook
   `condition` or `mutate` value — and only there — an Int or Decimal overflow, a zero divisor, or a *present* operand an
   operator cannot take (a value of an unexpected CLR type, a non-Bool where a Bool is needed, two such values under
@@ -937,23 +904,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still answers as before. A literal zero divisor (`x / 0`) in a hook is refused at apply. Rules, `access` and computed
   fields do not change. Only an embedded caller's own records can reach the operand cases; the HTTP binder types every
   value.
-
 - **`abs` and `round` are now `math.abs` and `math.round`** (slice D). Both names came in with slice C1, which has not
   shipped: no released version had them, so this is a break only relative to C1, and C1 and D must ship in the same
   release.
-
 - **`IPredicateRenderer.Render` refuses a `Condition`-profile expression** (R-16). `SqlPredicateRenderer` now throws
   `NotSupportedException` for one. It used to render it in part, but a hook condition's functions and fail-closed
   operators have no SQL backend. No product caller renders a `Condition`, but a host that called the public renderer
   with one will see the throw.
-
 - **`lowerAscii` is an ordinary built-in**, widened rather than narrowed. It now takes any text expression
   (`lowerAscii(trim(new.email))`) and is legal in a `condition`. Every source that compiled before compiles and
   evaluates to the same value. Only the refusal messages of a few computed-field sources changed wording.
-
 - **`examples/bike-workshop`: `rack_tag` is `readOnly`.** A before-hook writes it, so a client that sends it now gets
   `422 read-only-field`. The seed carries no `rack_tag` and is unaffected.
-
 - **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
   The boot sequence runs as part of the host lifecycle, before the server binds: it loads and
   validates the descriptor, brings the schema up as far as the startup mode allows, primes the policy
@@ -984,7 +946,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     provider that does not can no longer boot. `docs/architecture/package-boundary.md` records the
     widened contract, including that an `IAppliedSchemaStore` must bring its own storage up
     idempotently and race-safely on first call.
-
 - **A `unique` field on a `tenancy: "scoped"` entity is now unique *within* the tenant, not across the
   instance** (#137). It was a **cross-tenant existence oracle**: `DescriptorModelBuilder` emitted
   `HasIndex(field).IsUnique()` with no `tenant_id` — and the same for a declared `unique` index — so
@@ -996,20 +957,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a non-unique index is unchanged, and a descriptor that already named `tenant_id` keeps its own column
   order. **Mapping the underlying refusal to a clean 409 did not fix this** — `409`-versus-`201` is the
   same one-bit signal as `500`-versus-`201` was — which is why the two were separate issues.
-
   **This changes emitted DDL.** `IX_<table>_<field>` becomes `IX_<table>_tenant_id_<field>` on a scoped
   entity, so the next apply drops one index and creates another (`DropIndex`/`AddIndex`, neither
   destructive, so no `AllowDestructive` is needed). The change is always in the *widening* direction —
   the new index forbids strictly less than the old one — so no existing row can violate it and no
   migration can fail on data. Nothing is released, which is why this was the cheap moment.
-
 - **`IAlvoSqlDialect` gained an abstract member, `DecodeConstraintViolation`.** A driver outside this
   repo will no longer compile until it implements it. Abstract rather than a default interface member on
   purpose: `null` means "not a constraint violation", which is a legitimate answer for every other
   failure, so an inherited default would have a new driver silently answer `500` for every duplicate —
   indistinguishable from correct behaviour on an engine that really reported something else.
-
-
 - **A descriptor may no longer name a field `order`, `limit`, `offset`, `after`, `select`,
   `or`, `and` or `not`.** The generated Data API's query string reserves each of these
   (`?limit=10`, `?or=(...)`, `?not.color=eq.red`), so a request could not tell a filter on
@@ -1022,7 +979,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is no opt-out, because the ambiguity has no correct per-request resolution.
   `schema/project.schema.json` documents the exclusion on the `fields` description — the
   JSON Schema pattern cannot express it, so it is stated there rather than validated.
-
 - **A descriptor is now rejected at apply when it declares a feature this build does not honour**,
   rather than applying and silently dropping it. The rule: refuse what silently produces wrong data;
   tolerate what an author can observe the absence of. Each refusal names the entity, the field, the
@@ -1040,11 +996,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Each of the six `entity.hooks.*` points, refused **individually** so that implementing one lifts
     only its own refusal (#114) — a `before*` hook may reject or mutate inside the write transaction,
     so a write the author believes is vetted is neither; an `after*` effect simply never happens.
-
   Blocks that are **warned about instead of refused**, because their absence is observable:
   `dynamicEntities`, `automation`, `templates`, `webhooks`, `functions`. Applying a descriptor that
   declares any of them logs one warning naming each.
-
 - **A descriptor may no longer declare a field named after a framework-managed column** — `id`,
   `tenant_id`, `created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at` — on an entity
   whose traits carry it. The refusal is trait-scoped, so an entity that does not declare `audit` may
@@ -1057,7 +1011,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrowing is now forbidden** along with the declaration. Express that intent as a `create` rule
   instead — the synthesized tenant scope's `WITH CHECK` is already evaluated over the candidate row,
   so a rule can answer "which tenant may this row be placed in" per caller and a field flag cannot.
-
 - **`MMLib.Alvo` is now an ASP.NET Core library.** §0 principle 8 makes every generated endpoint a
   minimal-API delegate, so the core carries `FrameworkReference Microsoft.AspNetCore.App` plus
   `Microsoft.AspNetCore.OpenApi`. **An embedded consumer of the core is therefore an ASP.NET consumer
@@ -1067,7 +1020,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Side effect: the framework reference supplies `Microsoft.Extensions.Options`, whose explicit
   `PackageReference`s had to be removed, because NuGet's `NU1510` (an error in this repo) objects to a
   reference it will not prune.
-
 - **`AddAlvo()` now calls `AddLogging()`.** The core writes at least one warning of its own, so it resolves
   `ILogger<T>` and must not require the host to have arranged that. It is idempotent (`TryAdd` throughout),
   so an ASP.NET host or one that already called it is unaffected; a plain console host embedding Alvo would
@@ -1111,12 +1063,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and answers 409 `conflict` with `Retry-After: 5` from the Management API, or refuses the start at boot. Behaviour
   change: of two concurrent applies, the loser blocked more than 5 s now answers 409 where it answered 412 (a retry then
   answers 412). Adding a validation on PostgreSQL holds the table — readers included — until the apply commits.
-
 - A built-in refusing a value a host function produced, the stored row (`old.`), or a value a hook wrote stays 500
   `function-failed`; only the caller's own data answers 422, and only on the generated Data API routes (commands keep 500).
   The caller's own data is a field the request's body sent: a refusal of a field an update left alone, of a default, a
   literal or `@user`, and any refusal on a delete, stays 500.
-
 - **The `alvo.` event namespace is reserved** (HX-03). `IAlvoEvents.PublishAsync("alvo.…")` is refused, as
   `entity.…` already was: Alvo mints schedule runs and command completions there.
 - **A database provider must supply `IDeliveryStore`** over the same database as `IOutboxStore` (HX-03); both shipped
@@ -1140,16 +1090,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "database is locked" error as before. Code running inside a
   write — a host CEL function, a replacement `IBeforeHookRunner` — must not write through Alvo. PostgreSQL is
   unchanged.
-
 - **The #325 refusal reports each offending reference on its own, in new words.** One refusal per distinct row-image
   reference and per distinct `changed()` call, each naming the point and the image it lacks; anything matching the
   old error text must update.
-
 - **The README is rewritten, and NuGet packages carry a readme of their own.** The repository `README.md` now
   leads with what Alvo is, a runnable example and links into the docs site. nuget.org renders no Mermaid,
   `<picture>`, raw HTML or relative image, so every package now packs `PACKAGE_README.md` (`PackageReadmeFile` in
   `Directory.Build.props`) instead of the repository README.
-
 - **Serving the OpenAPI document no longer costs `O(N²)` per request** (#126). The document is rebuilt on
   every request to `/openapi/v1.json`, which needs no credential, and the transformer resolved each
   entity's schema and field flags once per entity *and again per endpoint* — five endpoints per entity, so
@@ -1160,14 +1107,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one because serving the document also reads it once through `EntityRouteCatalog` when ApiExplorer
   enumerates the route table — a different concern, and one read regardless of entity count. The document
   itself is byte-identical — no baseline moved — so this is a change in cost, not in contract.
-
 - **A create whose caller cannot satisfy it now answers `read-only-required-field`, not `required`**
   (#124). When a field is `required` and this caller's own expression-valued `readOnly` mask froze it,
   telling them to supply it sends them to fix something no value of theirs can be stored in. The new
   violation says the create is impossible for these roles and names the two ways out. A caller who
   *writes* the frozen field still gets `read-only-field` — the new code narrows the missing-value case
   only.
-
 - **`maxLength` is counted in Unicode code points, not UTF-16 code units** (#123). Ten astral-plane
   characters are twenty UTF-16 units, so a value well inside a `varchar(10)` was refused with a 422
   telling the caller to shorten something already short enough. Code points is the unit PostgreSQL's
@@ -1176,7 +1121,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the unit: they count *fewer* than the column does, which would have admitted values the engine
   refuses. The agreement is a two-engine guarantee and is recorded as one — T-SQL's `nvarchar(n)`
   bounds UTF-16 units, so a SQL Server dialect owes its own answer before it can honour this (#175).
-
 - **A format check that times out is now its own violation code, `format-not-evaluated`, and no
   longer reported as `format`.** A client branching on the `format` code will no longer see the
   pattern-timeout case. This is a fix for a fail-*wrong*, not a cosmetic split: the old behaviour told
@@ -1187,7 +1131,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   about the value. Both still refuse the request, because an unevaluable check must fail closed; the
   difference is that the new code's fix suggestion is **retry the request**, which is the one action
   that can succeed when nothing about the value was wrong.
-
 - **A 201's `Location` header now honours `HttpRequest.PathBase`** (#121). A host mounted under a
   path base — `UsePathBase("/alvo")`, or a reverse proxy sending `X-Forwarded-Prefix` — used to
   advertise `/api/owners/<id>`, which 404s at the proxy edge; it now advertises
@@ -1207,7 +1150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `select` gets the statement and the body they got before, and `?select=make` returns exactly the
   keys it returned before — what changed is that the database stops reading the columns it did not
   name. Four things are worth knowing rather than rediscovering:
-
   - **The `SELECT` list does not get shorter.** Reads run through `FromSqlRaw` over a property-bag
     entity mapping every schema field, and EF fails when a mapped column is missing from the result
     set, so an unselected column is rendered `NULL AS <col>` and its key is dropped when the record
@@ -1238,10 +1180,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     counts the caller's **readable** fields rather than the entity's declared ones on purpose: the
     number appears in the refusal's fix suggestion, and the declared count would have told the caller
     how many fields are hidden from them.
-
   Internal: `DataApiPage.Project` is gone, replaced by `Render`, which renames and orders rather than
   filtering — the filtering moved into the port.
-
 - **A load-test harness, with a per-PR regression gate and a per-release calibration run.** No
   public API changes and no product code: `test/load/` (k6 scenarios, the bulk seed, the gate's
   baseline), `scripts/test-load`, `scripts/assert-load-baseline` plus its own suite, and
@@ -1265,10 +1205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and 3.0x at 200 000 — because the fixed per-request overhead stops dominating as the database's
     share grows. So the calibration tier reports rather than judges (`--report-only`); its validity
     checks still bite, because a void run publishes garbage.
-
   The gate ships **advisory**, not as a required check; promoting it wants a couple of weeks of
   real PRs with no false positive.
-
   Three reviews ran before the PR and found real defects rather than nits — most usefully that the
   `row_policy` ratio (the rule engine's hot-path number) was **unfalsifiable**: a ratio can only
   reward a cheaper policy path, and the cheapest row predicate is one that matches nothing, so a
@@ -1276,7 +1214,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still returns a strict subset before k6 starts. Three fail-open paths in the guard were also
   closed — a misspelled baseline key judged nothing and printed `ok`, an unmeasured row could not
   fail, and a zero `min` read as the fastest thing in the run — and its suite grew 22 → 40 cases.
-
   The gate's own first CI run then corrected the design twice. **p95 does not degenerate on
   `ubuntu-latest`** — its ratios track `min` within ~10 % there, so the collapse the design
   described is a property of macOS + Docker Desktop, not of the gate tier; the claim is now scoped
@@ -1285,7 +1222,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `count_exact` with 18 % margin under a ceiling set from laptop numbers alone — raised to 3.0 from
   the runner's own numbers, with `observed` and `observedOnTheRunner` kept separate so the
   distinction cannot be lost. A ceiling is measured on the rig that judges.
-
 - **`/health/ready` now reports whether the database can *still* be reached** (#133), so a store that
   goes away after boot drains the pod's traffic instead of being invisible. **This changes what an
   orchestrator does with a running host:** readiness answered 200 for the life of the process once
@@ -1314,7 +1250,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     what every readiness probe assumes and nothing here enforces. Bounded, disposed per probe, and tracked
     as **#183**, where caching the answer for a short window is the likely resolution.
   - Cache and message-bus reachability remain owed; the readiness tag is what makes each additive.
-
 - **`?order=<nullable field>` works, and `nullsfirst`/`nullslast` finally do something** (#116).
   Every list over HTTP is paged, and a paged read sorted by a nullable field used to be refused with
   422 — so sorting by a `display_name` that may be null was impossible, and half the published sort
@@ -1325,7 +1260,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **The cost is real and worth knowing:** the null placement is emitted as a `CASE` expression over
   the key, which an index on that key cannot serve, so page by a required column where latency
   matters. Per-dialect native `NULLS FIRST`/`NULLS LAST` is the follow-up (#178).
-
 - **`Prefer: count=exact` fills the page envelope's `count`** (#110), with the number of rows the
   query matches in total — narrowed by your policy and your filter, and *not* by `limit`, `offset`
   or `after`, so it does not shrink as you page. Opt-in, because an exact count is a second scan of
@@ -1337,7 +1271,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from `Preference-Applied` is how that is reported. *Exact* means "not an estimate", not
   "atomically consistent with `items`": the count is a second statement, so a write landing between
   the two can make the number differ by one.
-
 - **A standalone host you can run without writing any code.** `docker compose up` brings up a
   working backend defined entirely by a JSON descriptor mounted at `/alvo/descriptor.json` — no
   project, no migrations, no scaffolding. What you get:
@@ -1383,7 +1316,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **An end-to-end suite** (`scripts/test-e2e`) that builds the image, brings the stack up
     against PostgreSQL, runs TeaPie against the published port and asserts the created row is in
     the database. It runs in CI on every pull request.
-
 - **A runnable complex demo, and an end-to-end suite that measures what F3 claims.**
   `examples/field-service` is a multi-tenant field-service backend — global reference data beside
   two tenant-scoped entities, one audited and one not, an optional hidden field, a required hidden
@@ -1392,7 +1324,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on. Its README states, per construct, which behaviour it exists to let a test measure.
   `docker-compose.field-service.yml` runs it on `:8081` with five dev keys differing only in role
   and tenant; the repo-root `docker compose up` is unchanged.
-
   `test/teapie-field-service` drives 327 assertions against that container: the PostgREST query
   grammar including keyset paging over four pages, RFC 9457 problem documents carrying every
   violation at once, `ETag`/`If-Match` in both directions of the `audit` pair, `Idempotency-Key`
@@ -1401,11 +1332,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   six multi-step CRUD journeys that end by asserting the state of the world. `scripts/test-e2e`
   runs both stacks and adds two PostgreSQL assertions no HTTP check can make — that a hidden
   field's value really is stored, and that the two tenants' rows really are partitioned.
-
   **Three defects it found are recorded rather than fixed here**, each pinned by a labelled case
   that turns red when the defect is. They are **two independent problems**, and conflating them
   would let a fix for one be mistaken for a fix for the other:
-
   - *A database constraint violation is answered `500`, not `409`.* Two reachable shapes — a
     duplicate value on a `unique` field, and a delete blocked by an `onDelete: restrict` reference.
     Every other declared facet is validated and answered with a per-field 422; a database constraint
@@ -1419,13 +1348,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     signal to tenant B as `500`-versus-`201`. The fix is a tenant-scoped unique index. Pinned
     separately by `080-Tenancy/002`, which asserts *distinguishability* rather than a status
     precisely so a status-only change cannot be mistaken for a fix.
-
   Known limits, so this is honest: the image is **not published yet** — you build it from this
   repository — and there is no dashboard, no Management API and no CLI (#24, all F4). A mis-typed
   descriptor mount currently ends in a stack trace rather than a readable refusal (#132), and the
   docs UI's behaviour behind a path base is unmeasured (#134). `docs/architecture/host.md` records
   what the host is and what it deliberately is not.
-
 - **`MapAlvo()` and `MapAlvoHealth()`, plus a boot state to read** — new public API in the core.
   `MapAlvo()` maps everything Alvo serves (the Data API and both probes) in one call, and
   `MapAlvoHealth()` maps the probes alone. **Neither needs the schema to exist yet, and neither does
@@ -1434,7 +1361,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `register → map → boot → listen` is the sequence, and the boot runs before the server binds.
   `AlvoBootState` (with `AlvoBootPhase`) is what the boot publishes for a readiness probe, a CLI or a
   dashboard to read: the phase, and the applied revision it primed from.
-
 - **`IServiceProvider.ApplyAlvoDescriptorAsync()`** — new public API in the core. The one verb a
   host performs on a built container: bring the configured descriptor up, creating or migrating the
   schema it declares. It is no longer the *startup* path — Alvo's own boot does that before the
@@ -1447,7 +1373,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`MigrationResult.EnsureApplied()`** on the result, also new. It throws only on a plan that was
   neither applied, empty, nor a dry run, naming the destructive steps that were refused; an
   unchanged descriptor (empty plan) and a dry run pass through untouched.
-
 - **`AddAlvoProblemDetails()`** — new public API in the core, and **opt-in**: `AddAlvo()` does not
   register it, so nothing changes for an existing host. Registering it, together with
   `UseExceptionHandler()`, makes an unhandled exception **on one of Alvo's generated routes** come
@@ -1459,7 +1384,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It also calls `AddProblemDetails()` for you, because `UseExceptionHandler()` refuses to configure
   itself with neither a handler path nor a problem-details fallback. The `internal` slug joins
   `AlvoProblemTypes.All` and the published `problemDetails` schema's `type` enum.
-
   **The handler declines what is not Alvo's**, which is what makes it safe to add to a host that
   renders its own errors: an `IExceptionHandler` you register *after* it still runs — for your own
   endpoints, and for anything that failed before routing matched. And a request your **web server**
@@ -1468,7 +1392,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the new `https://alvo.dev/errors/unreadable-request` slug, and logged at `Warning` without a
   stack trace, rather than coming back as a 500 that tells an agent to retry a request whose size is
   the thing that has to change.
-
 - **The HTTP Data API.** A host that calls `MapAlvoDataApi()` gets a REST API generated from its
   descriptor: five routes per declared entity (`GET` collection, `GET {id}`, `POST`, `PATCH`,
   `DELETE {id}`) under a configurable prefix, each one a minimal-API delegate gated by the entity's
@@ -1497,13 +1420,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **An OpenAPI 3.1 document** enriched from the applied schema — per-entity request and response
     schemas, the query parameters with their real enforced bounds, the problem shape, and an API-key
     security scheme. §0 principle 4: the document *is* the contract an agent reads.
-
   Known limits, so the list is honest: no bulk operations, no `PUT`/upsert, no relation embedding, no
   aggregations or total count, and `Idempotency-Key` is ignored on `PATCH`/`DELETE`. Each is filed
   with its reason. `docs/architecture/data-api.md` records the decisions and the surprises — in
   particular that a *configured* rule which excludes a caller answers **200 with an empty page, not
   403**, because a rule compiles to a row-level predicate.
-
 - Repository and solution skeleton: `MMLib.Alvo.Abstractions` (the interface-first
   root of the dependency graph) and its test project.
 - Central Package Management, shared build settings, pinned .NET SDK, `.slnx` solution.
@@ -1541,7 +1462,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in opposite orders, and one of the two failed with `40P01` (a 500 that rolled back) — 9 of 10 staged runs. Every
   transaction that sweeps or hands out a person's credentials now takes that person's account row first: a removal,
   leaving, a demotion, a refresh-token reuse, an invitation's creation, a ban and a mint.
-
 - **A write hook's cold runs no longer fail a write by timing out** (#519). A hook's timeout (250 ms inside the
   transaction by default) is wall-clock, and its first run after the host starts also pays for JIT compilation, type
   loading, DI activation and its first queries — work no later run repeats. In a fresh or loaded process that run could
@@ -1604,7 +1524,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   required field, written as `null` into an optional one.
 - **A rollup added to a populated parent is filled by the apply** (HX-11), instead of reading empty until a child write
   happened to recompute it; an apply that changes a rollup's definition recomputes it too.
-
 - **The outbox claim on SQLite could fail with "database is locked" under concurrent writers** (HX-03). It now runs in
   a write-first transaction (`BEGIN IMMEDIATE`), like the new delivery claim: `Microsoft.Data.Sqlite` retries a busy
   engine only on a statement's first step, and the auto-committed `UPDATE … RETURNING` met its busy on commit.
@@ -1615,19 +1534,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The architecture guard's banned-member list named a type that does not exist** (#397). The application-role ban
   named `MMLib.Alvo.Identity.Role`, so every suite asserting it passed vacuously. Each banned name is now resolved
   against Abstractions by reflection, and the Identity and Testing suites run the whole security-core list.
-
 - **A runtime apply now changes the Data API's fields at once, not after a restart** (#353). Every generated
   endpoint used to keep the entity's fields from the moment its route was built. Rules followed a
   `PUT …/descriptor` straight away, but the body reader, the validator and the query parser did not:
   - a field added at runtime was refused with `422 unknown-field` until the host restarted;
   - a removed field was let through here and then refused by the data port with a `403`;
   - a shorter `maxLength` or a newly `required` field was not enforced at all.
-
   Each request now reads the entity's fields, facets and formats from the revision its policy decision was
   taken against. If an apply lands between the two reads, the decision is taken again. This holds on SQLite
   and PostgreSQL. Route literals are still fixed at startup, so an entity *added* at runtime still has no
   route until a restart (#103).
-
 - **A batch `PATCH` stamps `updated_at` and `updated_by`, so its rows get a new `ETag`** (#349). The EF
   driver's batch update did not apply the audit stamp that the single-row update applies. A batch-updated row
   kept its old `updated_at` and `updated_by`, so its `ETag` did not change. A later single-row `PATCH` sent
@@ -1637,7 +1553,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same order the single-row path uses. As a result, a hook or an update rule that reads `updated_by` or
   `updated_at` now sees the stamped values on a batch too. The in-memory reference implementation already
   stamped; batch create was not affected.
-
 - **Webhook deliveries no longer log the endpoint's URL** (#347, security). `IHttpClientFactory`'s default
   logging handlers on the named webhook client wrote every delivery's full request URI, path included, at
   `Information` under `System.Net.Http.HttpClient.MMLib.Alvo.Events.Webhook.*`, and a webhook URL's path is
@@ -1646,7 +1561,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration required; the `Logging__LogLevel__System.Net.Http.HttpClient=Warning` workaround is no longer
   needed. Alvo's own lines still record each attempt by endpoint name. A host that wants transport logging
   back adds its own logger to the client after `AddAlvo`, and owns its redaction.
-
 - **A rollup field is no longer caller-writable** (#342). A payload naming a `rollup` field was accepted and
   stored: `PATCH /api/invoices/{id}` with `{"net_total": 1}` answered `200`, kept the `1`, and a computed field
   reading the rollup followed the forged value until a later child write recomputed it. Every write path now
@@ -1655,7 +1569,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/rows/{index}`), on SQLite and PostgreSQL alike; an explicit `null` is refused too. The framework's own
   recompute is unaffected. A client that echoed a read row back into a write must now drop its rollup fields,
   as it already had to for computed ones.
-
 - **The dashboard works over PostgreSQL** (#339). Every screen showed *"Something went wrong"*, with EF's
   *"a second operation was started on this context instance"* on the identity store. A Blazor circuit is one
   DI scope for as long as the tab is open, and its components initialise concurrently — the overview, the
@@ -1665,7 +1578,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own on every call, the rule the guarded user administration and the session revalidation already follow.
   Caller resolution is otherwise unchanged: still re-read on every call, so a disable, a role revoke or a
   tenant move still takes effect on the operator's next click.
-
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
@@ -1673,10 +1585,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `changed(<date>)` no longer reports every update as a change;
   - a rule's in-memory WITH CHECK over a date now agrees with SQL, so a row the rule's USING refuses is also refused
     on write.
-
   A descriptor that relied, knowingly or not, on such a guard never firing will now see writes refused. SQLite still
   differs from PostgreSQL for a date compared with a datetime at exactly midnight UTC of the same day (#318).
-
 - **A before-hook `"mutate": {"f": null}` is judged, not thrown on** (#326). The schema admits a JSON
   `null` mutate value — a hand- or agent-written descriptor may hold one — but System.Text.Json never
   hands a `null` token to a converter, so the entry reached the before-hook compiler as a null and a
@@ -1684,7 +1594,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validates answered 500. The entry is now read as the null literal it was written as, so the rule
   the literal path already had applies — refused at the mutate slot on a `required` field, accepted
   (the field is emptied) on an optional one.
-
 - **The OpenAPI document's advertised origin carries the request's path base** (#130) — and it always
   did. `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's scheme, host **and
   `PathBase`**, per request rather than once per document name, so a client resolving a path key
@@ -1695,14 +1604,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the framework's own server-URL construction would have left the whole suite green while every
   path in the document became wrong by the prefix. Two facts now pin it, one per package. No
   production code changed; a bump of `Microsoft.AspNetCore.OpenApi` is henceforth gated by them.
-
 - **A 500 from the standalone host carries `alvo.dev/errors/internal`** (#119) — closed by
   verification rather than by a change. The slug, the opt-in `AddAlvoProblemDetails()` registration,
   the handler that logs the exception with its stack trace *and* renders Alvo's document, and the
   standalone-pipeline facts that hold all of it were delivered with the host itself. The one thing
   left behind was a stale sentence in `docs/architecture/data-api.md` claiming nine problem-type
   slugs over an eleven-row table; the prose now names `AlvoProblemTypes.All` instead of a number.
-
 - **A database constraint violation is now `409`, naming the field, instead of `500 internal`** (#138).
   A value another record already holds on a `unique` field, and a delete an `onDelete: "restrict"`
   reference refuses, both reached the host as the provider's own exception and rendered as
@@ -1711,7 +1618,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defect: an agent could not repair the request (no pointer, no field, no fix suggestion, in a framework
   whose principle 4 is structured errors *with* one); a `500` invites a retry that can never succeed;
   and the operator was paged, with a stack trace, for an ordinary caller mistake.
-
   A new slug, `conflict`, is a second `409` beside `idempotency-conflict` by the same rule `out-of-scope`
   is a second `403` by — the two have different fixes. One slug covers both constraint kinds, with the
   difference in `violations`: code `unique` and pointer `/<field>` for a collision, code `referenced` and
@@ -1720,14 +1626,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity either — which of the entities that may reference a row actually holds one is a fact about data
   the caller may not be able to read. A conflict confined to framework-managed columns keeps propagating
   as the broken invariant it is.
-
   The engine-specific decoding lives behind the driver's own SQL seam, never in a `catch` that matches a
   message: PostgreSQL reads SQLSTATE `23505`/`23503` plus the constraint name, SQLite the extended result
   code `2067`/`1555`/`787` plus the columns its message names. Both are held to one inherited suite
   (#139), which caught two real engine differences the PostgreSQL-only e2e could not have: `ExecuteDelete`
   on SQLite loses the extended result code, and Alvo's *runtime* EF model declared no indexes at all, so
   the constraint-name resolution PostgreSQL depends on always came back empty.
-
 - **A duplicate in an *idempotent* create no longer costs ten transactions.** The retry that converges a
   lost key race caught any storage write failure, so a duplicate was re-attempted ten times — about
   450 ms — before surfacing. It is no longer a `DbException`, so it leaves on the first attempt. The
