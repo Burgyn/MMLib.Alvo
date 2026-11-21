@@ -1,0 +1,43 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Hooks/Internal/WriteHookApplyRefusals.cs",
+      "Hooks/Internal/WriteHookBinding.cs",
+      "Hooks/Internal/WriteHookRegistration.cs",
+      "Hooks/Internal/WriteHookStage.cs",
+      "Hooks/ValidateWrite{T}.cs",
+      "Hooks/WriteCondition{T}.cs",
+      "InboundWebhooks/Internal/StandardWebhookSignature.cs",
+      "InboundWebhooks/Internal/WebhookLog.cs",
+      "InboundWebhooks/Internal/WebhookReceiverEndpointMetadata.cs",
+      "InboundWebhooks/Internal/WebhookReceivers.cs",
+      "InboundWebhooks/Setup.cs",
+      "Internal/AlvoProviderValidation.cs",
+      "Internal/NameSuggestion.cs",
+      "Lifecycle/EntityLifecycle.cs",
+      "Lifecycle/EntityLifecycleService.cs",
+      "Lifecycle/EntityTimerPlanner.cs",
+      "Lifecycle/EntityTimerReplanJob.cs",
+      "Lifecycle/LifecycleCompiler.cs",
+      "Lifecycle/Setup.cs",
+      "Lifecycle/StateMachineGuard.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

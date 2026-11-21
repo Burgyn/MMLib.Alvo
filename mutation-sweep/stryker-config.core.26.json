@@ -1,0 +1,36 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Secrets/Internal/SecretReferenceCheck.cs",
+      "Tenants/SelfService/AppTokenRequest.cs",
+      "Tenants/SelfService/GlobalWriteWarnings.cs",
+      "Tenants/SelfService/InvitationCode.cs",
+      "Tenants/SelfService/InvitationCodeBody.cs",
+      "Tenants/SelfService/InvitationPreviewResponse.cs",
+      "Tenants/SelfService/InvitationRequest.cs",
+      "Tenants/SelfService/InvitationResponse.cs",
+      "Tenants/SelfService/InvitationRoutes.cs",
+      "Tenants/SelfService/MembershipRules.cs",
+      "Tenants/SelfService/PersonReference.cs",
+      "Tenants/SelfService/RegistryMembershipResolution.cs",
+      "Tenants/SelfService/RegistryTenantCatalog.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}

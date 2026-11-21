@@ -138,7 +138,13 @@ public sealed class PostgreSqlSqlDialect : IAlvoSqlDialect
         return installed ? ExclusionPrerequisite.Ready : new ExclusionPrerequisite("CREATE EXTENSION IF NOT EXISTS btree_gist");
     }
 
-    private static ExclusionRefusal MissingBtreeGist { get; } = new(
+    /// <summary>The refusal of an apply whose database lacks btree_gist and whose role may not install it.</summary>
+    /// <remarks>
+    /// Built on each read rather than held in a static initializer: Stryker's MTP runner re-runs the suite in one test host,
+    /// where a static initializer runs once with no mutant active, so its two sentences were mutation survivors that the
+    /// tests pinning them could never kill. Read only on a refused apply.
+    /// </remarks>
+    private static ExclusionRefusal MissingBtreeGist => new(
         Pointer: null,
         "Excluding overlaps needs PostgreSQL's btree_gist extension, which this database does not have and this connection's role may not install. Nothing was applied.",
         "Ask the database owner to run CREATE EXTENSION btree_gist; in this database (it ships with PostgreSQL and is trusted since PostgreSQL 13), then apply again.");

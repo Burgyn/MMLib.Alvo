@@ -3,6 +3,11 @@
   <ItemGroup>
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
     <ProjectReference Include="../../src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
+    <!-- Already reached through Data.Sqlite; named directly for the accounts-store mutation leg
+         (stryker-config.accounts-store.json). Stryker 4.16 finds the project it mutates only among a
+         test project's DIRECT references, and that leg's two suites — this one and Accounts.Tests —
+         had none, so it refused to start ("No project found"). -->
+    <ProjectReference Include="../../src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
     <!-- The relational half of the test-support library: AlvoSqlDialectContractTests (and, where a
          test needs it, the T-SQL fake). Referenced per project rather than from
          test/Directory.Build.props on purpose — only the projects with a dialect to hold to the

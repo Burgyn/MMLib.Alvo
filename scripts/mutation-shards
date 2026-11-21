@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""Generate the weekly mutation sweep's shards: mutation-sweep/*.json and mutation-sweep/matrix.json.
+
+WHY THIS EXISTS. Four legs of .github/workflows/mutation.yml cannot finish under GitHub's 360-minute
+job ceiling — expressions, rules/auth/rest, data-ef-core and accounts-store; see "THE CADENCE" in
+its header (a fifth, data-ef-rest, fits one job and runs in full on every push). On every push
+the four run with Stryker's `since` against the previous main commit, mutating only what the merge
+changed. The FULL measurement runs weekly and on workflow_dispatch, split into shards that each
+fit — and this script is the one place those shards come from.
+
+HOW A SHARD IS CUT. Each long leg keeps its committed config (stryker-config.<leg>.json) as the
+single source of what it mutates. This script resolves that config's `mutate` globs over the
+project's *.cs files, orders them (by path; accounts-store by store), weighs each by the mutants
+Stryker CREATES in it (scripts/fixtures/mutation-shards/created-*.tsv, read from a real trace
+log), and cuts the ordered list into contiguous runs of near-equal weight. Contiguous, so a shard
+reads as an area (Events/..., Migrations/...) rather than a scatter. Each shard config is its
+parent with `mutate` replaced by the exact file list.
+
+THE CATCH-ALL. Each leg also gets one more shard: the parent's own globs, minus a `!` exclude for
+every file the listed shards name. So a source file ADDED tomorrow is mutated by the catch-all
+with no regeneration, and a file DELETED tomorrow is harmless — Stryker 4.16 accepts a `mutate`
+entry or a `!` exclude that matches nothing (measured locally on the canary, 2026-11-21: same 13
+mutants, exit 0). Ruled 2026-11-21 by the debt-cleanup session on the maintainer's behalf, so that
+no PR adding or removing a .cs file meets an unrelated mutation-tooling failure in the required
+Build & test. The cost: the catch-all grows with every file added since the last regeneration.
+Regenerate (`scripts/mutation-shards`) when it has grown large — at the latest when a sweep's
+measurements recalibrate the shards.
+
+WHAT `--check` PROVES, AND WHAT IT DOES NOT. It does NOT regenerate and compare: the committed
+shards are allowed to be older than the tree. It checks that they are WELL-FORMED for the current
+committed configs — every leg has its listed shards and its catch-all; listed shards name plain
+paths, pairwise disjoint; the catch-all is exactly the parent's globs minus exactly the listed
+files, so together they cover the parent's set once; every other key matches the parent (a
+changed `test-projects` or `mutate` in a parent is a mutation-tooling edit, and regenerating is
+part of it); matrix.json names each config once. Adding, deleting or editing a source file can
+never fail it.
+
+HOW THE SHARD COUNT IS CHOSEN — measured cost, not mutant count. Runner seconds per mutant per
+suite, from the sampling run 44877284451 (2026-11-21): expressions 68.9 s (147 mutants, 94 %
+killed), the core suite on Rules 59.9 s (104, 89 %), data-ef-core 97.5 s (97, 28 %). Survivors
+cost ~4x what kills do there, and rules/auth/rest last measured ~58 % killed, so its cost is taken
+at 107 s (0.58 x 44 s + 0.42 x 194 s, the split the two core-suite samples give), not at the
+sample's 59.9. accounts-store has NO measurement: its sample was cancelled with every
+Accounts.Tests host force-killed at the test-run timeout under --concurrency 4; at concurrency 2
+it is ESTIMATED at 150 s. Each leg gets the fewest shards none of which is projected (mutants x
+cost / concurrency) past 180 minutes — except a single file heavier than that — so a 340-minute
+budget is >= 1.7x.
+
+EVERY NUMBER A SHARD CARRIES IS PROVISIONAL until the first sweep measures it: its `mutants:` is
+70 % of an estimate (weight x the leg's tested/created ratio) and informational — sweep shards
+run scripts/assert-mutation-run in mode `sweep`, which allows zero mutants and waives the floor,
+because a shard whose files were deleted (or an empty catch-all) is legitimate — and its `break`
+is the collapse floor 30 the header uses for unmeasured legs.
+
+Usage:
+  scripts/mutation-shards                       write mutation-sweep/
+  scripts/mutation-shards --check               fail (exit 1) if mutation-sweep/ is malformed
+  scripts/mutation-shards --resolve <config>    print the repo-relative files <config> mutates
+                                                (used by the `since` legs to tell "the merge
+                                                changed nothing here" from "nothing was tested")
+  --root <dir>                                  act on another checkout (the --check tests)
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import math
+import pathlib
+import re
+import statistics
+import sys
+
+TARGET_MINUTES = 180
+BUDGET = 340
+SHARD_BREAK = 30
+
+CORE = "src/MMLib.Alvo/MMLib.Alvo.csproj"
+EF = "src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj"
+
+# Which project each config mutates: its `project` key names a csproj file, not a path.
+PROJECTS = {
+    "MMLib.Alvo.csproj": CORE,
+    "MMLib.Alvo.Data.EntityFrameworkCore.csproj": EF,
+    "MMLib.Alvo.Data.Sqlite.csproj": "src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj",
+    "MMLib.Alvo.Data.PostgreSql.csproj": "src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj",
+    "MMLib.Alvo.Accounts.csproj": "src/MMLib.Alvo.Accounts/MMLib.Alvo.Accounts.csproj",
+    "MMLib.Alvo.Testing.csproj": "src/MMLib.Alvo.Testing/MMLib.Alvo.Testing.csproj",
+}
+
+# tested = "N total mutants will be tested" of the leg's last full discovery (run 44834820709 /
+# 44850064624); suite = its "Number of tests found"; cost = runner seconds per mutant (see above).
+LEGS = [
+    {"leg": "expressions", "slug": "expressions", "parent": "stryker-config.expressions.json",
+     "project": CORE, "tested": 2591, "suite": 5330, "cost": 68.9, "concurrency": 4},
+    {"leg": "rules, auth, rest", "slug": "core", "parent": "stryker-config.json",
+     "project": CORE, "tested": 9557, "suite": 5330, "cost": 107.0, "concurrency": 4},
+    {"leg": "data-ef-core", "slug": "data-ef-core", "parent": "stryker-config.data-ef-core.json",
+     "project": EF, "tested": 863, "suite": 2903, "cost": 97.5, "concurrency": 4},
+    {"leg": "accounts-store", "slug": "accounts-store", "parent": "stryker-config.accounts-store.json",
+     "project": EF, "tested": 888, "suite": 1750, "cost": 150.0, "concurrency": 2,
+     # Its only measurement so far is a sample whose every Accounts.Tests host was force-killed;
+     # the first sweep keeps Stryker's trace log (logs/*.txt) so a repeat can be read, not guessed.
+     "debug-log": True,
+     # By store, so a shard boundary falls between stores where the weights allow it.
+     "order": ["EfCoreAccountStore", "Internal/AuthTables", "EfCoreTenantStore.cs", "EfCoreTenantStore.Members",
+               "Internal/TenantTables", "EfCoreTenantStore.Invitations", "Internal/InvitationTables",
+               "Internal/InvitationAcceptance", "EfCoreAppTokenStore", "Internal/AppTokenTables"]},
+]
+
+
+def glob_regex(pattern: str) -> re.Pattern[str]:
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif pattern[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        else:
+            out, i = out + re.escape(pattern[i]), i + 1
+    return re.compile("^" + out + "$")
+
+
+def resolve(project_dir: pathlib.Path, mutate: list[str]) -> list[str]:
+    include = [glob_regex(p) for p in mutate if not p.startswith("!")]
+    exclude = [glob_regex(p[1:]) for p in mutate if p.startswith("!")]
+    files = []
+    for path in sorted(project_dir.rglob("*.cs")):
+        rel = path.relative_to(project_dir).as_posix()
+        if rel.split("/")[0] in ("bin", "obj"):
+            continue
+        if any(r.match(rel) for r in include) and not any(r.match(rel) for r in exclude):
+            files.append(rel)
+    return files
+
+
+def weights(root: pathlib.Path, project: str, files: list[str]) -> dict[str, float]:
+    """The measured created-mutant count per file; a file the table does not list weighs the
+    table's median — a constant, so nothing here depends on what a file contains."""
+    name = pathlib.Path(project).stem
+    table = {}
+    tsv = root / "scripts" / "fixtures" / "mutation-shards" / f"created-{name}.tsv"
+    for line in tsv.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            rel, count = line.split("\t")
+            table[rel] = int(count)
+    unlisted = statistics.median(v for v in table.values() if v > 0)
+    return {rel: table.get(rel, unlisted) for rel in files}
+
+
+def order(files: list[str], prefixes: list[str] | None) -> list[str]:
+    if not prefixes:
+        return files
+
+    def key(rel: str) -> tuple[int, str]:
+        for index, prefix in enumerate(prefixes):
+            if rel.startswith(prefix):
+                return index, rel
+        return len(prefixes), rel
+    return sorted(files, key=key)
+
+
+def greedy(files: list[str], weight: dict[str, float], limit: float) -> list[list[str]]:
+    """Contiguous runs, each as long as it stays within `limit` (a lone heavier file is its own run)."""
+    shards, current, acc = [], [], 0.0
+    for rel in files:
+        if current and acc + weight[rel] > limit:
+            shards.append(current)
+            current, acc = [], 0.0
+        current.append(rel)
+        acc += weight[rel]
+    if current:
+        shards.append(current)
+    return shards
+
+
+def cut(files: list[str], weight: dict[str, float], limit: float) -> list[list[str]]:
+    """The fewest contiguous shards none of which exceeds `limit` (or a single file heavier than
+    it), then the most even cut into that many: the smallest limit that still needs no more."""
+    count = len(greedy(files, weight, limit))
+    low, high = max(weight[f] for f in files), limit
+    for _ in range(60):
+        middle = (low + high) / 2
+        if len(greedy(files, weight, middle)) <= count:
+            high = middle
+        else:
+            low = middle
+    return greedy(files, weight, high)
+
+
+def build(root: pathlib.Path) -> dict[str, str]:
+    files_out: dict[str, str] = {}
+    matrix = []
+    for leg in LEGS:
+        parent = json.loads((root / leg["parent"]).read_text(encoding="utf-8"))
+        project_dir = root / pathlib.Path(leg["project"]).parent
+        files = order(resolve(project_dir, parent["stryker-config"]["mutate"]), leg.get("order"))
+        weight = weights(root, leg["project"], files)
+        total = sum(weight.values())
+        ratio = leg["tested"] / total
+        minutes_per_weight = ratio * leg["cost"] / leg["concurrency"] / 60
+        # No shard projected past TARGET_MINUTES — except a single file heavier than that
+        # (EfAlvoData.cs), which no file-level cut can shorten.
+        shards = cut(files, weight, TARGET_MINUTES / minutes_per_weight)
+        for number, shard in enumerate(shards, start=1):
+            config = copy.deepcopy(parent)
+            config["stryker-config"]["mutate"] = shard
+            thresholds = config["stryker-config"].setdefault("thresholds", {})
+            thresholds["break"] = SHARD_BREAK
+            path = f"mutation-sweep/stryker-config.{leg['slug']}.{number:02d}.json"
+            files_out[path] = json.dumps(config, indent=2, ensure_ascii=False) + "\n"
+            estimate = sum(weight[f] for f in shard) * ratio
+            minutes = estimate * leg["cost"] / leg["concurrency"] / 60
+            matrix.append({
+                # "of", not "/": the name is also the artifact name, which may not contain a slash.
+                "name": f"{leg['leg']} {number} of {len(shards)}",
+                "config": path, "project": leg["project"],
+                "mutants": max(1, math.floor(estimate * 0.7)), "suite": leg["suite"],
+                "timeout": BUDGET, "concurrency": leg["concurrency"],
+                "projected-minutes": round(minutes), "files": len(shard),
+                "mode": "sweep",
+                **({"debug-log": True} if leg.get("debug-log") else {}),
+            })
+        catch_all = copy.deepcopy(parent)
+        catch_all["stryker-config"]["mutate"] = catch_all_mutate(parent, files)
+        catch_all["stryker-config"].setdefault("thresholds", {})["break"] = SHARD_BREAK
+        path = f"mutation-sweep/stryker-config.{leg['slug']}.catch-all.json"
+        files_out[path] = json.dumps(catch_all, indent=2, ensure_ascii=False) + "\n"
+        matrix.append({
+            "name": f"{leg['leg']} catch-all",
+            "config": path, "project": leg["project"],
+            "mutants": 1, "suite": leg["suite"],
+            "timeout": BUDGET, "concurrency": leg["concurrency"],
+            "projected-minutes": 0, "files": 0,
+            "mode": "sweep",
+            **({"debug-log": True} if leg.get("debug-log") else {}),
+        })
+    files_out["mutation-sweep/matrix.json"] = json.dumps({"include": matrix}, indent=2) + "\n"
+    return files_out
+
+
+def catch_all_mutate(parent: dict, listed: list[str]) -> list[str]:
+    """The parent's own globs, minus every file a listed shard names."""
+    return list(parent["stryker-config"]["mutate"]) + ["!" + rel for rel in sorted(listed)]
+
+
+def check(root: pathlib.Path) -> list[str]:
+    """Structural problems with the COMMITTED shards; empty when they are well-formed."""
+    out = root / "mutation-sweep"
+    problems = []
+    try:
+        matrix = json.loads((out / "matrix.json").read_text(encoding="utf-8"))["include"]
+    except (OSError, ValueError, KeyError) as error:
+        return [f"mutation-sweep/matrix.json is unreadable: {error}"]
+    named = [entry.get("config") for entry in matrix]
+    on_disk = sorted(p.relative_to(root).as_posix() for p in out.glob("stryker-config.*.json"))
+    if sorted(named) != on_disk or len(set(named)) != len(named):
+        problems.append(f"matrix.json names {sorted(named)} but mutation-sweep/ holds {on_disk}")
+    for leg in LEGS:
+        parent = json.loads((root / leg["parent"]).read_text(encoding="utf-8"))["stryker-config"]
+        prefix = f"mutation-sweep/stryker-config.{leg['slug']}."
+        listed_paths = sorted(p for p in on_disk if p.startswith(prefix) and not p.endswith(".catch-all.json"))
+        catch_path = f"{prefix}catch-all.json"
+        if not listed_paths:
+            problems.append(f"{leg['leg']}: no listed shards")
+            continue
+        if catch_path not in on_disk:
+            problems.append(f"{leg['leg']}: no catch-all shard ({catch_path})")
+            continue
+        seen: dict[str, str] = {}
+        for shard_path in listed_paths + [catch_path]:
+            config = json.loads((root / shard_path).read_text(encoding="utf-8"))["stryker-config"]
+            others = {k: v for k, v in config.items() if k not in ("mutate", "thresholds")}
+            wanted = {k: v for k, v in parent.items() if k not in ("mutate", "thresholds")}
+            if others != wanted:
+                problems.append(f"{shard_path}: its keys differ from {leg['parent']} beyond `mutate`")
+            if config.get("thresholds", {}).get("break") != SHARD_BREAK:
+                problems.append(f"{shard_path}: break is not the provisional {SHARD_BREAK}")
+            if shard_path == catch_path:
+                continue
+            for rel in config["mutate"]:
+                if rel.startswith("!") or "*" in rel:
+                    problems.append(f"{shard_path}: '{rel}' is not a plain path")
+                elif rel in seen:
+                    problems.append(f"'{rel}' is in both {seen[rel]} and {shard_path}")
+                else:
+                    seen[rel] = shard_path
+        catch_all = json.loads((root / catch_path).read_text(encoding="utf-8"))["stryker-config"]
+        if catch_all["mutate"] != catch_all_mutate({"stryker-config": parent}, list(seen)):
+            problems.append(f"{catch_path}: not the parent's globs minus exactly the listed files")
+    return problems
+
+
+def resolve_config(root: pathlib.Path, config_path: str) -> list[str]:
+    config = json.loads((root / config_path).read_text(encoding="utf-8"))["stryker-config"]
+    project = PROJECTS.get(config["project"])
+    if project is None:
+        raise SystemExit(f"{config_path}: project '{config['project']}' is not one this script knows")
+    project_dir = pathlib.Path(project).parent
+    return [(project_dir / rel).as_posix() for rel in resolve(root / project_dir, config["mutate"])]
+
+
+USAGE = "usage: mutation-shards [--root <dir>] [--check | --resolve <config>]"
+
+
+def main(argv: list[str]) -> int:
+    root = pathlib.Path(__file__).resolve().parent.parent
+    args = list(argv)
+    if args[:1] == ["--root"]:
+        if len(args) < 2:
+            print(USAGE, file=sys.stderr)
+            return 2
+        root, args = pathlib.Path(args[1]).resolve(), args[2:]
+    if args not in ([], ["--check"]) and not (len(args) == 2 and args[0] == "--resolve"):
+        print(USAGE, file=sys.stderr)
+        return 2
+    if args[:1] == ["--resolve"]:
+        print("\n".join(resolve_config(root, args[1])))
+        return 0
+    out = root / "mutation-sweep"
+    if args == ["--check"]:
+        problems = check(root)
+        for problem in problems:
+            print(problem)
+        if problems:
+            print("Run scripts/mutation-shards and commit mutation-sweep/.")
+            return 1
+        print(f"mutation-sweep/ is well-formed: {len(list(out.glob('stryker-config.*.json')))} shard configs.")
+        return 0
+    wanted = build(root)
+    on_disk = {p.relative_to(root).as_posix() for p in out.glob("*.json")} if out.exists() else set()
+    out.mkdir(exist_ok=True)
+    for path in on_disk - set(wanted):
+        (root / path).unlink()
+    for path, text in wanted.items():
+        (root / path).write_text(text, encoding="utf-8")
+    for entry in json.loads(wanted["mutation-sweep/matrix.json"])["include"]:
+        print(f"{entry['name']:28s} files {entry['files']:>4} floor {entry['mutants']:>5} "
+              f"~{entry['projected-minutes']} min  budget {entry['timeout']}  c={entry['concurrency']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

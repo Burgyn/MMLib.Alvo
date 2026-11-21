@@ -1938,10 +1938,12 @@ string.
 
 ## Mutation-testing notes
 
-Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), across the parallel configs the
-matrix declares. Nothing
-blocks a merge on the score, so a red run is a notification someone has to act on — which makes it worth
-knowing, before the merge, that each config is configured to answer at all.
+Mutation runs post-merge on `main` (`.github/workflows/mutation.yml`), on the cadence its header calls
+*THE CADENCE* (2026-11-21): on every push the legs that fit run in full and the four long ones (`expressions`,
+`rules, auth, rest`, `data-ef-core`, `accounts-store`) run with Stryker `since` the previous main commit; the
+long legs run in full weekly and on `workflow_dispatch`, as shards generated into `mutation-sweep/` by
+`scripts/mutation-shards`. Nothing blocks a merge on the score, so a red run is a notification someone has to
+act on — which makes it worth knowing, before the merge, that each config is configured to answer at all.
 
 > **#142 is CLOSED as of 2026-09-14, and every absolute score recorded in this file or in a commit message
 > before that date is still not evidence.** They were measured through the defect; they were not
@@ -2132,19 +2134,25 @@ better evidence, being the runner that gets judged. The table below is that re-p
 stale with nothing reporting it (`rules, auth, rest` 1638 → 1713, and both suites 1185 → 1188), and the two
 `data-ef` rows moved because that day re-partitioned them; both were probed *after* the move.
 
-| Config | Mutated project | Tests found | Mutants to be tested | In the matrix? |
-|---|---|---|---|---|
-| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 1188 | 900 | yes |
-| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**`) | 1188 | 1713 | yes |
-| `stryker-config.data-ef-core.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the files measured to need `Sqlite.Tests`) | 1135 | 459 | yes |
-| `stryker-config.data-ef-rest.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (everything else) | 554 | 649 | yes |
-| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 581 | 44 | yes |
-| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 110 | 20 | yes |
-| `stryker-config.canary.json` | `MMLib.Alvo.Testing` (`InMemoryDescriptorVersionStore`) | 142 | 13 | yes |
-| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the whole shard) | 1135 | 1108 | **no — on demand** |
-| `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | 333 | 1502 | **no — on demand** |
+That 2026-09-14 table is history now. The CURRENT counts — re-probed 2026-11-20/21 from CI's own logs
+(runs 44834820709, 44850064624 and the sampling run 44877284451) — live in one place, the matrix entries of
+`.github/workflows/mutation.yml` and its *RE-PROBED 2026-11-21* table, rather than being copied here to go
+stale again:
 
-**The account store is a third partition of the EF project since accounts S2 (2026-11-14).** `EfCoreAccountStore.cs`, `EfCoreAccountStore.Sessions.cs`, `EfCoreAccountStore.Keys.cs` and `Internal/AuthTables.cs` are excluded from `data-ef-rest` — whose only suite, `EntityFrameworkCore.Tests`, never runs them — and mutated by `stryker-config.accounts-store.json` against `Data.Sqlite.Tests` (where `AccountStoreFacts` compile) and `Accounts.Tests`. The `MMLib.Alvo.Accounts` package has its own leg, `stryker-config.accounts.json`. Neither has been measured yet: their counts, budgets and thresholds are provisional estimates, and `.github/workflows/mutation.yml` (*THE ACCOUNTS LEGS*) says how each was derived and what the first run replaces. `scripts/test-assert-mutation-run` checks the three-way partition against `stryker-config.data-ef.json`.
+| Config | Mutated project | Tests found | Mutants to be tested | How it runs |
+|---|---|---|---|---|
+| `stryker-config.expressions.json` | `MMLib.Alvo` (`Expressions/**`) | 5330 | 2591 | `since` per push; weekly 5 shards |
+| `stryker-config.json` | `MMLib.Alvo` (the rest, minus `Api/**` and the self-service routes) | 5330 | 9557 | `since` per push; weekly 27 shards |
+| `stryker-config.data-ef-core.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the files measured to need `Sqlite.Tests`) | 2903 | 863 | `since` per push; weekly 3 shards |
+| `stryker-config.accounts-store.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the account store and tenant registry) | 1750 | 888 | `since` per push; weekly 7 shards |
+| `stryker-config.data-ef-rest.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (everything else) | 1560 | 2950 | full per push |
+| `stryker-config.data-sqlite.json` | `MMLib.Alvo.Data.Sqlite` | 1352 | 122 | full per push |
+| `stryker-config.data-postgresql.json` | `MMLib.Alvo.Data.PostgreSql` | 262 | 122 | full per push |
+| `stryker-config.canary.json` | `MMLib.Alvo.Testing` (`InMemoryDescriptorVersionStore`) | 230 | 13 | full per push |
+| `stryker-config.data-ef.json` | `MMLib.Alvo.Data.EntityFrameworkCore` (the whole shard) | — | — | **no — on demand** |
+| `stryker-config.api.json` | `MMLib.Alvo` (`Api/**`) | — | — | **no — on demand** |
+
+**The account store is a third partition of the EF project since accounts S2 (2026-11-14).** `EfCoreAccountStore.cs`, `EfCoreAccountStore.Sessions.cs`, `EfCoreAccountStore.Keys.cs` and `Internal/AuthTables.cs` are excluded from `data-ef-rest` — whose only suite, `EntityFrameworkCore.Tests`, never runs them — and mutated by `stryker-config.accounts-store.json` against `Data.Sqlite.Tests` (where `AccountStoreFacts` compile) and `Accounts.Tests`. The `MMLib.Alvo.Accounts` package has its own leg, `stryker-config.accounts.json`. `accounts` was measured on 2026-11-21 and calibrated from it; `accounts-store` has never finished — its Accounts.Tests hosts overran Stryker's test-run timeout at `--concurrency 4` — so it runs at 2, sharded, and its numbers stay provisional (`.github/workflows/mutation.yml`, *THE ACCOUNTS LEGS* and *THE CADENCE*). `scripts/test-assert-mutation-run` checks the three-way partition against `stryker-config.data-ef.json`.
 
 **`data-ef` is two legs since #205, and it is split by *test project* rather than by file.** The model that
 predicts the cost is not mutants × test *count*: measured runner-seconds per mutant on the 4-vCPU runner are

@@ -1,0 +1,36 @@
+{
+  "stryker-config": {
+    "project": "MMLib.Alvo.csproj",
+    "test-projects": [
+      "MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj"
+    ],
+    "test-runner": "mtp",
+    "coverage-analysis": "off",
+    "additional-timeout": 300000,
+    "mutate": [
+      "Data/Internal/RecordShape.cs",
+      "Data/Internal/RecordUnreadableException.cs",
+      "Data/Internal/RecordValue.cs",
+      "Data/Internal/RecordWriter.cs",
+      "Data/Internal/ShapeMapping.cs",
+      "Data/Internal/ShapeProblems.cs",
+      "Data/Internal/TranslationRefusal.cs",
+      "Data/Internal/TypedEntity.cs",
+      "Data/Internal/TypedField.cs",
+      "Data/Internal/TypedPatch.cs",
+      "Descriptor/DescriptorToSchemaMapper.cs",
+      "Descriptor/Internal/AccessTokensCheck.cs",
+      "Descriptor/Internal/CheckConstraintCheck.cs"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 57,
+      "break": 30
+    },
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ]
+  }
+}
