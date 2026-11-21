@@ -1,6 +1,7 @@
 # End-user accounts, hardening: lock order and a banned sole owner, undoing a stolen session, signing-key rotation, the sweep — design
 
-**Status:** design only, no code; every slice is `needs-deep-review` · **Date:** 2026-11-21 ·
+**Status:** design approved — every §9 question ruled on the maintainer's behalf (2026-11-21); #543 (slices 1 and 3)
+implemented on this branch; every slice is `needs-deep-review` · **Date:** 2026-11-21 ·
 **Branch:** `debt/p3-accounts-hardening-design` · **Issues:** [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543),
 [#546](https://github.com/Burgyn/MMLib.Alvo/issues/546), [#544](https://github.com/Burgyn/MMLib.Alvo/issues/544),
 [#527](https://github.com/Burgyn/MMLib.Alvo/issues/527) (milestone F6 — v0.1)
@@ -794,7 +795,7 @@ the contract* (`alvo-architecture-rules`), and the stores and ports stay interna
 - **Load:** `test/load/docker-compose.load.yml` resets the demo's sign-in, so load is unaffected. The sweeper runs on
   load hosts that add accounts only.
 
-## 9. Open questions — the maintainer's decisions
+## 9. Open questions — the maintainer's decisions (ruled, §9.1)
 
 Each has a recommendation; none blocks writing the race fact (slice 1).
 
@@ -825,6 +826,32 @@ Each has a recommendation; none blocks writing the race fact (slice 1).
 11. **#527 — the refresh-token format change (option B).** *Recommend* yes. It is the only option under which the
     sweep cannot weaken reuse detection; option A keeps the format but leaves ~17 000 rows per long-lived session.
 
+### 9.1 Rulings
+
+Ruled 2026-11-21 by the debt-cleanup session on the maintainer's behalf (the maintainer away, rulings delegated):
+every recommendation above is accepted as written. One line each, with the cost if the ruling is wrong:
+
+1. **Q1 — fix the lock order regardless of the race fact.** Cost if wrong: one extra no-op row lock per member write
+   that sweeps.
+2. **Q2 — reuse `ManageAccounts` at `admin`; the ban answers 200 `{orphanedTenants}`.** Cost if wrong: a later
+   `ManageTenants` operation moves one route's gate; the ban's body is additive to change again.
+3. **Q3 — the undo removes members admitted through a stolen session's owner invitations, transitively.** Cost if
+   wrong: a legitimate member re-joins by a fresh invitation.
+4. **Q4 — step-up 10 minutes, for owner-granting invitations and promoting, demoting or removing an owner.** Cost if
+   wrong: one configuration default or one gated route moves.
+5. **Q5 — notification deferred to spec D9's auth events, with a Warning log line now.** Cost if wrong: nobody is told
+   until D9 lands, as today.
+6. **Q6 — scheduled rotation every 90 days with a 24 h publish lead; `RotationDays: 0` turns it off.** Cost if wrong:
+   a default changes.
+7. **Q7 — a lost key file answers `503 sign-in-unavailable`.** Cost if wrong: one problem slug to retire before v0.1.
+8. **Q8 — `azp`, when present, must be a configured client id.** Cost if wrong: a mobile app that did not list its
+   client id is refused until it does — one configuration line, and the guide says so.
+9. **Q9 — retention 30 days, configurable, minimum 1.** Cost if wrong: a default changes.
+10. **Q10 — paged `{items, next}` lists with `limit`/`after`, breaking.** Cost if wrong: two list shapes to revert
+    before v0.1.
+11. **Q11 — the session-bound refresh-token value.** Cost if wrong: every live refresh token dies once more on the
+    revert; no users yet.
+
 ## 10. Slices — ordered, each independently mergeable, each `needs-deep-review`
 
 Each slice runs the `alvo-security-core-review` checklist plus reviewer passes standing in for `/security-review` and
@@ -845,10 +872,12 @@ working days for one implementer, tests included.
 | 10 | **Key lifecycle** (§4.4): `activates_at`, the refresher, scheduled rotation, retirement in validation | #544 | — | 2 |
 | 11 | **Emergency rotation** (§4.5): the Management route, the lost-key-file boot line, the production runbook | #544 | 10 | 1.5 |
 
-**Total ≈ 15 days.** Slices 1, 2, 7, 9 and 10 have no dependency and can start in any order. Slice 1 goes first
-anyway: its lock order is the rule every later multi-row write (6, 8, 11) is written against. Each slice moves the
-CHANGELOG lines of §7 that it lands, and closes its issue only with its last slice (#543 → 3, #546 → 6, #527 → 9,
-#544 → 11).
+**Total ≈ 15 days.** The numbers above name the slices; **the order they land in was ruled by value and risk**
+(2026-11-21, on the maintainer's behalf): **#543 (1, 3) → #544 `azp` (2) → #527 (7, 8, 9) → #544 rotation (10, 11) →
+#546 (4, 5, 6).** Slice 1 goes first: its lock order is the rule every later multi-row write (6, 8, 11) is written
+against. Because #527 now lands before #546, slice 8 ships without "finishing owed undos", and slice 6 adds that half
+to the sweeper. Each slice moves the CHANGELOG lines of §7 that it lands, and closes its issue only with its last slice
+(#543 → 3, #544 → 11, #527 → 9, #546 → 6).
 
 ## 11. Sources
 
