@@ -174,8 +174,9 @@ clients reach it, or with any provider's `AllowHttpMetadata` set (the test-issue
 authority; in Development it starts, with a warning on every start). **In Development an unset issuer is the URL each request reached the sign-in routes at** (scheme,
 host, path base and prefix — `http://localhost:5000/auth/v1` on a local run), read per request; set, it must be
 `https` in every environment, so a local `http` issuer is spelled by leaving it unset. An operator disables a person
-with `PUT /management/projects/{project}/accounts/{account}/disabled` (`admin`; see `management-api.md`, *Disabling an
-end user*).
+with `PUT /management/projects/{project}/accounts/{account}/disabled` and makes another account an owner of a tenant
+the ban orphaned with `PUT /management/projects/{project}/tenants/{tenant}/owners/{account}` (both `admin`; see
+`management-api.md`, *Disabling an end user* and *Making an end user an owner of a tenant*).
 
 **`Alvo:Api:Cors:Origins`**, **`Alvo:Api:RateLimits:Token`**, **`Alvo:Api:RateLimits:Create`** and **`Alvo:Api:RateLimits:Invitations`** come with the `Alvo:Api` binding the host already
 makes into `AlvoApiOptions` — nothing host-specific. `Cors:Origins` lists the exact browser origins

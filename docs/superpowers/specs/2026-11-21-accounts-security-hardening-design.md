@@ -158,8 +158,9 @@ visible.
    - 422 for a role outside `assignableRoles`.
 
    Lock order (§2.3): target account (`LockAccountSql`, which also refuses a disabled one) → tenant bump → member
-   upsert. It revokes nothing. It writes `owner_granted_session = NULL` and the new `owner_granted_by_operator = 1`
-   (§3.4) so the provenance is honest. It is logged like `AccountChanged`: actor, tenant id, account id, ids only.
+   upsert. It revokes nothing. With #546 it also writes `owner_granted_session = NULL` and the new
+   `owner_granted_by_operator = 1` (§3.4) so the provenance is honest; **as built** (#546 deferred, §9.2) it records
+   only `invitation_id = NULL`, as for a creator. It is logged like `AccountChanged`: actor, tenant id, account id, ids only.
    Roles matter because nobody changes their own membership (S3 D7). An operator-made owner with no roles could
    otherwise never hold one in that tenant.
 2. **`OwnersSql` counts only owners whose account is not disabled** (`HonouredAccount`'s predicate, `TenantTables.cs:150`

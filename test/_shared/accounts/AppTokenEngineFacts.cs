@@ -350,7 +350,7 @@ public abstract class AppTokenEngineFacts
             $"/management/projects/team-tracker/accounts/{account.Value:D}/disabled",
             AccountsWorld.Operator,
             body: new JsonObject { ["disabled"] = disabled }),
-        HttpStatusCode.NoContent);
+        HttpStatusCode.OK);
 
     private static async Task EachAsync(AccountsWorld world, string[] tokens, Guid tenant, HttpStatusCode status)
     {

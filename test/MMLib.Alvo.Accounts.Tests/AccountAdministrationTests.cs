@@ -40,7 +40,7 @@ public sealed class AccountAdministrationTests
         using var refreshed = await world.RefreshAsync(refresh);
         using var exchanged = await world.ExchangeAsync(world.IdToken("sub-1"));
 
-        disabled.StatusCode.ShouldBe(HttpStatusCode.NoContent, await disabled.ReadTextAsync());
+        disabled.StatusCode.ShouldBe(HttpStatusCode.OK, await disabled.ReadTextAsync());
         await PersonResolverTests.InvalidTokenAsync(data);
         await TokenExchangeTests.RefusalAsync(refreshed, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_grant");
         await TokenExchangeTests.RefusalAsync(exchanged, HttpStatusCode.Forbidden, AlvoProblemTypes.SignInRefused, "access_denied");
@@ -60,7 +60,7 @@ public sealed class AccountAdministrationTests
         var (again, _) = await world.SignInAsync("sub-1");
         using var newData = await world.AsPersonAsync(HttpMethod.Get, Entries, again);
 
-        enabled.StatusCode.ShouldBe(HttpStatusCode.NoContent, await enabled.ReadTextAsync());
+        enabled.StatusCode.ShouldBe(HttpStatusCode.OK, await enabled.ReadTextAsync());
         await PersonResolverTests.InvalidTokenAsync(oldData);
         await TokenExchangeTests.RefusalAsync(oldRefresh, HttpStatusCode.BadRequest, AlvoProblemTypes.TokenRefused, "invalid_grant");
         AccountOf(again).ShouldBe(account, "enabling restores the account, not a new one");

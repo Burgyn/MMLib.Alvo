@@ -341,12 +341,24 @@ Content-Type: application/json
 { "disabled": true }
 ```
 
-It answers `204`. Every session of the account ends in the same transaction, so the person's next request is `401`,
+It answers `200` with `orphanedTenants`, the shared tenants the person owned that no other enabled owner can now
+manage. Every session of the account ends in the same transaction, so the person's next request is `401`,
 their next refresh `invalid_grant`, and their next sign-in `403 sign-in-refused`. Every personal and service token
 they minted dies too. Work already queued as them, a handler that runs as the event's actor, runs with no tenant role
-while they are banned. Their memberships stay, so an owner can still remove them, and if they were a tenant's only
-owner nobody can manage it until they are enabled again
-([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)). `{ "disabled": false }` lets them sign in again. It brings
+while they are banned. Their memberships stay, so an owner can still remove them. A tenant they were the only owner of is
+one of the `orphanedTenants`: make someone else its owner without enabling them —
+
+```http
+PUT /management/projects/time-tracker/tenants/3c…/owners/9a…
+X-Alvo-Api-Key: admin.…
+Content-Type: application/json
+
+{ "roles": ["dispatcher"] }
+```
+
+— which answers `200` with the new owner's membership; `roles` is optional and must come from
+`tenancy.selfService.assignableRoles`. A banned owner never counts as the last owner, so a co-owner cannot leave the
+tenant to them. `{ "disabled": false }` lets them sign in again. It brings
 back no session and no token. The
 route exists only on a host with sign-in. The Management API never reads `Authorization`, so a person's access token
 there is an anonymous caller.

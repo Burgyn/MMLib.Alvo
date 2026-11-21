@@ -432,6 +432,8 @@ A name is trimmed, 1–100 code points, no control character — the display nam
 | A self-made `dispatcher` cannot write a global entity, directly or through a relation term (Review Focus 5) | `TenancyEngineFacts.A_self_made_dispatcher_cannot_write_global_regions`; `AccessTenantRoleRefusalTests`; `GlobalWriteWarningsTests` |
 | A tenant role never reaches Management | `TenancyEngineFacts.A_tenant_role_never_reaches_management`; `AccessTenantRoleRefusalTests.An_assignable_role_in_any_access_level_is_refused` |
 | Owner is never a role; a stored name outside `assignableRoles` is no role either | `TenancyEngineFacts.The_owner_flag_is_never_a_role`; `MembershipRulesTests.A_stored_role_no_longer_assignable_is_dropped`; `MemberRoutesTests.Members_show_display_names_and_never_an_email` |
+| A tenant never loses its last *enabled* owner: a co-owner cannot leave, be demoted or be removed beside a banned owner, who keeps the flag but stands in for nobody (#543) | `TenantStoreFacts.A_co_owner_cannot_leave_a_banned_owner_alone`, `…An_enabled_owner_demotes_and_removes_a_banned_co_owner` (both engines) |
+| An operator makes an account an owner of a shared tenant — joining it if needed, roles kept or set — without enabling a banned sole owner; a disabled account, an unknown one, an unknown tenant and a personal tenant are refused and nothing is written; the ban names the tenants it orphaned (#543) | `TenantStoreFacts.An_operator_makes_an_account_owner_of_a_tenant_whose_only_owner_is_banned`, `…Granting_an_owner_again_changes_only_the_roles_it_names`, `…An_ownership_grant_refuses_what_it_cannot_do_and_writes_nothing`, `…The_orphaned_tenants_are_those_no_enabled_owner_can_manage` (both engines); `OwnershipGrantTests` over HTTP |
 | A tenant never loses its last owner, also when two owners act at once (Review Focus 2) | `TenantStoreFacts.Two_owners_demoting_each_other_at_once_leave_exactly_one_owner`, `…removing…`, `…leaving…` (20 iterations, both engines); `TenancyEngineFacts.The_last_owner_cannot_leave_be_removed_or_be_demoted` |
 | Never more than `maxPerAccount` shared tenants, also in parallel (Review Focus 3) | `TenantStoreFacts.Concurrent_creates_at_the_cap_never_exceed_it`; `TenancyEngineFacts.Creating_tenants_stops_at_the_cap` (five at once over HTTP) |
 | Two devices signing a new person in at once: one account, one personal tenant, one owner (Review Focus 4) | `AccountStoreFacts.Two_concurrent_first_sign_ins_create_one_personal_tenant` |
@@ -485,7 +487,11 @@ From the spec, the plan's decisions (`2026-11-13-accounts-s3-tenants.md`, D1–D
   bounded registers its own `IAlvoTenantCatalog`, which always wins.
 - **D14** — `Alvo:Api:RateLimits:Create`, 10 per client per minute, charged on `POST /tenants` only. **Superseded by
   S5 D15**: minting (`POST /tokens`) draws on the same budget (the S5 decisions, below).
-- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them.
+- **D15** — members arrive only through invitations, which S4 added; the S3 tests seed them. **Since #543** an operator
+  can also make an account an owner through Management — the one way into a tenant that is not an invitation.
+- **#543** — the last owner is the last *enabled* owner (`TenantTables.OtherEnabledOwnersSql`). Stricter than spec §6.4's
+  "the last owner", never looser: a banned owner keeps the flag, so enabling them restores it, but cannot be the owner a
+  co-owner leaves the tenant to.
 
 And where the implementation answered differently from the plan's first wording:
 
@@ -739,9 +745,10 @@ And where the implementation answered differently from the plan's first wording,
 - Membership events — spec D9 defers them.
 - Invitation emails. Alvo never sends one; the app shares the code however it likes.
 - Deleting a tenant, and transferring a personal one.
-- Recovering a tenant whose only owner is banned. A ban leaves memberships, and no operator route grants ownership, so
-  nobody can manage it until the account is enabled again; and the lock order of an owner's removal racing their ban:
-  [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543).
+- ~~Recovering a tenant whose only owner is banned, and the lock order of an owner's removal racing their ban.~~ **Done
+  in [#543](https://github.com/Burgyn/MMLib.Alvo/issues/543):** the ban answers the tenants it orphaned, an operator
+  makes another account an owner (`management-api.md`, *Making an end user an owner of a tenant*), and every sweep of a
+  person's credentials takes their account row first ([*The lock order*](#the-lock-order-543)).
 
 ## Tokens for integrators: personal and service tokens (S5)
 
@@ -1389,9 +1396,7 @@ defects that no slice could see, because each sits where two slices meet. Each f
   other role it declares is named in an `access` level, and a tenant role there is refused.
 
 Still open after these fixes, each filed: the HTTP contract's coherence before v0.1
-([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant
-([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543); its lock-order half is [below](#the-lock-order-543));
-signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
 stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).
 The design for all four is `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`.
 

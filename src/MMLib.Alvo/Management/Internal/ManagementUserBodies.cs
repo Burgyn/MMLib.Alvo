@@ -26,3 +26,16 @@ internal sealed record ManagementDisabledFlag(bool Disabled);
 /// </remarks>
 /// <param name="Disabled">Whether the account is to be disabled, or <see langword="null"/> when the body did not say.</param>
 internal sealed record ManagementAccountDisabledFlag(bool? Disabled);
+
+/// <summary>An operator's grant of a tenant's ownership to an end user's account (#543).</summary>
+/// <param name="Roles">The tenant roles the owner holds, each in <c>tenancy.selfService.assignableRoles</c>, or <see langword="null"/> to keep a member's roles.</param>
+internal sealed record ManagementOwnerGrant(IReadOnlyList<string>? Roles);
+
+/// <summary>What disabling or enabling an end user's account answers (#543).</summary>
+/// <param name="OrphanedTenants">The shared tenants the account owns that no enabled owner can manage after the change.</param>
+internal sealed record ManagementAccountDisabled(IReadOnlyList<ManagementOrphanedTenant> OrphanedTenants);
+
+/// <summary>A shared tenant no enabled owner can manage.</summary>
+/// <param name="Id">The tenant's id.</param>
+/// <param name="Name">The tenant's name.</param>
+internal sealed record ManagementOrphanedTenant(Guid Id, string Name);

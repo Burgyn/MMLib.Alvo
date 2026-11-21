@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Accounts;
+﻿using MMLib.Alvo.Tenants;
+
+namespace MMLib.Alvo.Accounts;
 
 /// <summary>
 /// What an operator does to an end user's account (spec §5.6): disable it — which ends every session it has — or enable it
@@ -30,6 +32,20 @@ internal interface IAlvoAccountAdministration
     /// <param name="account">The account's id.</param>
     /// <param name="disabled">Whether the account is to be disabled.</param>
     /// <param name="ct">A token to cancel the operation.</param>
-    /// <returns><see langword="false"/> when there is no such account.</returns>
-    Task<bool> SetDisabledAsync(UserId account, bool disabled, CancellationToken ct);
+    /// <returns>
+    /// The shared tenants the account owns that, after the change, no enabled owner can manage — what a ban of a sole owner
+    /// orphaned, so the operator can make someone else an owner (#543) — or <see langword="null"/> when there is no such
+    /// account.
+    /// </returns>
+    Task<IReadOnlyList<OrphanedTenant>?> SetDisabledAsync(UserId account, bool disabled, CancellationToken ct);
+
+    /// <summary>
+    /// Makes <paramref name="account"/> an owner of the shared <paramref name="tenant"/>, joining it if needed — how an
+    /// operator recovers a tenant whose only owner is banned without enabling them (#543). Revokes nothing.
+    /// </summary>
+    /// <param name="tenant">The tenant.</param>
+    /// <param name="account">The account.</param>
+    /// <param name="roles">The tenant roles to store, already checked against <c>assignableRoles</c>, or <see langword="null"/> to keep them.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    Task<OwnershipGrantOutcome> GrantOwnershipAsync(TenantId tenant, UserId account, IReadOnlyList<string>? roles, CancellationToken ct);
 }

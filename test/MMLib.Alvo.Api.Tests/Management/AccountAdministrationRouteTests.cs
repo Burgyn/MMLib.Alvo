@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Accounts;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Tenants;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -41,19 +42,25 @@ public sealed class AccountAdministrationRouteTests
         ManagementOperations.RequiredLevel(ManagementOperation.ManageAccounts).ShouldBe(ManagementLevel.Admin);
     }
 
-    /// <summary>Over the wire: a caller the project names nowhere is refused, so the route really carries its gate.</summary>
+    /// <summary>Over the wire: a caller the project names nowhere is refused, so each route really carries its gate.</summary>
     [Fact]
-    public async Task The_route_refuses_a_caller_the_project_names_nowhere()
+    public async Task Every_route_refuses_a_caller_the_project_names_nowhere()
     {
         await using var world = await StartAsync(withAccounts: true);
 
-        using var response = await world.SendAsync(
+        using var disabled = await world.SendAsync(
             HttpMethod.Put,
             $"/management/projects/vehicle-registry/accounts/{Guid.NewGuid()}/disabled",
             _stranger,
             body: new JsonObject { ["disabled"] = true });
+        using var owner = await world.SendAsync(
+            HttpMethod.Put,
+            $"/management/projects/vehicle-registry/tenants/{Guid.NewGuid()}/owners/{Guid.NewGuid()}",
+            _stranger,
+            body: []);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await response.ReadTextAsync());
+        disabled.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await disabled.ReadTextAsync());
+        owner.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await owner.ReadTextAsync());
     }
 
     [Fact]
@@ -65,7 +72,7 @@ public sealed class AccountAdministrationRouteTests
 
         AccountRoutes(world).ShouldNotBeEmpty("the route must exist for its absence from the document to mean anything");
         paths.ShouldNotBeEmpty();
-        paths.ShouldAllBe(path => !path.Contains("/accounts/", StringComparison.Ordinal));
+        paths.ShouldAllBe(path => !IsAccountRoute(path));
     }
 
     [Fact]
@@ -99,12 +106,20 @@ public sealed class AccountAdministrationRouteTests
 
     private static IEnumerable<MMLib.Alvo.Management.Internal.ManagementRoute> AccountRoutes(AlvoApiWorld world) =>
         world.ManagementRouteEndpoints()
-            .Where(endpoint => endpoint.RoutePattern.RawText!.Contains("/accounts/", StringComparison.Ordinal))
+            .Where(endpoint => IsAccountRoute(endpoint.RoutePattern.RawText!))
             .Select(endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>()!);
+
+    /// <summary>An account route: an account's own, or the ownership grant that names one (#543).</summary>
+    private static bool IsAccountRoute(string path) =>
+        path.Contains("/accounts/", StringComparison.Ordinal) || path.Contains("/tenants/{tenant", StringComparison.Ordinal);
 
     /// <summary>A stand-in that knows no account; the facts here are about the route, never about the store.</summary>
     private sealed class NoAccounts : IAlvoAccountAdministration
     {
-        public Task<bool> SetDisabledAsync(UserId account, bool disabled, CancellationToken ct) => Task.FromResult(false);
+        public Task<IReadOnlyList<OrphanedTenant>?> SetDisabledAsync(UserId account, bool disabled, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<OrphanedTenant>?>(null);
+
+        public Task<OwnershipGrantOutcome> GrantOwnershipAsync(TenantId tenant, UserId account, IReadOnlyList<string>? roles, CancellationToken ct) =>
+            Task.FromResult(new OwnershipGrantOutcome(OwnershipGrantStatus.NoSuchAccount, null));
     }
 }

@@ -387,6 +387,104 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// #543's recovery: a ban leaves its sole owner's tenant with nobody who can manage it, the ban says which tenants, and
+    /// an operator makes a member — or a stranger — an owner without enabling the banned person. The new owner then manages
+    /// the tenant, the banned owner included.
+    /// </summary>
+    [Fact]
+    public async Task An_operator_makes_an_account_owner_of_a_tenant_whose_only_owner_is_banned()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TeamAsync(store, services);
+        var carol = await SignedUpAsync(services, "Carol");
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(ada, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBe([new OrphanedTenant(tenant, "Acme")]);
+
+        var promoted = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, bob, Roles: null, _now.AddHours(1)), Ct);
+        var joined = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, carol, ["dispatcher"], _now.AddHours(2)), Ct);
+
+        promoted.Status.ShouldBe(OwnershipGrantStatus.Granted);
+        Same(promoted.Membership.ShouldNotBeNull(), Membership(tenant, ["viewer"], isOwner: true, _now.AddMinutes(1)));
+        Same(joined.Membership.ShouldNotBeNull(), Membership(tenant, ["dispatcher"], isOwner: true, _now.AddHours(2)));
+        (await TenantSeed.InvitationIdOfAsync(services, tenant, carol)).ShouldBeNull("an operator's grant came through no invitation");
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBeEmpty("Bob and Carol can manage it now");
+        (await store.RemoveMemberAsync(Remove(tenant, bob, ada), Ct)).ShouldBe(MemberChangeStatus.Changed, "the new owner removes the banned one");
+    }
+
+    /// <summary>
+    /// A grant is idempotent: an owner granted again stays an owner with the roles they had, unless the grant names roles —
+    /// and it revokes nothing, so their invitations and tokens live on.
+    /// </summary>
+    [Fact]
+    public async Task Granting_an_owner_again_changes_only_the_roles_it_names()
+    {
+        var (store, services) = await StoreAsync();
+        var owner = await SignedUpAsync(services);
+        var tenant = TenantId.New();
+        (await store.CreateSharedAsync(Create(tenant, owner, ["dispatcher"]), Ct)).Status.ShouldBe(CreateTenantStatus.Created);
+        var invitation = await InvitedByAsync(store, tenant, owner, _now.AddMinutes(5));
+
+        var again = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, owner, Roles: null, _now.AddHours(1)), Ct);
+        var renamed = await store.GrantOwnershipAsync(new OwnershipGrant(tenant, owner, ["planner"], _now.AddHours(2)), Ct);
+
+        Same(again.Membership.ShouldNotBeNull(), Membership(tenant, ["dispatcher"], isOwner: true, _now));
+        Same(renamed.Membership.ShouldNotBeNull(), Membership(tenant, ["planner"], isOwner: true, _now));
+        (await LiveInvitationsOfAsync(services, owner)).ShouldBe(1, "a grant revokes nothing");
+        invitation.ShouldNotBe(Guid.Empty);
+    }
+
+    /// <summary>
+    /// What a grant refuses, writing nothing: an unknown tenant or account, a disabled account — a banned person is never
+    /// made an owner — and a personal tenant, which has exactly one member forever.
+    /// </summary>
+    [Fact]
+    public async Task An_ownership_grant_refuses_what_it_cannot_do_and_writes_nothing()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TeamAsync(store, services);
+        var banned = await SignedUpAsync(services, "Mallory");
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(banned, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+        var personal = TenantId.New();
+        await TenantSeed.AddPersonalTenantAsync(services, personal, ada, "Ada", _now);
+
+        (await GrantAsync(store, TenantId.New(), bob)).ShouldBe(OwnershipGrantStatus.NoSuchTenant);
+        (await GrantAsync(store, tenant, UserId.New())).ShouldBe(OwnershipGrantStatus.NoSuchAccount);
+        (await GrantAsync(store, tenant, banned)).ShouldBe(OwnershipGrantStatus.AccountDisabled);
+        (await GrantAsync(store, personal, bob)).ShouldBe(OwnershipGrantStatus.PersonalTenant);
+
+        (await OwnersAsync(services, tenant)).ShouldBe(1);
+        (await store.FindMembershipAsync(bob, personal, Ct)).ShouldBeNull();
+        (await VersionAsync(services, tenant)).ShouldBe(0, "every refusal rolled its bump back");
+    }
+
+    /// <summary>
+    /// The tenants a ban orphaned (#543): shared tenants the account owns where no owner's account is enabled — a co-owner
+    /// who is banned too counts for nothing — and never a tenant it only belongs to or its personal tenant. By name.
+    /// </summary>
+    [Fact]
+    public async Task The_orphaned_tenants_are_those_no_enabled_owner_can_manage()
+    {
+        var (store, services) = await StoreAsync();
+        var accounts = services.GetRequiredService<IAccountStore>();
+        var (ada, bob, carol) = (await SignedUpAsync(services), await SignedUpAsync(services), await SignedUpAsync(services));
+        var (sole, shared, bothBanned, joined) = (TenantId.New(), TenantId.New(), TenantId.New(), TenantId.New());
+        await CreateNamedAsync(store, sole, ada, "Zeta");
+        await CreateNamedAsync(store, shared, ada, "Beta");
+        await TenantSeed.AddMemberAsync(services, shared, bob, [], isOwner: true, _now);
+        await CreateNamedAsync(store, bothBanned, ada, "Alpha");
+        await TenantSeed.AddMemberAsync(services, bothBanned, carol, [], isOwner: true, _now);
+        await CreateNamedAsync(store, joined, bob, "Gamma");
+        await TenantSeed.AddMemberAsync(services, joined, ada, [], isOwner: false, _now);
+        await TenantSeed.AddPersonalTenantAsync(services, TenantId.New(), ada, "Ada", _now);
+
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBeEmpty("before any ban every tenant has an enabled owner");
+        (await accounts.SetDisabledAsync(carol, disabled: true, _now.AddMinutes(10), Ct)).ShouldBeTrue();
+        (await accounts.SetDisabledAsync(ada, disabled: true, _now.AddMinutes(20), Ct)).ShouldBeTrue();
+
+        (await store.ListOrphanedTenantsAsync(ada, Ct)).ShouldBe([new OrphanedTenant(bothBanned, "Alpha"), new OrphanedTenant(sole, "Zeta")]);
+    }
+
     [Fact]
     public async Task A_second_owner_makes_leaving_possible()
     {
@@ -616,6 +714,15 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         (await store.CreateInvitationAsync(request, Ct)).Status.ShouldBe(MemberChangeStatus.Changed);
         return request.Id;
     }
+
+    /// <summary>A grant of ownership of <paramref name="tenant"/> to <paramref name="account"/>, keeping roles; its status.</summary>
+    private protected static async Task<OwnershipGrantStatus> GrantAsync(ITenantStore store, TenantId tenant, UserId account) =>
+        (await store.GrantOwnershipAsync(new OwnershipGrant(tenant, account, Roles: null, _now.AddHours(1)), Ct)).Status;
+
+    /// <summary>Creates a shared tenant named <paramref name="name"/> owned by <paramref name="creator"/>.</summary>
+    private protected static async Task CreateNamedAsync(ITenantStore store, TenantId tenant, UserId creator, string name) =>
+        (await store.CreateSharedAsync(new CreateTenantRequest(tenant, name, creator, [], 5, _now), Ct)).Status
+            .ShouldBe(CreateTenantStatus.Created);
 
     /// <summary>How many live invitations <paramref name="creator"/> created.</summary>
     protected static async Task<long> LiveInvitationsOfAsync(IServiceProvider services, UserId creator) => Convert.ToInt64(

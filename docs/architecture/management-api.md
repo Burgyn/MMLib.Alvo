@@ -62,6 +62,7 @@ end user*:
 | Route | `IAlvoAccountAdministration` member | Level |
 |---|---|---|
 | `PUT {m}/projects/{project}/accounts/{account:guid}/disabled` | `SetDisabledAsync` | `admin` |
+| `PUT {m}/projects/{project}/tenants/{tenant:guid}/owners/{account:guid}` | `GrantOwnershipAsync` | `admin` |
 
 **This table is generated from nothing.** It is prose, and prose drifts — so it is not what holds the
 mapping. `ManagementContractTests` does, reflectively and in four directions: every member of
@@ -602,13 +603,35 @@ transaction also revokes every personal and service token the account minted (ac
 beyond spec §7.1, because a banned owner who kept a token's secret would otherwise keep acting as the tenant — and
 enabling the account revives none: the person mints new ones
 (`AppTokenEngineFacts.A_banned_person_s_tokens_die_and_stay_dead`, both engines). On an account that
-is not disabled it is a no-op — still `204`, and nobody is logged out. The success answer is `204`; an account id that
+is not disabled it is a no-op — still `200`, and nobody is logged out. The success answer is `200`
+`{"orphanedTenants": [{"id", "name"}]}`: the shared tenants the account owns that, after the change, no owner with an
+enabled account can manage (#543) — what a ban of a sole owner orphaned, and so what the next section's route is for. It
+is read right after the change commits, so a grant racing the ban shows on the next, idempotent call; enabling answers
+the tenants still orphaned by *other* banned owners, usually none. An account id that
 does not exist is the surface's named `404`; a body without `disabled` is `422`, never read as "enable" — on a ban the absent answer
 must not be the permissive one. The ban takes effect on the very next request, not when the access token expires:
 every Bearer request reads its session (spec §5.7's one store read), and that read sees the revocation. Until the
 audit component (#42) records who banned whom, each change that lands writes one Information line, category
 `MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} disabled end-user account {id}.` (or `enabled`) — ids
 only, never the person's email or a token; a refused or missed change writes none.
+
+## Making an end user an owner of a tenant (#543)
+
+A ban leaves the banned person's memberships in place, so a tenant whose only owner is banned has nobody who can
+rename it, invite, mint a service token or change a member. `PUT {m}/projects/{project}/tenants/{tenant}/owners/{account}`
+makes another account an owner — joining the tenant if it is not a member — without enabling the banned person. The
+body is optional: `{"roles": [...]}` sets the owner's tenant roles, each in the applied
+`tenancy.selfService.assignableRoles` (nobody changes their own membership, so an operator-made owner could otherwise
+never hold one there); none keeps a member's roles and gives a new member none. It is idempotent and revokes nothing.
+
+It answers `200` with the membership (`{tenantId, name, kind, roles, isOwner}`, the shape `GET /auth/v1/user` lists);
+the surface's named `404` for an unknown tenant or account, each naming which; `409 conflict` for a disabled account
+("enable it first, or choose another account") or a personal tenant; `422` for a role the descriptor does not let a
+membership carry, or one named twice. One store call takes the account's row (refusing a disabled one), then the
+tenant's version bump, then the membership — the lock order of `accounts.md`, *The lock order*. Each grant writes one
+Information line in `MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} made end-user account {id} an owner of
+tenant {id}.` — ids only. Gated like the ban, `ManageAccounts` at `admin`: whoever may ban an owner may give the tenant
+another (hardening design §9.1 Q2). `AccountAdministrationRouteTests`, `OwnershipGrantTests`.
 
 **Its own operation, `ManageAccounts`, at `admin`.** Not `ManageUsers`: those people manage the project, these use
 the app — a deployment can have either without the other, and a later level split between them should not need a new

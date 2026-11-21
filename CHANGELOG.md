@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An operator can give a tenant whose only owner is banned a new owner** (#543). `PUT
+  {management}/projects/{project}/tenants/{tenant}/owners/{account}` (`ManageAccounts`, `admin`) makes an end user's
+  account an owner of a shared tenant — joining it if needed, with optional `roles` from
+  `tenancy.selfService.assignableRoles` — without enabling the banned person. It answers `200` with the membership,
+  `404` for an unknown tenant or account, `409` for a disabled account or a personal tenant and `422` for a role a
+  membership cannot carry, and revokes nothing.
+
 - **End-user sign-in with Google: `MMLib.Alvo.Accounts`** (accounts initiative, slice S2; level 1 of the design: data
   per person, no tenants). With `AddAlvoAccounts` and `MapAlvoAccounts` (or `Alvo:Accounts:Providers:Google:ClientIds`
   in the standalone host), a person can sign in through the app:
@@ -668,6 +675,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the docs site's tutorial and the source of the README's "See it" section.
 
 ### Changed (breaking)
+
+- **Disabling or enabling an end user's account answers `200`, not `204`** (#543). The body is
+  `{"orphanedTenants": [{"id", "name"}]}`: the shared tenants the account owns that no owner with an enabled account can
+  manage after the change — what a ban of a sole owner orphaned.
+- **The last owner of a tenant is the last *enabled* owner** (#543). A co-owner can no longer leave, nor be demoted or
+  removed, while the only other owner is banned: the banned owner keeps the flag, so enabling them restores it, but no
+  longer counts toward the last-owner check.
 
 - **One shape and one key for the person who made a `/auth/v1` resource** (#542 item 1). Every answer names its creator
   as `createdBy: { "id", "name" }` — `name` is the display name `/auth/v1/user` answers, as it reads now, `null` when
@@ -1462,6 +1476,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment-style rules).
 
 ### Fixed
+
+- **An owner's removal racing her ban no longer deadlocks on PostgreSQL** (#543). Both revoked her invitations with an
+  unordered multi-row `UPDATE`, one walking the `tenant_id` index and one the heap; after a HOT update they met her rows
+  in opposite orders, and one of the two failed with `40P01` (a 500 that rolled back) — 9 of 10 staged runs. Every
+  transaction that sweeps or hands out a person's credentials now takes that person's account row first: a removal,
+  leaving, a demotion, a refresh-token reuse, an invitation's creation, a ban and a mint.
 
 - **The standalone host exits 78 on a descriptor the boot refuses at stage 0, not 139** (#340, #547). A mounted
   descriptor that fails validation — mistyped, or written for a newer Alvo — or that the mapper refuses (a field naming

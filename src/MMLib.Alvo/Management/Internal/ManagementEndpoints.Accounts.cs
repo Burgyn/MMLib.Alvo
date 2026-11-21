@@ -65,11 +65,13 @@ internal static partial class ManagementEndpoints
                             project, account, body, gate, accounts, loggers.CreateLogger(AccountsLogCategory), ct))),
             new ManagementRoute(nameof(IAlvoAccountAdministration.SetDisabledAsync), ManagementOperation.ManageAccounts),
             qualifier: "Accounts");
+        MapOwnership(group);
     }
 
     /// <summary>
-    /// Admits the caller to the project, then disables or enables the account: 204, logged as <see cref="AccountChanged"/>,
-    /// or a named 404.
+    /// Admits the caller to the project, then disables or enables the account: 200 naming the shared tenants the account
+    /// owns that no enabled owner can manage after the change (#543 — what a ban of a sole owner orphaned, for
+    /// <see cref="MapOwnership"/>'s route to recover), logged as <see cref="AccountChanged"/>; or a named 404.
     /// </summary>
     private static async Task<IResult> SetAccountDisabledAsync(
         string project,
@@ -86,14 +88,14 @@ internal static partial class ManagementEndpoints
             return ProblemResultFactory.ManagementValidation(AccountDisabledRequired);
         }
 
-        if (!await accounts.SetDisabledAsync(new UserId(account), disabled, ct).ConfigureAwait(false))
+        if (await accounts.SetDisabledAsync(new UserId(account), disabled, ct).ConfigureAwait(false) is not { } orphaned)
         {
             return ProblemResultFactory.ManagementNotFound(
                 $"There is no account '{account}'. Account ids are the 'sub' of the access tokens Alvo issues.");
         }
 
         AccountChanged(logger, gate.Actor, disabled ? "disabled" : "enabled", account);
-        return Results.NoContent();
+        return Results.Ok(new ManagementAccountDisabled([.. orphaned.Select(tenant => new ManagementOrphanedTenant(tenant.Id.Value, tenant.Name))]));
     }
 
     /// <summary>The one record of an operator's ban or its lifting, until the audit component (#42) keeps one.</summary>
