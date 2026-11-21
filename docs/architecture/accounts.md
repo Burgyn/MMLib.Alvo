@@ -1359,11 +1359,9 @@ defects that no slice could see, because each sits where two slices meet. Each f
   the reuse's revocation waits for it to commit and its sweep then revokes what it wrote, or the reuse revokes the row
   first, and the write finds no live session and writes nothing: `MintTokenStatus.SessionEnded` /
   `MemberChangeStatus.SessionEnded`, answered as the dead session's own `401 invalid_token`. SQLite's write gate
-  serialises the two outright. **Lock order**: a mint takes the account row, then the session, then the tenant; an
-  invitation's creation takes the session, then the tenant (before its version bump); a refresh takes the session, then
-  the personal tenant it ensures; reuse takes the session, then invitations, then `_api_keys`; a ban takes the account
-  row first, then the same three in the same order. No pair takes two
-  of these rows in opposite orders. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
+  serialises the two outright. **Lock order**: every one of these writes takes the person's account row first — see
+  [*The lock order*](#the-lock-order-543) below, which #543 made the rule after this table of orders proved
+  incomplete. Facts: `AccountStoreFacts.A_mint_or_an_invitation_naming_a_session_a_reuse_ended_writes_nothing`,
   `…A_mint_racing_a_reuse_of_its_session_never_outlives_it`, `…An_invitation_racing_a_reuse_of_its_session_never_outlives_it`
   (20 iterations; red on both engines without the re-read), and over HTTP `CredentialWritesMidReuseTests` (the store
   ends the session between the route's check and its own transaction; red when the route drops the session).
@@ -1391,8 +1389,56 @@ defects that no slice could see, because each sits where two slices meet. Each f
   other role it declares is named in an `access` level, and a tenant role there is refused.
 
 Still open after these fixes, each filed: the HTTP contract's coherence before v0.1
-([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant and the owner-removal × ban
-lock order ([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543)) — the reuse sweep above is a third multi-row
-sweep over the same invitations and `_api_keys` rows, in the same order as the ban's, and belongs in that issue's
-race fact; signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
+([#542](https://github.com/Burgyn/MMLib.Alvo/issues/542)); a banned sole owner's tenant
+([#543](https://github.com/Burgyn/MMLib.Alvo/issues/543); its lock-order half is [below](#the-lock-order-543));
+signing-key rotation and `azp` ([#544](https://github.com/Burgyn/MMLib.Alvo/issues/544)); undoing the ownership a
 stolen session already granted before its reuse ended it ([#546](https://github.com/Burgyn/MMLib.Alvo/issues/546)).
+The design for all four is `docs/superpowers/specs/2026-11-21-accounts-security-hardening-design.md`.
+
+## The lock order (#543)
+
+Four transactions sweep a person's invitations and `_api_keys` rows with unordered multi-row `UPDATE`s: a ban, a
+refresh-token reuse, a removal (or leaving) and a demotion. Visiting the *tables* in one order (invitations before
+tokens) was not enough. A PostgreSQL `UPDATE … WHERE …` locks rows in the order its plan reaches them. The removal's
+`tenant_id = …` sweep walks the `tenant_id` index, while the ban's `created_by = …` sweep (no index) scans the heap.
+After one HOT update, an index entry still points at the row's *root* line pointer while the heap holds its live
+tuple further on, so the two statements met one person's two invitations in opposite orders. Each could hold one and
+wait on the other: a `40P01`, and a 500 that rolled back. That was reasoned in the whole-stack review and **measured**
+here: `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` stages exactly that (the plans
+and the heap order are asserted, then a held lock releases both rows at once) and deadlocked in 9 of 10 iterations
+before the fix.
+
+**The rule: one person, one mutex.** Every transaction that sweeps or hands out a person's credentials first takes
+that person's `_auth_accounts` row with a write that changes nothing (`AuthTables.LockAccountRowSql`, S3 D3's idiom,
+one SQL text for both engines). Two sweeps of one person then never run at once, whatever order their statements would
+meet the rows in. The order every accounts and tenancy transaction keeps:
+
+```
+_auth_accounts (at most ONE account row per transaction)
+  → _auth_sessions
+  → _tenants (version bump)
+  → _tenant_members
+  → _tenant_invitations
+  → _api_keys
+```
+
+| Transaction | Account row it takes first |
+|---|---|
+| Ban, enable | the account's own (`DisableAccountSql` / `EnableAccountSql`) |
+| Refresh-token reuse | the session's account, before the session is revoked |
+| Remove, leave | the member removed — never the acting owner, whose liveness is their session |
+| Demote (`isOwner: false`) | the member demoted; a role-only change takes none |
+| Mint | the minter (`LockAccountSql`, which also refuses a disabled one) |
+| Create an invitation | the creator, before their session |
+| Accept, sign-in | the person accepting or signing in |
+
+"At most one account row per transaction" is the load-bearing clause. A future write that needs two must take them in
+ascending `id` order and say so. Ordering the rows inside each statement instead (`… WHERE pk IN (SELECT … ORDER BY pk
+FOR UPDATE)`) was rejected: SQLite has no `FOR UPDATE`, so it would need a per-engine statement for a problem SQLite's
+write gate cannot have (design §2.3).
+
+| Invariant | Held by |
+|---|---|
+| An owner's removal and her ban at once never deadlock, and leave one state: banned, gone, no live invitation, the other owner still owning | `PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks` (10 staged iterations; 9 deadlocks before the fix); `TenantStoreFacts.An_owner_s_removal_and_her_ban_at_once_leave_one_consistent_state` (20 iterations, both engines) |
+| A removal, leaving and a demotion take the member's account row before any of her credentials, and hold none while they wait for it | `PostgreSqlTenantStoreTests.A_member_write_that_sweeps_takes_the_member_s_account_row_before_their_credentials` (red on all three before the fix) |
+| A reuse and an invitation's creation take the account row before the session | `PostgreSqlAccountStoreTests.A_reuse_or_an_invitation_takes_the_account_row_before_the_session` (red on both before the fix) |

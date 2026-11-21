@@ -197,7 +197,8 @@ staged so the inversion §2.1 reasons about is *constructed* rather than hoped f
    member of `T`; that every invitation and token of hers is revoked; and that Bob is still an owner.
 
 Run it 10 times. **Red on `main` is the expected outcome.** If it is green, the PR records that and the fix still lands,
-for the reason in Q1 (§9). Two more facts sit beside it:
+for the reason in Q1 (§9). **Measured on `main` (`6a71769f`), 2026-11-21: 9 of 10 iterations deadlocked (`40P01`)** —
+the race is real, not only reasoned. Two more facts sit beside it:
 
 - **`…Every_sweep_of_one_person_takes_their_account_row_first`** — deterministic, and the fact the fix is judged by.
   Hold Ada's account row (`LockAccountSql` in a holder). Start each of: the removal of Ada, the demotion of Ada, a

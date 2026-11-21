@@ -308,6 +308,85 @@ public abstract class TenantStoreFacts : IAsyncDisposable
         (await store.RemoveMemberAsync(Remove(tenant, owner, member), Ct)).ShouldBe(MemberChangeStatus.Changed, "an owner removes a banned member");
     }
 
+    /// <summary>
+    /// #543: the last owner is the last <i>enabled</i> owner. A banned owner keeps the flag — enabling them restores it —
+    /// but stands in for nobody, so a co-owner cannot leave them alone in a tenant nobody could manage, nor be demoted or
+    /// removed beside them. Red before the count left banned owners out.
+    /// </summary>
+    [Fact]
+    public async Task A_co_owner_cannot_leave_a_banned_owner_alone()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TwoOwnersAsync(store, services);
+        var accounts = services.GetRequiredService<IAccountStore>();
+        (await accounts.SetDisabledAsync(ada, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+
+        (await store.RemoveMemberAsync(Remove(tenant, bob, bob), Ct)).ShouldBe(MemberChangeStatus.LastOwner, "Bob is the last enabled owner");
+
+        (await store.FindMembershipAsync(bob, tenant, Ct)).ShouldNotBeNull().IsOwner.ShouldBeTrue();
+        (await OwnersAsync(services, tenant)).ShouldBe(2, "the banned owner keeps the flag");
+        (await accounts.SetDisabledAsync(ada, disabled: false, _now.AddMinutes(40), Ct)).ShouldBeTrue();
+        (await store.RemoveMemberAsync(Remove(tenant, bob, bob), Ct))
+            .ShouldBe(MemberChangeStatus.Changed, "once Ada is enabled again she is an owner who outlasts Bob");
+    }
+
+    /// <summary>
+    /// The other side of the enabled-owner count (#543): a banned owner is no obstacle to the owner who remains — they
+    /// may be demoted or removed, since the enabled owner outlasts them.
+    /// </summary>
+    [Fact]
+    public async Task An_enabled_owner_demotes_and_removes_a_banned_co_owner()
+    {
+        var (store, services) = await StoreAsync();
+        var (tenant, ada, bob) = await TwoOwnersAsync(store, services);
+        (await services.GetRequiredService<IAccountStore>().SetDisabledAsync(ada, disabled: true, _now.AddMinutes(30), Ct)).ShouldBeTrue();
+
+        (await store.UpdateMemberAsync(Update(tenant, bob, ada, roles: null, isOwner: false), Ct)).ShouldBe(MemberChangeStatus.Changed);
+        (await store.RemoveMemberAsync(Remove(tenant, bob, ada), Ct)).ShouldBe(MemberChangeStatus.Changed);
+
+        (await OwnersAsync(services, tenant)).ShouldBe(1);
+        (await store.FindMembershipAsync(bob, tenant, Ct)).ShouldNotBeNull().IsOwner.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// #543, design §2.5: an owner's removal and her ban, at once, in either order, leave one consistent state — she is
+    /// banned and gone, none of her invitations is live, and the other owner still owns. On PostgreSQL the two really
+    /// overlap; the staged deadlock itself is <c>PostgreSqlTenantStoreTests.An_owner_s_removal_racing_their_ban_never_deadlocks</c>.
+    /// </summary>
+    [Fact]
+    public async Task An_owner_s_removal_and_her_ban_at_once_leave_one_consistent_state()
+    {
+        for (var iteration = 0; iteration < Iterations; iteration++)
+        {
+            var (store, services) = await StoreAsync();
+            var (tenant, ada, bob) = await TwoOwnersAsync(store, services);
+            await InvitedByAsync(store, tenant, ada, _now.AddMinutes(5));
+            await InvitedByAsync(store, tenant, ada, _now.AddMinutes(6));
+            var accounts = services.GetRequiredService<IAccountStore>();
+            using var start = new Barrier(2);
+
+            var outcomes = await Task.WhenAll(
+                Task.Run(
+                    async () =>
+                    {
+                        start.SignalAndWait(Ct);
+                        return await store.RemoveMemberAsync(Remove(tenant, bob, ada), Ct) == MemberChangeStatus.Changed;
+                    },
+                    Ct),
+                Task.Run(
+                    async () =>
+                    {
+                        start.SignalAndWait(Ct);
+                        return await accounts.SetDisabledAsync(ada, disabled: true, _now.AddHours(1), Ct);
+                    },
+                    Ct));
+
+            outcomes.ShouldAllBe(done => done, $"iteration {iteration}");
+            (await LiveInvitationsOfAsync(services, ada)).ShouldBe(0, $"iteration {iteration}");
+            (await store.ListMembersAsync(tenant, bob, Ct))!.Select(member => member.User).ShouldBe([bob], $"iteration {iteration}");
+        }
+    }
+
     [Fact]
     public async Task A_second_owner_makes_leaving_possible()
     {
@@ -527,6 +606,23 @@ public abstract class TenantStoreFacts : IAsyncDisposable
     /// <summary>The two accounts in the order their stored ids sort.</summary>
     private protected static UserId[] Order(UserId first, UserId second) =>
         [.. new[] { first, second }.OrderBy(user => user.Value.ToString("D", CultureInfo.InvariantCulture), StringComparer.Ordinal)];
+
+    /// <summary>A live single-use invitation of <paramref name="owner"/>'s into <paramref name="tenant"/>, created at <paramref name="now"/>.</summary>
+    private protected static async Task<Guid> InvitedByAsync(ITenantStore store, TenantId tenant, UserId owner, DateTimeOffset now)
+    {
+        var request = new CreateInvitationRequest(
+            Guid.NewGuid(), tenant, owner, Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"), [], GrantsOwner: false,
+            null, 1, now.AddDays(7), now);
+        (await store.CreateInvitationAsync(request, Ct)).Status.ShouldBe(MemberChangeStatus.Changed);
+        return request.Id;
+    }
+
+    /// <summary>How many live invitations <paramref name="creator"/> created.</summary>
+    protected static async Task<long> LiveInvitationsOfAsync(IServiceProvider services, UserId creator) => Convert.ToInt64(
+        await ScalarAsync(
+            services,
+            $"SELECT COUNT(*) FROM {TableOf(services, AlvoFrameworkTables.TenantInvitationsSuffix)} WHERE created_by = '{creator.Value:D}' AND revoked_at IS NULL"),
+        CultureInfo.InvariantCulture);
 
     /// <summary>How many owners <paramref name="tenant"/> has.</summary>
     protected static async Task<long> OwnersAsync(IServiceProvider services, TenantId tenant) => Convert.ToInt64(

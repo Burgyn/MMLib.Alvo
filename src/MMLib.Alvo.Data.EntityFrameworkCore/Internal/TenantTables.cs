@@ -207,8 +207,13 @@ internal sealed class TenantTables(string schemaPrefix)
     /// </summary>
     internal string BumpVersionSql => $"UPDATE {Tenants} SET version = version + 1 WHERE id = @tenant_id";
 
-    /// <summary>Gets the statement counting one tenant's owners.</summary>
-    internal string OwnersSql => $"SELECT COUNT(*) FROM {Members} WHERE tenant_id = @tenant_id AND is_owner = 1";
+    /// <summary>
+    /// Gets the statement counting one tenant's owners other than <c>@user_id</c> whose account is not disabled (#543): a
+    /// banned owner keeps the flag but manages nothing, so they never stand in for the last owner. <c>NOT EXISTS …
+    /// disabled</c>, as <see cref="HonouredMembershipSql"/>, so an owner without an account row still counts.
+    /// </summary>
+    internal string OtherEnabledOwnersSql =>
+        $"SELECT COUNT(*) FROM {Members} m WHERE m.tenant_id = @tenant_id AND m.is_owner = 1 AND m.user_id <> @user_id{HonouredAccount}";
 
     /// <summary>Gets the statement renaming one tenant.</summary>
     internal string RenameSql => $"UPDATE {Tenants} SET name = @name WHERE id = @tenant_id";
