@@ -615,24 +615,6 @@ audit component (#42) records who banned whom, each change that lands writes one
 `MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} disabled end-user account {id}.` (or `enabled`) — ids
 only, never the person's email or a token; a refused or missed change writes none.
 
-## Making an end user an owner of a tenant (#543)
-
-A ban leaves the banned person's memberships in place, so a tenant whose only owner is banned has nobody who can
-rename it, invite, mint a service token or change a member. `PUT {m}/projects/{project}/tenants/{tenant}/owners/{account}`
-makes another account an owner — joining the tenant if it is not a member — without enabling the banned person. The
-body is optional: `{"roles": [...]}` sets the owner's tenant roles, each in the applied
-`tenancy.selfService.assignableRoles` (nobody changes their own membership, so an operator-made owner could otherwise
-never hold one there); none keeps a member's roles and gives a new member none. It is idempotent and revokes nothing.
-
-It answers `200` with the membership (`{tenantId, name, kind, roles, isOwner}`, the shape `GET /auth/v1/user` lists);
-the surface's named `404` for an unknown tenant or account, each naming which; `409 conflict` for a disabled account
-("enable it first, or choose another account") or a personal tenant; `422` for a role the descriptor does not let a
-membership carry, or one named twice. One store call takes the account's row (refusing a disabled one), then the
-tenant's version bump, then the membership — the lock order of `accounts.md`, *The lock order*. Each grant writes one
-Information line in `MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} made end-user account {id} an owner of
-tenant {id}.` — ids only. Gated like the ban, `ManageAccounts` at `admin`: whoever may ban an owner may give the tenant
-another (hardening design §9.1 Q2). `AccountAdministrationRouteTests`, `OwnershipGrantTests`.
-
 **Its own operation, `ManageAccounts`, at `admin`.** Not `ManageUsers`: those people manage the project, these use
 the app — a deployment can have either without the other, and a later level split between them should not need a new
 operation then. Disabling a person decides who may reach the backend, which spec §3.3 gives to `admin`.
@@ -652,6 +634,30 @@ their own access token here is an anonymous caller and is refused `403` like one
 and endpoint names must be unique. `AccountAdministrationRouteTests` is `ManagementContractTests`' counterpart for this
 contract. `AccountsEngineFacts.A_disabled_person_is_refused_on_the_next_request` drives the route end to end on both
 engines; the accounts side (tables, sessions, the person resolver) is [`accounts.md`](./accounts.md).
+
+## Making an end user an owner of a tenant (#543)
+
+A ban leaves the banned person's memberships in place, so a tenant whose only owner is banned has nobody who can
+rename it, invite, mint a service token or change a member. `PUT {m}/projects/{project}/tenants/{tenant}/owners/{account}`
+makes another account an owner — joining the tenant if it is not a member — without enabling the banned person. The
+body is optional: `{"roles": [...]}` sets the owner's tenant roles, each in the applied
+`tenancy.selfService.assignableRoles` (nobody changes their own membership, so an operator-made owner could otherwise
+never hold one there); none keeps a member's roles and gives a new member none. It is idempotent and revokes nothing.
+
+It answers `200` with the membership (`{tenantId, name, kind, roles, isOwner}`, the shape `GET /auth/v1/user` lists);
+the surface's named `404` for an unknown tenant or account, each naming which; `409 conflict` for a disabled account
+("enable it first, or choose another account") or a personal tenant; `422` for a role the descriptor does not let a
+membership carry, or one named twice. One store call takes the account's row (refusing a disabled one), then the
+tenant's version bump, then the membership — the lock order of `accounts.md`, *The lock order*. Each grant writes one
+Information line in `MMLib.Alvo.Management.Accounts`: `Management: {keyId}:{user} made end-user account {id} an owner of
+tenant {id}.` — ids only. Gated like the ban, `ManageAccounts` at `admin`: whoever may ban an owner may give the tenant
+another (hardening design §9.1 Q2). `AccountAdministrationRouteTests`, `OwnershipGrantTests`.
+
+**One window, recorded.** A ban racing a co-owner *leaving* the same tenant can leave it with no enabled owner while the
+ban answers `orphanedTenants: []`: the leave's last-owner count saw the banned owner still enabled, and the ban's orphan
+read (right after its commit) still saw the co-owner. The tenant is recovered with this route; an operator's ban may
+orphan, a member's acts alone never do (hardening design §2.4, ruled acceptable). Tenants and accounts are host-wide —
+`{project}` is the gate, not a partition — so this grant, like the ban, acts on host-wide rows.
 
 ## What is deliberately absent
 

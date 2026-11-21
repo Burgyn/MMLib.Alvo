@@ -80,6 +80,23 @@ public sealed class AccountAdministrationTests
         data.StatusCode.ShouldBe(HttpStatusCode.OK, "a refused disable changes nothing");
     }
 
+    /// <summary>
+    /// #543: granting a tenant's ownership is the ban's operation, so a caller below <c>admin</c> is refused before anything
+    /// is read — a stranger learns nothing about the tenant or the account.
+    /// </summary>
+    [Fact]
+    public async Task A_developer_cannot_grant_ownership()
+    {
+        await using var world = await StartAsync();
+        var (access, _) = await world.SignInAsync("sub-1");
+
+        using var refused = await world.Api.SendAsync(
+            HttpMethod.Put, $"/management/projects/time-tracker/tenants/{Guid.NewGuid()}/owners/{AccountOf(access)}", _developer, body: []);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await refused.ReadTextAsync());
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+    }
+
     [Fact]
     public async Task An_unknown_account_is_404()
     {

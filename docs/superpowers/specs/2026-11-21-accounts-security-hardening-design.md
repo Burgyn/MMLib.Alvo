@@ -122,6 +122,12 @@ What changes, so that every path follows it:
 | Accept (`InvitationAcceptance.cs:100`) | account (acceptor) → invitation → member insert | unchanged (it already starts at the account) |
 | Sign-in, refresh rotate | account → session …; refresh row → session → personal tenant | unchanged |
 
+**Why the lock is a no-op `UPDATE`** (`… SET last_sign_in_at = last_sign_in_at`, as `LockAccountSql` already is): it
+is S3 D3's idiom, one SQL text for both engines — on SQLite it is a harmless write under the write gate. On PostgreSQL
+it writes a new row version on every sweep; `SELECT … FOR NO KEY UPDATE` is the bloat-free alternative, not taken
+because SQLite has no locking clause and the idiom's whole point is SQLite parity. Recorded so a later reader can
+weigh the trade, not rediscover it.
+
 "At most one account row per transaction" is the load-bearing clause. The removal locks the *member's* account, never
 the acting owner's; the actor's own liveness is already the session lock. Any future write that needs two accounts
 must take them in ascending `id` order and say so.
@@ -168,8 +174,20 @@ visible.
    enable restores exactly what was there.
 3. **The ban answers 200 `{ "orphanedTenants": [ { "id", "name" } ] }`** — the shared tenants where, after the ban, no
    owner has an enabled account — instead of 204. The operator learns the consequence in the same call, and the agent
-   gets the follow-up it needs to call (1). It is read in the ban's transaction, after the sweeps. **Breaking**
-   (204 → 200); listed in §7.
+   gets the follow-up it needs to call (1). **As built** it is read right after the ban commits, not in its
+   transaction. **Breaking** (204 → 200); listed in §7.
+
+**A recorded window** (#543 review; ruled acceptable on the maintainer's behalf, §9.1). A ban of Ada racing her co-owner
+Bob *leaving* can leave the tenant with no enabled owner while the ban answers `orphanedTenants: []`. Bob's leave takes
+his own account row and the tenant; on PostgreSQL's `READ COMMITTED` its last-owner count still sees Ada enabled while
+her ban is uncommitted, so it passes. If the ban's orphan read then runs before Bob's leave commits, it still sees
+Bob. The tenant is recoverable with (1); the cost is an orphan the operator notices later rather than in the ban's
+answer. Closing it would need the leave to lock every co-owner's account row — more than one account row per
+transaction, against §2.3's rule. Operator acts may orphan; a member's acts alone never do.
+
+**Tenants and accounts are host-wide.** One registry and one account table serve the deployment; the `{project}` in
+the path is the Management surface's gate, not a partition. So a project `admin`'s grant — like their ban — acts on
+host-wide rows, exactly as the existing ban route already did.
 
 This does not reopen F5 D4 ("Management does not enumerate tenants"). The ban names only tenants that this account's
 ban orphaned, and the operator already holds the account id.
@@ -844,7 +862,10 @@ every recommendation above is accepted as written. One line each, with the cost 
 1. **Q1 — fix the lock order regardless of the race fact.** Cost if wrong: one extra no-op row lock per member write
    that sweeps.
 2. **Q2 — reuse `ManageAccounts` at `admin`; the ban answers 200 `{orphanedTenants}`.** Cost if wrong: a later
-   `ManageTenants` operation moves one route's gate; the ban's body is additive to change again.
+   `ManageTenants` operation moves one route's gate; the ban's body is additive to change again. **Review addendum:**
+   the ban × co-owner-leaving window of §2.4 (the ban can answer `orphanedTenants: []` for a tenant the race left with
+   no enabled owner) is accepted — operator acts may orphan, and the grant recovers it. Cost if wrong: an orphan noticed
+   later than the ban.
 3. **Q3 — the undo removes members admitted through a stolen session's owner invitations, transitively.** Cost if
    wrong: a legitimate member re-joins by a fresh invitation.
 4. **Q4 — step-up 10 minutes, for owner-granting invitations and promoting, demoting or removing an owner.** Cost if
