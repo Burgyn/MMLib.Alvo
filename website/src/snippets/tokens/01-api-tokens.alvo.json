@@ -6,7 +6,7 @@
     "providers": ["google"],
     "roles": ["dispatcher", "technician"],
     "signUp": { "mode": "open" },
-    "accessTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }
+    "apiTokens": { "personal": true, "service": true, "maxLifetimeDays": 30 }
   },
   "tenancy": {
     "enabled": true,

@@ -124,7 +124,7 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   every dead code one 404, an owner's invitations dying with their ownership or their account, and `signUp.mode: invitationOnly` signing
   people up through `invitation_code` on the token exchange with account and membership in one transaction;
   `tenancy.selfService.invitations` is honoured; proven end to end and under both races on SQLite and PostgreSQL
-  (`InvitationEngineFacts`). **S5**: tokens for integrators — `auth.accessTokens`, personal tokens acting as their
+  (`InvitationEngineFacts`). **S5**: tokens for integrators — `auth.apiTokens` (named `auth.accessTokens` until #542), personal tokens acting as their
   person with live tenant roles and service tokens acting as a shared tenant with fixed ones, minted over
   `/auth/v1/tokens` and shown once (`alvo_pat_`/`alvo_svc_`, `_api_keys`), sent as `X-Alvo-Api-Key`, refused by the
   Management API and by a host's own `.WithAlvoCaller()` endpoints (a scope opt-in for those is #536), and revoked in
@@ -138,7 +138,9 @@ are numbered independently of the plan's own bracketed `[N]` step numbers
   (`docs/architecture/accounts.md`, *The demo (S6)*). S0–S6 are complete as stacked PRs #524, #525, #528, #529,
   #530, #537 and S6's; a whole-stack review precedes the merge. Follow-ups: #523, #526, #527, #536,
   ~~#538~~ (done: a scoped create without `tenant_id` is placed in the tenant the call acts in), ~~#539~~ (done: on every surface where Alvo reads a Bearer, an app token sent as `Authorization: Bearer` gets a
-  401 naming the API-key header) and #540 (the v10 assistant eval is owed).
+  401 naming the API-key header), ~~#542~~ (done: one `/auth/v1` contract — `createdBy: { id, name }`, a 401 Bearer
+  challenge for any API key on a person-only route, `auth.apiTokens`, one rate budget per route, and `Idempotency-Key` on
+  `POST /tenants`, refused on mint and invitation create) and #540 (the v10 assistant eval is owed).
 
 ## 3a. What closed F4
 

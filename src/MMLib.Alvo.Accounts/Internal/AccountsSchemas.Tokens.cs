@@ -74,7 +74,7 @@ internal static partial class AccountsSchemas
             {
                 Type = JsonSchemaType.String,
                 Format = "date-time",
-                Description = "When the token expires: RFC 3339 with an offset, in the future, at most `auth.accessTokens.maxLifetimeDays` days away. "
+                Description = "When the token expires: RFC 3339 with an offset, in the future, at most `auth.apiTokens.maxLifetimeDays` days away. "
                     + "A token always expires.",
             }));
         schema.AdditionalPropertiesAllowed = false;

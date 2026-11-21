@@ -120,7 +120,7 @@ internal sealed partial class AccountsWorld
     internal static void WithoutSelfService(JsonObject descriptor)
     {
         descriptor["tenancy"]!.AsObject().Remove("selfService");
-        (descriptor["auth"]?["accessTokens"] as JsonObject)?.Remove("service");
+        (descriptor["auth"]?["apiTokens"] as JsonObject)?.Remove("service");
     }
 
     private async Task<JsonObject> UserAsync(string access)

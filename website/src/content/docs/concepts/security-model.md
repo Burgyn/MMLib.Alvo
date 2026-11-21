@@ -237,8 +237,8 @@ outside Alvo, an audit log of data changes, issuing and revoking a configured AP
 deliveries, and rate limiting on the Data and Management APIs are not in this build
 ([Capabilities in this build](/reference/capabilities/)). Alvo rate-limits only these: the dashboard's sign-in
 forms, and, per client address and minute, the token endpoint `POST /auth/v1/token` (30,
-`Alvo:Api:RateLimits:Token`), creating a tenant and minting a token, which share one budget (10,
-`Alvo:Api:RateLimits:Create`), and the five invitation routes (20, `Alvo:Api:RateLimits:Invitations`). Listing and
+`Alvo:Api:RateLimits:TokenEndpoint`), creating a tenant (10, `Alvo:Api:RateLimits:Tenants`), minting a token (10,
+`Alvo:Api:RateLimits:ApiTokens`), and the five invitation routes (20, `Alvo:Api:RateLimits:Invitations`). Listing and
 renaming tenants, the member routes, listing and revoking tokens, `/user`, `/logout` and the discovery documents carry
 no budget. Put a proxy limiter in front of what you need limited, or, in an embedded host, attach ASP.NET Core's
 limiter to Alvo's routes ([HTTP conventions](/extending/http-conventions/#one-entitys-routes-forentity)).

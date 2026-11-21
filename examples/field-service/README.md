@@ -191,7 +191,7 @@ Acme, his next request there and his personal token are refused, while he stays 
 "auth": {
   "providers": ["local", "google"],
   "signUp": { "mode": "open" },
-  "accessTokens": { "personal": true, "service": true }
+  "apiTokens": { "personal": true, "service": true }
 },
 "tenancy": {
   "enabled": true,

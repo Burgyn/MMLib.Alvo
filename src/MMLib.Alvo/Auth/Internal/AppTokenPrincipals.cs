@@ -9,7 +9,7 @@ namespace MMLib.Alvo.Auth.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Default-deny on the applied descriptor</b> (D11): a kind <c>auth.accessTokens</c> does not turn on is refused, and a
+/// <b>Default-deny on the applied descriptor</b> (D11): a kind <c>auth.apiTokens</c> does not turn on is refused, and a
 /// service token also needs <c>tenancy.selfService</c> on — so turning a kind off stops every token of it at the next
 /// request, and turning it back on revives the unexpired ones.
 /// </para>

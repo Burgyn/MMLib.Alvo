@@ -21,7 +21,10 @@ internal static partial class AccountsDocumentation
             + "a command's handler then writes as the token's caller under the descriptor's rules, and a host's custom "
             + "endpoints refuse tokens with 403. Every token expires at `expiresAt`. The answer carries the credential "
             + "in `token`, shown this once: present it in the header `header` names. Neither kind ever manages a project or "
-            + "mints a token.",
+            + "mints a token.\n\n"
+            + "**`Idempotency-Key` is refused here (422 `malformed-query`):** the secret is kept only as a hash, so no retry "
+            + "could return it. If an answer is lost, list your tokens (`GET /tokens`), revoke the one you never received "
+            + "(`DELETE /tokens/{keyId}`) and mint again.",
             Bearer: true,
             document => Body("application/json", AccountsSchemas.AppTokenRequestId, "The token to mint.", document),
             CreateTokenResponses,
@@ -59,7 +62,7 @@ internal static partial class AccountsDocumentation
             }))),
         PersonUnauthenticated(document),
         NotAPerson(document),
-        Disabled(document, "`feature-disabled`: the descriptor does not declare `auth.accessTokens`; `descriptorKey` names it."));
+        Disabled(document, "`feature-disabled`: the descriptor does not declare `auth.apiTokens`; `descriptorKey` names it."));
 
     private static OpenApiResponses RevokeTokenResponses(OpenApiDocument document) => Answers(
         document,
@@ -69,7 +72,7 @@ internal static partial class AccountsDocumentation
         Disabled(
             document,
             "`not-found`: no such token, or one the person may not revoke — one answer for both. `feature-disabled`: the "
-            + "descriptor does not declare `auth.accessTokens`; `descriptorKey` names it."));
+            + "descriptor does not declare `auth.apiTokens`; `descriptorKey` names it."));
 
     private static OpenApiResponses CreateTokenResponses(OpenApiDocument document) => Answers(
         document,
@@ -86,8 +89,8 @@ internal static partial class AccountsDocumentation
         Disabled(
             document,
             "`not-found`: no such tenant, or the person is no member of it — one answer for both. `feature-disabled`: the "
-            + "descriptor does not declare `auth.accessTokens`, or the requested kind is off; `descriptorKey` names which "
-            + "(`auth.accessTokens`, `auth.accessTokens.personal` or `auth.accessTokens.service`)."),
+            + "descriptor does not declare `auth.apiTokens`, or the requested kind is off; `descriptorKey` names which "
+            + "(`auth.apiTokens`, `auth.apiTokens.personal` or `auth.apiTokens.service`)."),
         TenantRefusal(
             "409",
             "`conflict`: a service token was asked for a personal tenant, or the person already has 100 live tokens.",
@@ -99,8 +102,8 @@ internal static partial class AccountsDocumentation
             + "service token or not a UUID; `roles` is sent for a personal token, missing or empty for a service token, or "
             + "names a role outside `tenancy.selfService.assignableRoles` or one the person does not hold in the tenant; a "
             + "scope names no entity of the descriptor, is the wildcard or is named twice; `expiresAt` is not an RFC 3339 "
-            + "instant with an offset, in the future and at most `auth.accessTokens.maxLifetimeDays` away; or the body "
-            + "carries another property.",
+            + "instant with an offset, in the future and at most `auth.apiTokens.maxLifetimeDays` away; or the body "
+            + "carries another property. `malformed-query`: `Idempotency-Key` was sent, which minting does not honour.",
             document),
         TokenRateLimited(document));
 
@@ -108,8 +111,8 @@ internal static partial class AccountsDocumentation
     {
         var (status, response) = TenantRefusal(
             "429",
-            "`rate-limited`: this client created tenants and minted tokens more often this minute than "
-            + "`Alvo:Api:RateLimits:Create` allows — one budget for both. Wait for `Retry-After`, then send the request again.",
+            "`rate-limited`: this client minted more tokens this minute than `Alvo:Api:RateLimits:ApiTokens` allows. Wait "
+            + "for `Retry-After`, then send the request again.",
             document);
         response.Headers!["Retry-After"] = Header("Whole seconds until the window admits this client again.", "60");
         return (status, response);

@@ -15,7 +15,7 @@
     "signUp": {
       "mode": "open"
     },
-    "accessTokens": {
+    "apiTokens": {
       "personal": true,
       "service": true,
       "maxLifetimeDays": 30

@@ -769,7 +769,7 @@ internal static partial class ManagementEndpoints
         }
         catch (Data.AlvoIdempotencyConflictException)
         {
-            return ProblemResultFactory.ManagementIdempotencyConflict();
+            return ProblemResultFactory.IdempotencyKeySpent();
         }
         catch (ManagementEscalationException)
         {
