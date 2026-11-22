@@ -39,7 +39,7 @@
          alvo-dotnet-conventions, and they are confined to the one package an embedded host can
          decline to install. -->
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.22.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="11.0.1" />
     <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.10.0" />
     <!-- These two are 10.0.12 while the rest of this family is 10.0.11, because the AI packages above
          demand it — Microsoft.Extensions.AI asks for DependencyInjection.Abstractions >= 10.0.12 and
